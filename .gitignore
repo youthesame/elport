@@ -1,4 +1,27 @@
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+.fuse_hidden*
+.nfs*
+
+# Python
 .venv/
 __pycache__/
 *.py[oc]
@@ -9,5 +32,5 @@ dist/
 wheels/
 *.egg-info/
 
-# 機密の誤コミット防止（SPEC §6.3）。api_key は keyring、env は CI 専用。
+# Secrets
 .env
