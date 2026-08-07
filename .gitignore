@@ -1,0 +1,13 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[oc]
+.ruff_cache/
+.pytest_cache/
+build/
+dist/
+wheels/
+*.egg-info/
+
+# 機密の誤コミット防止（SPEC §6.3）。api_key は keyring、env は CI 専用。
+.env
