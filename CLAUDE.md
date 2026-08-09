@@ -1,50 +1,61 @@
-# elab — AI エージェント向けプロジェクトガイド
+# elab — project guide for AI agents
 
-`elab` は eLabFTW 用の **git 的な同期 CLI**。ローカルで書いた実験ノート（Markdown/HTML ＋参照ファイル）を
-eLabFTW のエンティティに push/pull する。**ローカルが source of truth**。
+`elab` is a **git-like sync CLI for eLabFTW**. It push/pulls locally-written lab notes (Markdown/HTML + referenced
+files) to/from eLabFTW entities. **Local is the source of truth.**
 
-## 設計の権威
+## Documentation map (what is authoritative for what)
 
-- **`docs/SPEC.md` が設計の権威**。非自明な作業の前に読むこと。
-- **§3（中核エンジン）・§6（認証/設定）・§8（API 事実）・§9（同期セマンティクス）は load-bearing**。
-  逸脱するなら**先に SPEC を更新**してから。
-- 設計原則は SPEC §2.1（単一エンジン／markdown ネイティブ／明示・単純／機密隔離）。追加機能は**薄く**
-  （YAGNI）。読み取り専用・単一エンドポイントの機能を優先する。
+The monolithic `SPEC.md` was split by role and retired. **Authority differs by role:**
 
-## 破ってはいけない invariant（クイックリファレンス。正は SPEC）
+- **Behavioral contract (authoritative) = the tests** (`tests/`). The core engine (reference scan/replace, path
+  safety, reverse transclusion) and the sync semantics (push/pull/status/diff, conflict detection, the two-form
+  base) are owned solely by the tests. **To change behavior, update the tests first**, then implement. Do not
+  create prose restatements of the contract (they become a drift source).
+- **Why it is built this way = [docs/DESIGN.md](docs/DESIGN.md)** (frozen: background, scope, settled decisions).
+- **Measured eLabFTW API facts = [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** (observation log of the external
+  world; update only when the target instance version changes).
+- **User-facing usage = [README.md](README.md)** (commands, front matter, config).
+- **Driving elab from an agent = [skills/elab/SKILL.md](skills/elab/SKILL.md)** (for the downstream operating
+  context).
 
-- **ローカルが正**。push は競合検出つきの本文全文上書き（§9）。黙って双方向自動同期を足さない。
-- push の transclusion は**送信用コピーに対して**行い、**ローカル原本を書き換えない**（§3）。
-- **base は 2 形**: remote-base（push 成功後に GET し直した本文。送信バイト列ではない）と local-base
-  （push/pull 時点のローカル原文）。**比較は必ず同形同士**（remote↔remote-base、local↔local-base）。
-  片形だけだとサーバー正規化（非収束、§8.2）により毎回 false conflict / 恒常 dirty になる（§6.6・§9.1）。
-- **同期外データ（コメント・steps・リビジョン本文）を本文に埋め込まない**。サイドカーか端末出力にする
-  （source を汚さない）。
-- アップロード対象は**ドキュメントディレクトリ配下のみ**。スキーム付き URL・絶対パス・`..` 脱出は除外し、
-  **コードフェンス／インラインコード／HTML コメント内は解析しない**（§3.2）。
-- 添付の同一判定は **basename＋サイズ、またはサーバーが返すハッシュ**（同名エントリは複数共存しうるので
-  全件と照合）。**push 中に添付を自動削除しない**（§9.4）。
-- **機密（API キー）をプロジェクトツリーに置かない**。OS keyring＋ホーム配下設定のみ（§6）。**キーをログに
-  出さない**。
+Design principles (DESIGN §2.1): single engine / markdown-native / explicit-and-simple / secret isolation. Keep
+added features **thin** (YAGNI); prefer read-only, single-endpoint features.
 
-## eLabFTW API の非自明な罠（環境非依存）
+## Invariants you must not break (quick reference — detailed authority is the tests, rationale is DESIGN)
 
-- **`content_type:2`（markdown）は PATCH で設定でき、近年の eLabFTW では尊重される**（作成時本文のバグ
-  #6416 は修正済み。ごく古いインスタンスは無視しうる）。**push 後に `content_type==2` を検証**し、
-  そうでなければ中断する（§8.3）。
-- **`download.php?...` の URL はブラウザの Cookie セッション認証**で、**API キーでは通らない**。本文には
-  人間向けに埋め込むが、**ツール自身のダウンロード（pull）は API の
-  `GET /api/v2/{entity}/{id}/uploads/{id}?format=binary`** を使う（§8.4）。
-- アップロードの `long_name` は **`/` を含む**。download URL のクエリを組むときは **percent-encode 必須**
-  （§3.3）。
-- **本文は保存のたびに正規化され、正規化形を再送しても収束しない**（md モードでも。個別の差は §8.2）。
-  body 中の URL は **HTML unescape してから**パースする（§3.4）。
-- **リビジョンは読める**（`GET .../revisions[/{id}]`）が、「どの版が自分の前回 push か」を紐づける情報は
-  無い。**読み取り専用**に留め、3-way マージの祖先 base の自動復元には使わない（§8.6）。
+- **Local is authoritative.** push is a full-body overwrite with conflict detection. Do not silently add two-way
+  auto-sync.
+- push transclusion runs on the **outgoing copy** and **never rewrites the local original**.
+- **base is two-form**: remote-base (the body re-`GET`'d after a successful push, not the sent bytes) and local-base
+  (the local original at push/pull time). **Always compare same-form** (remote↔remote-base, local↔local-base). With
+  only one form, server normalization (non-convergent) yields a false conflict / permanent-dirty every time — see
+  the "Body normalization" section of ELABFTW-API.
+- **Do not embed out-of-sync data (comments, steps, revision bodies) in the body.** Use a sidecar or terminal
+  output (do not pollute the source).
+- Upload targets are **only files under the document directory.** Exclude schemed URLs, absolute paths, and `..`
+  escapes; **never parse inside code fences, inline code, or HTML comments.**
+- Attachment identity uses the **server-returned hash first, else basename + size** (same-name entries can coexist,
+  so check against all of them). **Never auto-delete attachments during push.**
+- **Keep secrets (API keys) out of the project tree.** OS keyring + home-dir config only. **Never log the key.**
 
-## テストと検証
+## Non-obvious eLabFTW API traps (highlights — details in ELABFTW-API.md)
 
-- §3（参照の抽出・置換・パス安全・逆 transclusion）は**ネットワーク非依存**でユニットテストできる。
-  API 層はモックする。
-- 実 API 挙動の確認が要るときは、**公開デモ <https://demo.elabftw.net>** が使える（公開・定期リセットの
-  使い捨て環境）。バージョン依存の挙動は、対象の実インスタンスでも確認する。
+- **`content_type:2` (markdown) is settable via PATCH and respected by recent eLabFTW** (the create-time body bug
+  #6416 is fixed; very old instances may ignore it). **Verify `content_type == 2` after push** and abort otherwise.
+- **`download.php?...` URLs use browser Cookie-session auth** and **do not work with the API key.** Embed them in
+  the body for humans, but the tool's own download (pull) uses the API
+  `GET /api/v2/{entity}/{id}/uploads/{id}?format=binary`.
+- An upload's `long_name` **contains `/`**. When building download-URL queries, **percent-encode is mandatory.**
+- **The body is normalized on every save and re-sending the normalized form does not converge** (even in md mode).
+  **HTML-unescape** URLs in the body before parsing them.
+- **Revisions are readable** (`GET .../revisions[/{id}]`), but nothing ties a version to "my last push." Keep them
+  **read-only**; do not use them to auto-restore the 3-way merge ancestor base.
+
+## Testing and verification
+
+- The core engine (reference scan/replace, path safety, reverse transclusion) and the sync semantics are
+  unit-tested **without network** (the API layer is mocked). These tests are the authority for behavior, so
+  **changes go test-first.**
+- When live API behavior needs confirming, use the **public demo <https://demo.elabftw.net>** (public, periodically
+  reset, disposable). Confirm version-dependent behavior on the real target instance too (see the version-specific
+  section of ELABFTW-API.md).
