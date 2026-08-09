@@ -14,7 +14,7 @@ import keyring
 import tomli_w
 from keyring.errors import KeyringError
 
-PLAINTEXT_WARNING = "warning: 平文 api_key を使用中（600 推奨）"
+PLAINTEXT_WARNING = "warning: using plaintext api_key (chmod 600 recommended)"
 
 
 def config_path() -> Path:

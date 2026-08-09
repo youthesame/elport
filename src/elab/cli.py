@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from . import config, frontmatter, state
@@ -11,46 +12,121 @@ from .sync import diff, pull, push, status
 
 ENTITIES = ("experiments", "items")
 
+_EXAMPLES = """\
+examples:
+  elab login                       store credentials for the default profile
+  elab new "Cell viability assay"  create a remote entity and report.md
+  elab push                        upload report.md (add -n to preview first)
+  elab status                      show local/remote sync state
+  elab pull                        download the remote body and attachments
+"""
+
 
 def _add_target_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--profile")
-    parser.add_argument("--entity", choices=ENTITIES)
+    parser.add_argument("--profile", help="config profile to use")
+    parser.add_argument(
+        "--entity", choices=ENTITIES, help="target entity type (default: experiments)"
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="elab")
+    parser = argparse.ArgumentParser(
+        prog="elab",
+        description="git-like sync CLI for eLabFTW (local is authoritative)",
+        epilog=_EXAMPLES,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {_pkg_version('elab')}"
+    )
     commands = parser.add_subparsers(dest="cmd", required=True)
 
-    push_parser = commands.add_parser("push")
-    push_parser.add_argument("doc", nargs="?", default="report.md")
+    push_parser = commands.add_parser(
+        "push", help="upload the local document (full-body overwrite)"
+    )
+    push_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
+    )
     _add_target_options(push_parser)
-    push_parser.add_argument("-n", "--dry-run", action="store_true")
-    push_parser.add_argument("-f", "--force", action="store_true")
+    push_parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="show what would change without uploading",
+    )
+    push_parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="overwrite even if the remote has diverged",
+    )
 
-    pull_parser = commands.add_parser("pull")
-    pull_parser.add_argument("doc", nargs="?", default="report.md")
+    pull_parser = commands.add_parser(
+        "pull", help="download the remote body and attachments"
+    )
+    pull_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
+    )
     _add_target_options(pull_parser)
 
-    status_parser = commands.add_parser("status")
-    status_parser.add_argument("doc", nargs="?", default="report.md")
+    status_parser = commands.add_parser("status", help="show local/remote sync state")
+    status_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
+    )
     _add_target_options(status_parser)
 
-    diff_parser = commands.add_parser("diff")
-    diff_parser.add_argument("doc", nargs="?", default="report.md")
+    diff_parser = commands.add_parser("diff", help="show changes against the base")
+    diff_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
+    )
     _add_target_options(diff_parser)
-    diff_parser.add_argument("--base", action="store_true")
+    diff_parser.add_argument(
+        "--base",
+        action="store_true",
+        help="diff against the recorded base instead of the remote",
+    )
 
-    new_parser = commands.add_parser("new")
-    new_parser.add_argument("title")
-    new_parser.add_argument("--entity", choices=ENTITIES, default="experiments")
-    new_parser.add_argument("--profile")
-    new_parser.add_argument("-o", "--output", default="report.md")
+    new_parser = commands.add_parser(
+        "new", help="create a new remote entity and local document"
+    )
+    new_parser.add_argument("title", help="title of the new entity")
+    new_parser.add_argument(
+        "--entity",
+        choices=ENTITIES,
+        default="experiments",
+        help="entity type to create (default: experiments)",
+    )
+    new_parser.add_argument("--profile", help="config profile to use")
+    new_parser.add_argument(
+        "-o",
+        "--output",
+        default="report.md",
+        help="local document to create (default: report.md)",
+    )
 
-    whoami_parser = commands.add_parser("whoami")
-    whoami_parser.add_argument("--profile")
+    whoami_parser = commands.add_parser(
+        "whoami", help="show the authenticated user and active team"
+    )
+    whoami_parser.add_argument("--profile", help="config profile to use")
 
-    login_parser = commands.add_parser("login")
-    login_parser.add_argument("profile", nargs="?", default="default")
+    login_parser = commands.add_parser(
+        "login", help="store base_url and api_key for a profile"
+    )
+    login_parser.add_argument(
+        "profile", nargs="?", default="default", help="profile name (default: default)"
+    )
     return parser
 
 

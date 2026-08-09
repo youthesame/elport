@@ -121,7 +121,7 @@ def test_resolve_uses_home_plaintext_key_when_keyring_is_unavailable(
     resolved = config.resolve(config._read(user), "lab", {})
 
     assert resolved == ("lab", "https://e.example", "secret", True)
-    assert "平文 api_key を使用中（600 推奨）" in capsys.readouterr().err
+    assert "using plaintext api_key" in capsys.readouterr().err
 
 
 def test_resolve_does_not_use_project_plaintext_key(tmp_path, monkeypatch):
@@ -174,7 +174,7 @@ def test_login_saves_plaintext_key_when_keyring_is_unavailable(
         "base_url": "https://other.example"
     }
     assert user.stat().st_mode & 0o777 == 0o600
-    assert "平文 api_key を使用中（600 推奨）" in capsys.readouterr().err
+    assert "using plaintext api_key" in capsys.readouterr().err
 
 
 def test_login_replaces_config_from_mode_0600_temporary_file(tmp_path, monkeypatch):
