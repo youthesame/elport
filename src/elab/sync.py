@@ -7,7 +7,9 @@ import os
 import shlex
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from . import config as config_module
 from . import frontmatter, state
@@ -15,6 +17,32 @@ from .transclude import download_url, plan, replace_spans, reverse, safe_name
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
 CONTROL_FILENAMES = {".elab.toml", ".elabignore"}
+
+
+@dataclass
+class Remote:
+    """Binds an entity's identity (client, entity, eid, base_url) so helpers and
+    call sites stop threading those four values through every signature."""
+
+    client: Any
+    entity: str
+    eid: object
+    base_url: str
+
+    def get(self):
+        return self.client.get(self.entity, self.eid)
+
+    def uploads(self):
+        return self.client.uploads(self.entity, self.eid)
+
+    def upload(self, path):
+        return self.client.upload(self.entity, self.eid, path)
+
+    def download(self, uid):
+        return self.client.download(self.entity, self.eid, uid)
+
+    def patch(self, payload):
+        return self.client.patch(self.entity, self.eid, payload)
 
 
 def _upload_name(upload: dict) -> str:
@@ -76,11 +104,11 @@ def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
     return None
 
 
-def _complete_upload(client, entity: str, eid, uploaded: dict) -> dict:
+def _complete_upload(remote: Remote, uploaded: dict) -> dict:
     if all(key in uploaded for key in ("long_name", "real_name", "storage")):
         return uploaded
     upload_id = str(uploaded.get("id", ""))
-    refreshed = client.uploads(entity, eid)
+    refreshed = remote.uploads()
     match = next((u for u in refreshed if str(u.get("id", "")) == upload_id), None)
     if match is None:
         raise RuntimeError("uploaded file metadata could not be retrieved")
@@ -152,32 +180,35 @@ def push(
     refs = plan(body, path.parent, ignore_patterns(path.parent, config))
     files = sorted({ref.file for ref in refs if ref.file})
 
+    remote = Remote(client, entity, eid, base_url) if eid else None
     saved = state.load(base_url, entity, str(eid)) if eid else None
     identity = client.me()
     _check_team_match(saved, identity)
     category = _resolve_category(
         client, entity, identity.get("team"), meta.get("category")
     )
-    remote = client.get(entity, eid) if eid else {}
+    remote_doc = remote.get() if remote is not None else {}
     if eid and saved is None and not force:
         raise RuntimeError("base unavailable; run pull first or use --force")
-    if saved and remote.get("body", "") != saved.get("remote_base", "") and not force:
+    if (
+        remote is not None
+        and saved
+        and remote_doc.get("body", "") != saved.get("remote_base", "")
+        and not force
+    ):
         message = "remote changed; use pull or --force"
         if dry_run:
             raise RuntimeError(message)
         _raise_conflict(
             path,
-            remote.get("body", ""),
+            remote_doc.get("body", ""),
             saved,
-            client.uploads(entity, eid),
-            base_url,
-            client,
-            entity,
-            eid,
+            remote.uploads(),
+            remote,
             message,
         )
 
-    uploads = client.uploads(entity, eid) if eid else []
+    uploads = remote.uploads() if remote is not None else []
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
     if dry_run:
@@ -187,11 +218,10 @@ def push(
                 continue
             file_path = ref.file
             upload = reused[file_path]
-            target = (
-                download_url(base_url, upload)
-                if upload is not None
-                else f"UPLOAD_PENDING:{file_path.name}"
-            )
+            if upload is not None:
+                target = download_url(base_url, upload)
+            else:
+                target = f"UPLOAD_PENDING:{file_path.name}"
             target += ref.fragment
             print(f"{ref.path} -> {target}")
         return
@@ -205,16 +235,15 @@ def push(
         meta["entity"] = entity
         meta["profile"] = resolved_profile
         frontmatter.atomic_write(path, frontmatter.render(meta, body))
+    remote = Remote(client, entity, eid, base_url)
 
     urls: dict[Path, str] = {}
     for file_path in files:
         upload = reused[file_path]
         if upload is None:
-            upload = _complete_upload(
-                client, entity, eid, client.upload(entity, eid, file_path)
-            )
+            upload = _complete_upload(remote, remote.upload(file_path))
             uploads.append(upload)
-        urls[file_path] = download_url(base_url, upload)
+        urls[file_path] = download_url(remote.base_url, upload)
 
     sent = replace_spans(body, refs, urls)
     payload = {"body": sent, "content_type": 2}
@@ -224,22 +253,19 @@ def push(
         payload["category"] = category
 
     if saved and not force:
-        latest = client.get(entity, eid)
+        latest = remote.get()
         if latest.get("body", "") != saved.get("remote_base", ""):
             _raise_conflict(
                 path,
                 latest.get("body", ""),
                 saved,
-                client.uploads(entity, eid),
-                base_url,
-                client,
-                entity,
-                eid,
+                remote.uploads(),
+                remote,
                 "remote changed after uploads; body was not updated and uploads remain",
             )
 
-    client.patch(entity, eid, payload)
-    stored = client.get(entity, eid)
+    remote.patch(payload)
+    stored = remote.get()
     if stored.get("content_type") != 2:
         raise RuntimeError("remote entity is not in markdown mode")
 
@@ -254,7 +280,7 @@ def push(
         },
     )
 
-    existing_tags = _remote_tags(remote)
+    existing_tags = _remote_tags(remote_doc)
     for tag in meta.get("tags", []) or []:
         if tag not in existing_tags:
             client.add_tag(entity, eid, tag)
@@ -305,16 +331,15 @@ def _raise_conflict(
     remote_body: str,
     saved: dict,
     uploads: list[dict],
-    base_url: str,
-    client,
-    entity: str,
-    eid,
+    remote: Remote,
     message: str,
 ) -> None:
     """Write git merge-file inputs (remote + base sidecars, attachments) and raise."""
     uploads = _reversible_uploads(uploads)
-    remote_source, remote_used = reverse(remote_body, uploads, base_url)
-    base_source, base_used = reverse(saved.get("remote_base", ""), uploads, base_url)
+    remote_source, remote_used = reverse(remote_body, uploads, remote.base_url)
+    base_source, base_used = reverse(
+        saved.get("remote_base", ""), uploads, remote.base_url
+    )
     used = []
     for upload in remote_used + base_used:
         if upload not in used:
@@ -328,8 +353,8 @@ def _raise_conflict(
         [(upload, ".remote") for upload in remote_used]
         + [(upload, ".base") for upload in base_only],
     )
-    _place_attachments(path, client, entity, eid, remote_used)
-    _place_attachments(path, client, entity, eid, base_only, conflict_suffix=".base")
+    _place_attachments(path, remote, remote_used)
+    _place_attachments(path, remote, base_only, conflict_suffix=".base")
     meta = frontmatter.parse(path.read_text(encoding="utf-8"))[0]
     frontmatter.atomic_write(
         _sidecar_path(path), frontmatter.render(meta, remote_source)
@@ -402,7 +427,7 @@ def _replace_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
-def _coalesce_attachments(client, entity: str, eid, uploads: list[dict]):
+def _coalesce_attachments(remote: Remote, uploads: list[dict]):
     groups: dict[str, list[dict]] = {}
     for upload in uploads:
         name = _upload_name(upload)
@@ -418,7 +443,7 @@ def _coalesce_attachments(client, entity: str, eid, uploads: list[dict]):
             digest = _remote_sha256(upload)
             data = None
             if digest is None:
-                data = client.download(entity, eid, upload["id"])
+                data = remote.download(upload["id"])
                 digest = hashlib.sha256(data).hexdigest()
             candidates.append((upload, data, digest))
         if any(item[2] != candidates[0][2] for item in candidates[1:]):
@@ -435,14 +460,12 @@ def _coalesce_attachments(client, entity: str, eid, uploads: list[dict]):
 
 def _place_attachments(
     path: Path,
-    client,
-    entity: str,
-    eid,
+    remote: Remote,
     uploads: list[dict],
     conflict_suffix: str = ".remote",
 ) -> list[str]:
     conflicts = []
-    for upload, prefetched in _coalesce_attachments(client, entity, eid, uploads):
+    for upload, prefetched in _coalesce_attachments(remote, uploads):
         name = _upload_name(upload)
         if _is_control_upload(upload):
             print(
@@ -452,11 +475,7 @@ def _place_attachments(
             continue
         target = path.parent / name
         _validate_attachment_target(target, path.parent)
-        data = (
-            prefetched
-            if prefetched is not None
-            else client.download(entity, eid, upload["id"])
-        )
+        data = prefetched if prefetched is not None else remote.download(upload["id"])
         _validate_attachment_target(target, path.parent)
         try:
             _write_attachment(target, data, path.parent)
@@ -475,16 +494,17 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
     if not eid:
         raise RuntimeError("elab_id is required")
     _, base_url, _, _ = config_module.resolve(config, profile, meta)
+    remote = Remote(client, entity, eid, base_url)
     saved = state.load(base_url, entity, str(eid))
     identity = client.me()
     _check_team_match(saved, identity)
-    remote = client.get(entity, eid)
+    remote_doc = remote.get()
     local_dirty = saved is not None and body != saved.get("local_base", "")
-    if local_dirty and remote.get("body", "") == saved.get("remote_base", ""):
+    if local_dirty and remote_doc.get("body", "") == saved.get("remote_base", ""):
         print("remote: unchanged")
         return
 
-    uploads = client.uploads(entity, eid)
+    uploads = remote.uploads()
     for upload in uploads:
         if _is_control_upload(upload):
             print(
@@ -493,20 +513,19 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
                 file=sys.stderr,
             )
     source, used = reverse(
-        remote.get("body", ""), _reversible_uploads(uploads), base_url
+        remote_doc.get("body", ""),
+        _reversible_uploads(uploads),
+        remote.base_url,
     )
 
     no_base_conflict = saved is None and bool(body.strip()) and body != source
     if local_dirty:
         _raise_conflict(
             path,
-            remote.get("body", ""),
+            remote_doc.get("body", ""),
             saved,
             uploads,
-            base_url,
-            client,
-            entity,
-            eid,
+            remote,
             f"local changes conflict; merge {_sidecar_path(path).name}",
         )
     if no_base_conflict:
@@ -515,7 +534,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         _reject_attachment_conflict_name_collisions(
             used, [(upload, ".remote") for upload in used]
         )
-        attachment_conflicts = _place_attachments(path, client, entity, eid, used)
+        attachment_conflicts = _place_attachments(path, remote, used)
         frontmatter.atomic_write(sidecar, source)
         message = f"base unavailable; remote written to {sidecar.name}"
         if attachment_conflicts:
@@ -527,7 +546,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
     _reject_attachment_conflict_name_collisions(
         used, [(upload, ".remote") for upload in used]
     )
-    attachment_conflicts = _place_attachments(path, client, entity, eid, used)
+    attachment_conflicts = _place_attachments(path, remote, used)
     if attachment_conflicts:
         raise RuntimeError(
             "attachment conflicts written to: " + ", ".join(attachment_conflicts)
@@ -539,15 +558,15 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         entity,
         str(eid),
         {
-            "remote_base": remote.get("body", ""),
+            "remote_base": remote_doc.get("body", ""),
             "local_base": source,
             "team": identity.get("team"),
         },
     )
-    title = meta.get("title") or remote.get("title") or path.stem
+    title = meta.get("title") or remote_doc.get("title") or path.stem
     print(f"pulled {entity}/{eid}: {title}")
     print(f"  wrote {path.name}")
-    url = remote.get("sharelink")
+    url = remote_doc.get("sharelink")
     if url:
         print(f"  → {url}")
 
@@ -555,8 +574,10 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
 def status(path: Path, client, config: dict, profile=None) -> None:
     meta, body, entity, eid = _document(path, config)
     saved = None
+    remote = None
     if eid:
         _, base_url, _ = config_module.base_target(config, profile, meta)
+        remote = Remote(client, entity, eid, base_url)
         saved = state.load(base_url, entity, str(eid))
     refs = plan(body, path.parent, ignore_patterns(path.parent, config))
     files = sorted({ref.file for ref in refs if ref.file})
@@ -568,14 +589,14 @@ def status(path: Path, client, config: dict, profile=None) -> None:
         print('local: dirty (use "elab push")')
     print("uploads local:", ", ".join(path.name for path in files) or "none")
 
-    if not eid:
+    if remote is None:
         print("uploads new:", ", ".join(path.name for path in files) or "none")
         print("uploads reuse: none")
         print("remote: no elab_id (comparison unavailable)")
         return
     try:
-        uploads = client.uploads(entity, eid)
-        remote = client.get(entity, eid)
+        uploads = remote.uploads()
+        remote_doc = remote.get()
     except (OSError, ValueError):
         print("uploads reuse: unavailable (offline?)")
         print("remote: unavailable (offline?)")
@@ -589,12 +610,12 @@ def status(path: Path, client, config: dict, profile=None) -> None:
     print(
         "mode:",
         "markdown"
-        if remote.get("content_type") == 2
-        else remote.get("content_type", "unknown"),
+        if remote_doc.get("content_type") == 2
+        else remote_doc.get("content_type", "unknown"),
     )
     if saved is None:
         print("remote: base unavailable (comparison unavailable)")
-    elif remote.get("body", "") == saved.get("remote_base", ""):
+    elif remote_doc.get("body", "") == saved.get("remote_base", ""):
         print("remote: unchanged")
     else:
         print('remote: changed (use "elab pull")')
@@ -607,8 +628,10 @@ def _normalize_remote_diff(text: str) -> str:
 def diff(path: Path, client, config: dict, profile=None, base_only=False) -> None:
     meta, body, entity, eid = _document(path, config)
     saved = None
+    remote = None
     if eid:
         _, base_url, _ = config_module.base_target(config, profile, meta)
+        remote = Remote(client, entity, eid, base_url)
         saved = state.load(base_url, entity, str(eid))
 
     if base_only:
@@ -618,10 +641,10 @@ def diff(path: Path, client, config: dict, profile=None, base_only=False) -> Non
         local = body
         fromfile = "base"
     else:
-        if not eid:
+        if remote is None:
             raise RuntimeError("elab_id is required")
-        remote = client.get(entity, eid)
-        other = reverse(remote.get("body", ""), client.uploads(entity, eid), base_url)[
+        remote_doc = remote.get()
+        other = reverse(remote_doc.get("body", ""), remote.uploads(), remote.base_url)[
             0
         ]
         other = _normalize_remote_diff(other)
