@@ -8,17 +8,15 @@ dependencies = [
   "keyring>=25",
   "tomli-w>=1.0",
   "tomli>=2.0; python_version < '3.11'",
+  "pyyaml>=6.0",
 ]
 
-# 実装開始（src/elab/cli.py 作成）時に有効化する:
-#   [project.scripts]
-#   elab = "elab.cli:main"
-#   [build-system]
-#   requires = ["hatchling"]
-#   build-backend = "hatchling.build"
-# それまでは非パッケージの開発環境として扱う。
-[tool.uv]
-package = false
+[project.scripts]
+elab = "elab.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project.optional-dependencies]
 dev = [
@@ -26,6 +24,7 @@ dev = [
   "pytest>=9.0",
   "pytest-xdist>=3.8",
   "ruff>=0.16",
+  "tomli>=2.0",
   "ty>=0.0.69",
 ]
 

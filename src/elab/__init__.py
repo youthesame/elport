@@ -1,0 +1,1 @@
+"""eLabFTW synchronization CLI."""

@@ -389,6 +389,11 @@ base_url   = "https://elab-b.example.org"
     - 保存と保存の間の `GET` は**安定**（同一本文が返る）。remote-base との比較はこの安定性に依拠する。
     - **CRLF は保存時に LF へ正規化**される（`\r\n` 送信 → `\n` で返る）。local↔local-base 比較は
       両方ローカル形なので影響しないが、ローカル↔リモートの diff（§9.5）は改行コード非依存で比較する。
+    - **Markdown の `<URL>` 角括弧型リンク先はタグとして除去される**（実測 2026-08-08, demo）。
+      push はローカルの `<PATH>` 全体を置換し、本文には裸 URL を送ること。
+    - **この HTML 正規化はコードフェンス内にも及ぶ**（実測 2026-08-08, demo: フェンス内の
+      `<figure 1.csv>` が `<figure>`＋`</figure>` に書き換えられた）。ツール側では防げないが、
+      remote↔remote-base 比較は同形同士なので false conflict にはならない。
     - `content_type` は **body のみの PATCH では巻き戻らない**（2 のまま維持。毎 push で 2 を送る現行
       方針と push 後検証で十分）。
 - 作成: `POST /api/v2/{entity}`（本文空で作成）。**ID はサーバーが採番**し、`Location` ヘッダ末尾
