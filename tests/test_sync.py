@@ -84,7 +84,9 @@ def saved_state(local="local", remote="remote"):
     return {"local_base": local, "remote_base": remote, "team": 7}
 
 
-def test_push_order_includes_post_upload_recheck(tmp_path, monkeypatch, configured):
+def test_push_order_includes_post_upload_recheck(
+    tmp_path, monkeypatch, configured, capsys
+):
     doc = tmp_path / "report.md"
     attachment = tmp_path / "data.csv"
     attachment.write_text("new")
@@ -93,7 +95,11 @@ def test_push_order_includes_post_upload_recheck(tmp_path, monkeypatch, configur
         gets=[
             {"body": "remote", "tags": ""},
             {"body": "remote"},
-            {"body": "stored", "content_type": 2},
+            {
+                "body": "stored",
+                "content_type": 2,
+                "sharelink": "https://e.example/experiments/1",
+            },
         ]
     )
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
@@ -111,6 +117,34 @@ def test_push_order_includes_post_upload_recheck(tmp_path, monkeypatch, configur
         "get",
         "save",
     ]
+    assert capsys.readouterr().out == (
+        "pushed experiments/1: Test\n"
+        "  body updated (markdown)\n"
+        "  uploads: 0 reused, 1 new\n"
+        "  → https://e.example/experiments/1\n"
+    )
+
+
+def test_push_summary_omits_empty_sharelink(tmp_path, monkeypatch, configured, capsys):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(
+        gets=[
+            {"body": "remote", "tags": ""},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2, "sharelink": ""},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert capsys.readouterr().out == (
+        "pushed experiments/1: Test\n"
+        "  body unchanged (markdown)\n"
+        "  uploads: 0 reused, 0 new\n"
+    )
 
 
 def test_identical_files_with_same_basename_share_one_upload(
@@ -700,10 +734,17 @@ def test_large_upload_non_tty_stops_before_mutation(tmp_path, monkeypatch, confi
     assert client.calls == ["me", "get", "uploads"]
 
 
-def test_pull_clean_updates_document(tmp_path, monkeypatch, configured):
+def test_pull_clean_updates_document(tmp_path, monkeypatch, configured, capsys):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
-    client = FakeClient(gets=[{"body": "remote"}])
+    client = FakeClient(
+        gets=[
+            {
+                "body": "remote",
+                "sharelink": "https://e.example/experiments/1",
+            }
+        ]
+    )
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
     monkeypatch.setattr(sync.state, "save", lambda *args: None)
 
@@ -711,6 +752,11 @@ def test_pull_clean_updates_document(tmp_path, monkeypatch, configured):
 
     assert frontmatter.parse(doc.read_text())[1] == "remote"
     assert not (tmp_path / "report.remote.md").exists()
+    assert capsys.readouterr().out == (
+        "pulled experiments/1: Test\n"
+        "  wrote report.md\n"
+        "  → https://e.example/experiments/1\n"
+    )
 
 
 def test_pull_rejects_same_basename_uploads_with_different_content(
@@ -1536,7 +1582,10 @@ def test_status_degrades_remote_fields_when_offline(
     sync.status(doc, client, {})
 
     lines = capsys.readouterr().out.splitlines()
-    assert lines[:2] == ["local: dirty", "uploads local: data.csv"]
+    assert lines[:2] == [
+        'local: dirty (use "elab push")',
+        "uploads local: data.csv",
+    ]
     assert "uploads reuse: unavailable (offline?)" in lines
     assert "remote: unavailable (offline?)" in lines
     assert "mode: unavailable (offline?)" in lines
@@ -1565,6 +1614,21 @@ def test_status_prints_local_plan_before_remote_get_failure(
         "remote: unavailable (offline?)",
         "mode: unavailable (offline?)",
     ]
+
+
+def test_status_suggests_actions_for_local_and_remote_changes(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local change")
+    client = FakeClient(gets=[{"body": "remote change", "content_type": 2}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    lines = capsys.readouterr().out.splitlines()
+    assert 'local: dirty (use "elab push")' in lines
+    assert 'remote: changed (use "elab pull")' in lines
 
 
 def test_remote_diff_ignores_line_endings_and_trailing_newlines(

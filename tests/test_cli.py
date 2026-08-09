@@ -15,13 +15,16 @@ class NewClient:
         return {"id": 42}
 
     def get(self, entity, eid):
-        return {"body": "server empty\n"}
+        return {
+            "body": "server empty\n",
+            "sharelink": "https://e.example/experiments/42",
+        }
 
     def me(self):
         return {"team": 7}
 
 
-def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch):
+def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch, capsys):
     output = tmp_path / "report.md"
     client = NewClient()
     saved = []
@@ -50,6 +53,9 @@ def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch):
             {"remote_base": "server empty\n", "local_base": "", "team": 7},
         )
     ]
+    assert capsys.readouterr().out == (
+        f"created experiments/42: {output}\n  → https://e.example/experiments/42\n"
+    )
 
 
 @pytest.mark.parametrize(

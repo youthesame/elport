@@ -119,6 +119,9 @@ def _new(args) -> None:
         },
     )
     print(f"created {args.entity}/{eid}: {path}")
+    url = remote.get("sharelink")
+    if url:
+        print(f"  → {url}")
 
 
 def _whoami(profile: str | None) -> None:

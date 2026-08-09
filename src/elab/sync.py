@@ -135,7 +135,6 @@ def push(
 
     refs = plan(body, path.parent, ignore_patterns(path.parent, config))
     files = sorted({ref.file for ref in refs if ref.file})
-    print("Upload plan:", *(path.name for path in files), sep="\n  ")
 
     saved = state.load(base_url, entity, str(eid)) if eid else None
     identity = client.me()
@@ -170,6 +169,7 @@ def push(
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
     if dry_run:
+        print("Upload plan:", *(path.name for path in files), sep="\n  ")
         for ref in refs:
             if ref.file is None:
                 continue
@@ -250,6 +250,17 @@ def push(
         if tag not in existing_tags:
             client.add_tag(entity, eid, tag)
             existing_tags.add(tag)
+
+    title = meta.get("title") or path.stem
+    body_changed = saved is None or body != saved.get("local_base", "")
+    reused_count = len(files) - len(new_uploads)
+    new_count = len(new_uploads)
+    print(f"pushed {entity}/{eid}: {title}")
+    print(f"  body {'updated' if body_changed else 'unchanged'} (markdown)")
+    print(f"  uploads: {reused_count} reused, {new_count} new")
+    url = stored.get("sharelink")
+    if url:
+        print(f"  → {url}")
 
 
 def _sidecar_path(path: Path) -> Path:
@@ -531,6 +542,12 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
             "team": identity.get("team"),
         },
     )
+    title = meta.get("title") or remote.get("title") or path.stem
+    print(f"pulled {entity}/{eid}: {title}")
+    print(f"  wrote {path.name}")
+    url = remote.get("sharelink")
+    if url:
+        print(f"  → {url}")
 
 
 def status(path: Path, client, config: dict, profile=None) -> None:
@@ -548,7 +565,7 @@ def status(path: Path, client, config: dict, profile=None) -> None:
     elif body == saved.get("local_base", ""):
         print("local: clean")
     else:
-        print("local: dirty")
+        print('local: dirty (use "elab push")')
     print("uploads local:", ", ".join(path.name for path in files) or "none")
 
     if not eid:
@@ -580,7 +597,7 @@ def status(path: Path, client, config: dict, profile=None) -> None:
     elif remote.get("body", "") == saved.get("remote_base", ""):
         print("remote: unchanged")
     else:
-        print("remote: changed")
+        print('remote: changed (use "elab pull")')
 
 
 def _normalize_remote_diff(text: str) -> str:
