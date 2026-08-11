@@ -749,7 +749,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
     remote_doc = remote.get()
     local_dirty = saved is not None and body != saved.get("local_base", "")
     if local_dirty and remote_doc.get("body", "") == saved.get("remote_base", ""):
-        print("remote: unchanged")
+        print("remote: unchanged (local differs from the last sync; nothing to pull)")
         return
 
     uploads = remote.uploads()

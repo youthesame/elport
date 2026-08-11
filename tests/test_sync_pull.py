@@ -259,7 +259,9 @@ def test_pull_dirty_remote_unchanged_is_noop(tmp_path, monkeypatch, configured, 
     assert client.calls == ["me", "get"]
     assert not (tmp_path / "report.remote.md").exists()
     assert not (tmp_path / "report.base.md").exists()
-    assert capsys.readouterr().out == "remote: unchanged\n"
+    assert capsys.readouterr().out == (
+        "remote: unchanged (local differs from the last sync; nothing to pull)\n"
+    )
 
 
 def test_pull_dirty_control_file_urls_remain_in_three_way_sidecars(

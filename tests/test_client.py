@@ -104,3 +104,23 @@ def test_add_comment_posts_comment_text(monkeypatch):
     client.add_comment("items", 9, "hello")
 
     assert calls == [(("POST", "/items/9/comments"), {"json": {"comment": "hello"}})]
+
+
+@pytest.mark.parametrize(
+    ("entity", "resource"),
+    [
+        ("items", "resources_categories"),
+        ("experiments", "experiments_categories"),
+    ],
+)
+def test_categories_uses_entity_category_endpoint(monkeypatch, entity, resource):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _Response([]),
+    )
+
+    assert client.categories(7, entity) == []
+    assert calls == [(("GET", f"/teams/7/{resource}"), {})]

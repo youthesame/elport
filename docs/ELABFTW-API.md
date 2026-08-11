@@ -105,8 +105,9 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   comma-joined. elab tolerates both `|` and `,` separators. **Add-only** (delete via Web UI).
 - Metadata: `PATCH` with `{"metadata": "<JSON string>"}`.
 - Category: `PATCH` with `category` (ID). Resolve name→ID via
-  `GET /api/v2/teams/{team_id}/experiments_categories` (items use the corresponding types endpoint), reading the
-  `{id, title}` list and matching on `title` (measured: `{"id":13,"title":"Synthesis"}`, etc.). No auto-creation.
+  `GET /api/v2/teams/{team_id}/experiments_categories` for experiments or
+  `GET /api/v2/teams/{team_id}/resources_categories` for items, reading the `{id, title}` list and matching on
+  `title`. The `items_types` submodel returns 400 on the current instance. No auto-creation.
 
 ## Comments (measured 5.6.12, 2026-08-11)
 

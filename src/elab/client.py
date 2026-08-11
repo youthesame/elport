@@ -99,6 +99,8 @@ class Client:
 
     def categories(self, team_id, entity):
         resource = (
-            "experiments_categories" if entity == "experiments" else "items_types"
+            "experiments_categories"
+            if entity == "experiments"
+            else "resources_categories"
         )
         return self.request("GET", f"/teams/{team_id}/{resource}").json()
