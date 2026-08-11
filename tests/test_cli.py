@@ -1,8 +1,9 @@
 import stat
+from pathlib import Path
 
 import pytest
 
-from elab import cli, frontmatter
+from elab import cli, frontmatter, sync
 
 
 class NewClient:
@@ -410,6 +411,55 @@ def test_selected_profile_verify_ssl_is_forwarded(monkeypatch):
 def test_irrelevant_flags_are_rejected(argv):
     with pytest.raises(SystemExit):
         cli._parser().parse_args(argv)
+
+
+def test_merge_defaults_to_report_without_loading_config(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+    monkeypatch.setattr(cli, "merge", lambda path: calls.append(path))
+    monkeypatch.setattr(
+        cli.config,
+        "load",
+        lambda *args: pytest.fail("merge must not load config"),
+    )
+    monkeypatch.setattr(
+        cli,
+        "_client",
+        lambda *args: pytest.fail("merge must not create a client"),
+    )
+
+    assert cli.main(["merge"]) == 0
+    assert calls == [Path("report.md")]
+
+
+def test_merge_missing_sidecars_is_reported_as_cli_error(tmp_path, capsys):
+    document = tmp_path / "note.md"
+    document.write_text("local\n", encoding="utf-8")
+
+    assert cli.main(["merge", str(document)]) == 1
+    error = capsys.readouterr().err
+    assert "no conflict to merge; run push/pull first" in error
+    assert "note.base.md" in error
+    assert "note.remote.md" in error
+    assert "Traceback" not in error
+
+
+def test_merge_without_git_is_reported_as_cli_error(tmp_path, monkeypatch, capsys):
+    document = tmp_path / "note.md"
+    base = tmp_path / "note.base.md"
+    remote = tmp_path / "note.remote.md"
+    document.write_text("local\n", encoding="utf-8")
+    base.write_text("base\n", encoding="utf-8")
+    remote.write_text("remote\n", encoding="utf-8")
+    monkeypatch.setattr(sync.shutil, "which", lambda command: None)
+
+    assert cli.main(["merge", str(document)]) == 1
+    error = capsys.readouterr().err
+    assert str(base) in error
+    assert str(remote) in error
+    assert "manually" in error
+    assert "Traceback" not in error
+    assert document.read_text(encoding="utf-8") == "local\n"
 
 
 def test_whoami_prints_user_and_active_team(monkeypatch, capsys):

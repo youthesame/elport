@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import config, frontmatter, state
 from .client import Client
-from .sync import diff, pull, push, status
+from .sync import diff, merge, pull, push, status
 
 ENTITIES = ("experiments", "items")
 
@@ -96,6 +96,16 @@ def _parser() -> argparse.ArgumentParser:
         "--base",
         action="store_true",
         help="diff against the recorded base instead of the remote",
+    )
+
+    merge_parser = commands.add_parser(
+        "merge", help="merge local and remote changes using git merge-file"
+    )
+    merge_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
     )
 
     new_parser = commands.add_parser(
@@ -233,6 +243,9 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "whoami":
             _whoami(args.profile)
+            return 0
+        if args.cmd == "merge":
+            merge(Path(args.doc))
             return 0
 
         path = Path(args.doc)

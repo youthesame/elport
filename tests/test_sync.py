@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import shlex
+import shutil
 from pathlib import Path
 
 import pytest
@@ -82,6 +83,143 @@ def write_doc(path: Path, body: str, **extra):
 
 def saved_state(local="local", remote="remote"):
     return {"local_base": local, "remote_base": remote, "team": 7}
+
+
+def test_merge_requires_both_sidecars(tmp_path):
+    doc = tmp_path / "report.md"
+    doc.write_text("local\n", encoding="utf-8")
+    (tmp_path / "report.base.md").write_text("base\n", encoding="utf-8")
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"no conflict to merge; run push/pull first .*report\.base\.md.*report\.remote\.md",
+    ):
+        sync.merge(doc)
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_merge_cleanly_updates_document_and_deletes_sidecars(tmp_path, capsys):
+    doc = tmp_path / "report.md"
+    base = tmp_path / "report.base.md"
+    remote = tmp_path / "report.remote.md"
+    doc.write_text("local first\nmiddle\nlast\n", encoding="utf-8")
+    base.write_text("first\nmiddle\nlast\n", encoding="utf-8")
+    remote.write_text("first\nmiddle\nremote last\n", encoding="utf-8")
+
+    sync.merge(doc)
+
+    assert doc.read_text(encoding="utf-8") == "local first\nmiddle\nremote last\n"
+    assert not base.exists()
+    assert not remote.exists()
+    assert capsys.readouterr().out == (
+        f"merged cleanly into {doc}; review and run 'elab push'\n"
+    )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_merge_conflict_keeps_sidecars_and_writes_markers(tmp_path):
+    doc = tmp_path / "report.md"
+    base = tmp_path / "report.base.md"
+    remote = tmp_path / "report.remote.md"
+    doc.write_text("local\n", encoding="utf-8")
+    base.write_text("base\n", encoding="utf-8")
+    remote.write_text("remote\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match=f"1 conflict.*{doc}"):
+        sync.merge(doc)
+
+    merged = doc.read_text(encoding="utf-8")
+    assert "<<<<<<< " in merged
+    assert "=======\n" in merged
+    assert ">>>>>>> " in merged
+    assert base.exists()
+    assert remote.exists()
+
+
+def test_merge_without_git_leaves_document_untouched(tmp_path, monkeypatch, capsys):
+    doc = tmp_path / "report.md"
+    base = tmp_path / "report.base.md"
+    remote = tmp_path / "report.remote.md"
+    doc.write_text("local\n", encoding="utf-8")
+    base.write_text("base\n", encoding="utf-8")
+    remote.write_text("remote\n", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda command: None)
+
+    with pytest.raises(
+        RuntimeError, match=r"merge .*report\.base\.md.*report\.remote\.md manually"
+    ):
+        sync.merge(doc)
+
+    assert doc.read_text(encoding="utf-8") == "local\n"
+    assert base.exists()
+    assert remote.exists()
+    assert "Traceback" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("returncode", [-9, 128])
+def test_merge_reports_git_execution_errors(tmp_path, monkeypatch, returncode):
+    doc = tmp_path / "report.md"
+    base = tmp_path / "report.base.md"
+    remote = tmp_path / "report.remote.md"
+    doc.write_text("local\n", encoding="utf-8")
+    base.write_text("base\n", encoding="utf-8")
+    remote.write_text("remote\n", encoding="utf-8")
+    monkeypatch.setattr(shutil, "which", lambda command: "/usr/bin/git")
+    monkeypatch.setattr(
+        sync.subprocess,
+        "run",
+        lambda *args, **kwargs: sync.subprocess.CompletedProcess(
+            args[0], returncode, stderr="git failed"
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="git failed"):
+        sync.merge(doc)
+
+    assert base.exists()
+    assert remote.exists()
+
+
+def test_push_rejects_unresolved_merge_markers_before_network(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(
+        doc, "<<<<<<< report.md\nlocal\n=======\nremote\n>>>>>>> report.remote.md\n"
+    )
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match=f"unresolved merge markers in {doc}"):
+        sync.push(doc, client, {})
+
+    assert client.calls == []
+
+
+def test_push_does_not_treat_separator_alone_as_merge_markers(
+    tmp_path, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    doc.write_text("Heading\n=======\n", encoding="utf-8")
+    client = FakeClient()
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    assert client.calls == ["me"]
+    assert capsys.readouterr().out == "Upload plan:\n"
+
+
+def test_force_push_bypasses_unresolved_merge_marker_guard(
+    tmp_path, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    doc.write_text(
+        "<<<<<<< report.md\nlocal\n=======\nremote\n>>>>>>> report.remote.md\n",
+        encoding="utf-8",
+    )
+    client = FakeClient()
+
+    sync.push(doc, client, {}, dry_run=True, force=True)
+
+    assert client.calls == ["me"]
+    assert capsys.readouterr().out == "Upload plan:\n"
 
 
 def test_push_order_includes_post_upload_recheck(

@@ -5,6 +5,8 @@ import errno
 import hashlib
 import os
 import shlex
+import shutil
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -170,6 +172,14 @@ def push(
     force: bool = False,
 ) -> None:
     meta, body, entity, eid = _document(path, config)
+    if not force:
+        lines = body.splitlines()
+        if any(line.startswith("<<<<<<< ") for line in lines) and any(
+            line.startswith(">>>>>>> ") for line in lines
+        ):
+            raise RuntimeError(
+                f"unresolved merge markers in {path}; resolve them or use --force"
+            )
     for key in ("entity", "category"):
         if key in meta and meta[key] is not None:
             meta[key] = str(meta[key])
@@ -304,6 +314,36 @@ def _sidecar_path(path: Path) -> Path:
 
 def _base_sidecar_path(path: Path) -> Path:
     return path.with_name(path.stem + ".base.md")
+
+
+def merge(path: Path) -> None:
+    base = _base_sidecar_path(path)
+    remote = _sidecar_path(path)
+    if not base.exists() or not remote.exists():
+        raise RuntimeError(
+            f"no conflict to merge; run push/pull first (expected {base} and {remote})"
+        )
+    if shutil.which("git") is None:
+        raise RuntimeError(f"git is not installed; merge {base} and {remote} manually")
+
+    result = subprocess.run(
+        ["git", "merge-file", str(path), str(base), str(remote)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        base.unlink()
+        remote.unlink()
+        print(f"merged cleanly into {path}; review and run 'elab push'")
+        return
+    if result.returncode < 0 or result.returncode >= 128:
+        raise RuntimeError(result.stderr.strip() or "git merge-file failed")
+    if result.returncode > 0:
+        raise RuntimeError(
+            f"{result.returncode} conflict(s) remain in {path}; "
+            "resolve the markers, then run 'elab push'"
+        )
 
 
 def _reject_sidecar_attachment_collisions(
