@@ -32,5 +32,6 @@ dist/
 wheels/
 *.egg-info/
 
-# Secrets
+# Secrets / local config
 .env
+.elab.toml
