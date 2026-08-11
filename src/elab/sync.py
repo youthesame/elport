@@ -263,7 +263,7 @@ def push(
     meta, body, entity, eid = _document(path, config)
     if not force:
         lines = body.splitlines()
-        if any(line.startswith("<<<<<<< ") for line in lines) and any(
+        if any(line.startswith("<<<<<<< ") for line in lines) or any(
             line.startswith(">>>>>>> ") for line in lines
         ):
             raise RuntimeError(
@@ -290,6 +290,11 @@ def push(
     permission_changes = _permission_changes(
         meta, remote_doc, identity, eid is not None
     )
+    is_owner = remote_doc.get("userid") == identity.get("userid")
+    is_team_admin = any(
+        team.get("id") == remote_doc.get("team") and team.get("is_admin")
+        for team in identity.get("teams", [])
+    )
     for field, _, target, current in permission_changes:
         if target != current and (
             remote_doc.get(f"can{field}_is_immutable")
@@ -303,11 +308,22 @@ def push(
             target == frontmatter.PERMISSION_LEVELS["owner"]
             and target < current
             and eid is not None
-            and remote_doc.get("userid") != identity.get("userid")
+            and not is_owner
         ):
             raise RuntimeError(
                 f"{field}: owner would revoke your own access "
                 "(you are not the entity owner); use 'team' or ask the owner"
+            )
+        if (
+            target == frontmatter.PERMISSION_LEVELS["owner+admin"]
+            and target < current
+            and eid is not None
+            and not (is_owner or is_team_admin)
+        ):
+            raise RuntimeError(
+                f"{field}: owner+admin would revoke your own access "
+                "(you are not an owner or admin of this team); "
+                "use 'team' or ask an admin"
             )
     if eid and saved is None and not force:
         raise RuntimeError("base unavailable; run pull first or use --force")

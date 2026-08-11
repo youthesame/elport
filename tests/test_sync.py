@@ -567,11 +567,19 @@ def test_merge_reports_git_execution_errors(tmp_path, monkeypatch, returncode):
     assert remote.exists()
 
 
-def test_push_rejects_unresolved_merge_markers_before_network(tmp_path, configured):
+@pytest.mark.parametrize(
+    "body",
+    [
+        "<<<<<<< report.md\nlocal\n",
+        ">>>>>>> report.remote.md\nremote\n",
+        "<<<<<<< report.md\nlocal\n=======\nremote\n>>>>>>> report.remote.md\n",
+    ],
+)
+def test_push_rejects_unresolved_merge_markers_before_network(
+    tmp_path, configured, body
+):
     doc = tmp_path / "report.md"
-    write_doc(
-        doc, "<<<<<<< report.md\nlocal\n=======\nremote\n>>>>>>> report.remote.md\n"
-    )
+    write_doc(doc, body)
     client = FakeClient()
 
     with pytest.raises(RuntimeError, match=f"unresolved merge markers in {doc}"):
@@ -936,6 +944,105 @@ def test_owner_can_narrow_existing_entity_to_owner(
     assert client.saved_payload[f"can{field}_base"] == 10
     assert f"can{field}" not in client.saved_payload
     assert client.calls.count("patch") == 2
+
+
+@pytest.mark.parametrize("field", ["read", "write"])
+def test_non_admin_cannot_narrow_existing_entity_to_owner_admin(
+    tmp_path, monkeypatch, configured, field
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_text("new", encoding="utf-8")
+    write_doc(doc, "[data](data.csv)", **{field: "owner+admin"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "team": 7,
+            "userid": 2,
+            f"can{field}_base": 30,
+        },
+        identity={
+            "userid": 1,
+            "teams": [
+                {"id": 7, "is_admin": False},
+                {"id": 8, "is_admin": True},
+            ],
+        },
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"^{field}: owner\+admin would revoke your own access "
+        rf"\(you are not an owner or admin of this team\); "
+        rf"use 'team' or ask an admin$",
+    ):
+        sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get"]
+    assert "patch" not in client.calls
+    assert "upload" not in client.calls
+
+
+@pytest.mark.parametrize("field", ["read", "write"])
+@pytest.mark.parametrize(
+    ("remote_userid", "identity", "current", "permission_changes"),
+    [
+        pytest.param(
+            2,
+            {"userid": 1, "teams": [{"id": 7, "is_admin": True}]},
+            30,
+            True,
+            id="team-admin",
+        ),
+        pytest.param(
+            1,
+            {"userid": 1, "teams": []},
+            30,
+            True,
+            id="owner",
+        ),
+        pytest.param(
+            2,
+            {"userid": 1, "teams": [{"id": 7, "is_admin": False}]},
+            20,
+            False,
+            id="no-op",
+        ),
+    ],
+)
+def test_owner_admin_narrowing_allowed_for_authorized_or_unchanged_base(
+    tmp_path,
+    monkeypatch,
+    configured,
+    field,
+    remote_userid,
+    identity,
+    current,
+    permission_changes,
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "updated", **{field: "owner+admin"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "team": 7,
+            "userid": remote_userid,
+            f"can{field}_base": current,
+        },
+        identity=identity,
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["body"] == "updated"
+    assert (f"can{field}_base" in client.saved_payload) is permission_changes
+    if permission_changes:
+        assert client.saved_payload[f"can{field}_base"] == 20
+    assert f"can{field}" not in client.saved_payload
+    assert client.calls.count("patch") == (2 if permission_changes else 1)
 
 
 def test_non_owner_can_narrow_existing_entity_read_to_team(
