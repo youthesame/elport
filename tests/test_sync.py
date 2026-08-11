@@ -2470,3 +2470,31 @@ def test_remote_diff_ignores_line_endings_and_trailing_newlines(
 
 def test_remote_tags_handles_null():
     assert sync._remote_tags({"tags": None}) == set()
+
+
+def test_successful_push_removes_leftover_conflict_sidecars(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "resolved\n")
+    base_sidecar = tmp_path / "report.base.md"
+    remote_sidecar = tmp_path / "report.remote.md"
+    base_sidecar.write_text("stale base\n", encoding="utf-8")
+    remote_sidecar.write_text("stale remote\n", encoding="utf-8")
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: saved_state(local="old\n", remote="R\n")
+    )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+    client = FakeClient(
+        gets=[
+            {"body": "R\n"},
+            {"body": "R\n"},
+            {"body": "R\n", "content_type": 2},
+        ]
+    )
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert not base_sidecar.exists()
+    assert not remote_sidecar.exists()

@@ -403,6 +403,11 @@ def push(
         },
     )
 
+    # A successful push means any prior conflict is resolved; drop stale sidecars
+    # so a later 'elab merge' does not re-apply obsolete base/remote content.
+    _sidecar_path(path).unlink(missing_ok=True)
+    _base_sidecar_path(path).unlink(missing_ok=True)
+
     existing_tags = _remote_tags(remote_doc)
     for tag in meta.get("tags", []) or []:
         if tag not in existing_tags:
