@@ -14,6 +14,28 @@ class _Response:
         return self._data
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "data"),
+    [
+        ("info", "/info", {"elabftw_version": "5.6.12"}),
+        ("apikeys", "/apikeys", [{"id": 12, "can_write": 1}]),
+    ],
+)
+def test_account_metadata_methods_use_expected_get_endpoint(
+    monkeypatch, method, path, data
+):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _Response(data),
+    )
+
+    assert getattr(client, method)() == data
+    assert calls == [(("GET", path), {})]
+
+
 def test_get_normalizes_null_body(monkeypatch):
     client = Client("https://example.org", "key")
     monkeypatch.setattr(

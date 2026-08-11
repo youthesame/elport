@@ -41,6 +41,12 @@ class Client:
     def me(self):
         return self.request("GET", "/users/me").json()
 
+    def info(self):
+        return self.request("GET", "/info").json()
+
+    def apikeys(self):
+        return self.request("GET", "/apikeys").json()
+
     def get(self, entity, eid):
         data = self.request("GET", _entity_path(entity, eid)).json()
         # eLabFTW returns null for an empty body; normalize at the API boundary.

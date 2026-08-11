@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import os
+import re
 import sys
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
@@ -176,6 +178,13 @@ def _parser() -> argparse.ArgumentParser:
     logout_parser.add_argument(
         "profile", nargs="?", default="default", help="profile name (default: default)"
     )
+    profile_parser = commands.add_parser(
+        "profile", help="list profiles or select the default profile"
+    )
+    profile_parser.add_argument(
+        "action", nargs="?", choices=["list", "use"], default="list"
+    )
+    profile_parser.add_argument("name", nargs="?")
     return parser
 
 
@@ -251,9 +260,19 @@ def _new(args) -> None:
         print(f"  → {url}")
 
 
+def _color(text: str, code: int) -> str:
+    if sys.stdout.isatty() and os.environ.get("NO_COLOR") is None:
+        return f"\033[{code}m{text}\033[0m"
+    return text
+
+
 def _whoami(profile: str | None) -> None:
     data = config.load(Path.cwd(), Path.cwd())
-    identity = _client(data, profile, {}).me()
+    profile_name, client = _resolved_client(data, profile, {})
+    identity = client.me()
+    server = client.info()
+    api_keys = client.apikeys()
+
     name = identity.get("fullname")
     if not name:
         name = " ".join(
@@ -261,14 +280,85 @@ def _whoami(profile: str | None) -> None:
             for part in (identity.get("firstname"), identity.get("lastname"))
             if part
         )
-    name = name or identity.get("email") or identity.get("userid") or "unknown"
+    name = name or identity.get("email") or identity.get("userid")
+    userid = identity.get("userid")
+
+    host = client.root.split("://", 1)[-1]
+    heading = f"{_color('✓', 32)} {host}"
+    if name:
+        heading += f" — {name}"
+    if userid is not None:
+        heading += f" (uid {userid})"
+    print(heading)
+    print(f"  Profile   {profile_name}")
+
+    email = identity.get("email")
+    if email:
+        print(f"  Email     {email}")
+
     team_id = identity.get("team")
     teams = identity.get("teams") or []
     team = next((item for item in teams if str(item.get("id")) == str(team_id)), {})
-    team_name = team.get("name") or team.get("title")
-    team_display = f"{team_name} ({team_id})" if team_name else str(team_id)
-    print(f"user: {name}")
-    print(f"active team: {team_display}")
+    team_name = team.get("name")
+    if team_name and team_id is not None:
+        roles = {1: "sysadmin", 2: "admin", 4: "user"}
+        role = roles.get(team.get("usergroup"))
+        if role is None:
+            if team.get("is_owner"):
+                role = "owner"
+            elif team.get("is_admin"):
+                role = "admin"
+            else:
+                role = "user"
+        role_colors = {"sysadmin": 31, "owner": 36, "admin": 35, "user": 32}
+        role_display = _color(role, role_colors[role])
+        if identity.get("is_sysadmin") and role != "sysadmin":
+            role_display += f" · {_color('sysadmin', 31)}"
+        print(f"  Team      {team_name} (#{team_id}) · {role_display}")
+
+    match = re.match(r"^(\d+)-", client.key)
+    if match:
+        key_id = match.group(1)
+        api_key = next(
+            (item for item in api_keys if str(item.get("id")) == key_id), None
+        )
+        can_write = api_key.get("can_write") if api_key else None
+        if can_write is not None:
+            key_label = "read-write" if can_write else "read-only"
+            print(f"  API key   {_color(key_label, 32 if can_write else 31)}")
+
+    server_version = server.get("elabftw_version")
+    if server_version:
+        print(f"  Server    eLabFTW {server_version}")
+
+    scope_experiments = identity.get("scope_experiments")
+    scope_items = identity.get("scope_items")
+    if scope_experiments is not None and scope_items is not None:
+        scopes = {1: "self", 2: "team", 3: "everything"}
+        experiments_label = scopes.get(scope_experiments, str(scope_experiments))
+        items_label = scopes.get(scope_items, str(scope_items))
+        print(f"  Scopes    experiments={experiments_label} · items={items_label}")
+
+
+def _profile(action: str, name: str | None) -> None:
+    data = config.load(Path.cwd(), Path.cwd())
+    profiles = data.get("profiles", {})
+    if action == "use":
+        if not name:
+            raise ValueError("elab profile use requires a profile name")
+        if name not in profiles:
+            raise ValueError(f"no such profile: {name}")
+        config.set_default(name)
+        print(f"default profile is now {name}")
+        return
+    if not profiles:
+        print("no profiles configured; run 'elab login <name>'")
+        return
+    default = data.get("default_profile")
+    for profile_name, values in profiles.items():
+        marker = "* " if profile_name == default else "  "
+        base_url = values.get("base_url") or ""
+        print(f"{marker}{profile_name}  {base_url}".rstrip())
 
 
 def main(argv=None) -> int:
@@ -285,6 +375,9 @@ def main(argv=None) -> int:
                 print(f"logged out profile {args.profile}")
             else:
                 print(f"no stored credentials for profile {args.profile}")
+            return 0
+        if args.cmd == "profile":
+            _profile(args.action, args.name)
             return 0
         if args.cmd == "new":
             _new(args)

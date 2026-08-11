@@ -723,17 +723,139 @@ def test_merge_without_git_is_reported_as_cli_error(tmp_path, monkeypatch, capsy
     assert document.read_text(encoding="utf-8") == "local\n"
 
 
-def test_whoami_prints_user_and_active_team(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("can_write", "key_label"), [(1, "read-write"), (0, "read-only")]
+)
+def test_whoami_prints_auth_status_block(monkeypatch, capsys, can_write, key_label):
     class IdentityClient:
+        root = "https://elab-a.example.org"
+        key = "42-secret"
+
         def me(self):
             return {
                 "fullname": "Ada Lovelace",
+                "userid": 9,
+                "email": "ada@example.org",
                 "team": 7,
-                "teams": [{"id": 7, "name": "Lab A"}],
+                "is_sysadmin": 0,
+                "teams": [
+                    {
+                        "id": 7,
+                        "name": "Lab A",
+                        "usergroup": None,
+                        "is_admin": 0,
+                        "is_owner": 1,
+                    }
+                ],
+                "scope_experiments": 2,
+                "scope_items": 3,
             }
 
+        def info(self):
+            return {"elabftw_version": "5.6.12"}
+
+        def apikeys(self):
+            return [{"id": 42, "can_write": can_write}]
+
     monkeypatch.setattr(cli.config, "load", lambda *args: {})
-    monkeypatch.setattr(cli, "_client", lambda *args: IdentityClient())
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda *args: ("labA", IdentityClient())
+    )
 
     assert cli.main(["whoami"]) == 0
-    assert capsys.readouterr().out == "user: Ada Lovelace\nactive team: Lab A (7)\n"
+    output = capsys.readouterr().out
+    assert output == (
+        "✓ elab-a.example.org — Ada Lovelace (uid 9)\n"
+        "  Profile   labA\n"
+        "  Email     ada@example.org\n"
+        "  Team      Lab A (#7) · owner\n"
+        f"  API key   {key_label}\n"
+        "  Server    eLabFTW 5.6.12\n"
+        "  Scopes    experiments=team · items=everything\n"
+    )
+    assert "\x1b[" not in output
+
+
+def test_whoami_omits_missing_optional_fields(monkeypatch, capsys):
+    class IdentityClient:
+        root = "https://elab-a.example.org"
+        key = "unprefixed"
+
+        def me(self):
+            return {"firstname": "Ada", "lastname": "Lovelace"}
+
+        def info(self):
+            return {}
+
+        def apikeys(self):
+            return []
+
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda *args: ("labA", IdentityClient())
+    )
+
+    assert cli.main(["whoami"]) == 0
+    assert capsys.readouterr().out == (
+        "✓ elab-a.example.org — Ada Lovelace\n  Profile   labA\n"
+    )
+
+
+def test_profile_list_marks_default(monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.config,
+        "load",
+        lambda *args: {
+            "default_profile": "labA",
+            "profiles": {
+                "labA": {"base_url": "https://elab-a.example.org"},
+                "labB": {"base_url": "https://elab-b.example.org"},
+            },
+        },
+    )
+
+    assert cli.main(["profile"]) == 0
+    assert capsys.readouterr().out == (
+        "* labA  https://elab-a.example.org\n  labB  https://elab-b.example.org\n"
+    )
+
+
+def test_profile_list_reports_when_empty(monkeypatch, capsys):
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+
+    assert cli.main(["profile", "list"]) == 0
+    assert capsys.readouterr().out == (
+        "no profiles configured; run 'elab login <name>'\n"
+    )
+
+
+def test_profile_use_sets_default(monkeypatch, capsys):
+    selected = []
+    monkeypatch.setattr(
+        cli.config,
+        "load",
+        lambda *args: {"profiles": {"labA": {"base_url": "https://e.example"}}},
+    )
+    monkeypatch.setattr(cli.config, "set_default", selected.append, raising=False)
+
+    assert cli.main(["profile", "use", "labA"]) == 0
+    assert selected == ["labA"]
+    assert capsys.readouterr().out == "default profile is now labA\n"
+
+
+@pytest.mark.parametrize(
+    ("argv", "message"),
+    [
+        (["profile", "use"], "elab profile use requires a profile name"),
+        (["profile", "use", "missing"], "no such profile: missing"),
+    ],
+)
+def test_profile_use_reports_invalid_name(argv, message, monkeypatch, capsys):
+    monkeypatch.setattr(
+        cli.config,
+        "load",
+        lambda *args: {"profiles": {"labA": {"base_url": "https://e.example"}}},
+    )
+
+    assert cli.main(argv) == 1
+    assert capsys.readouterr().err == f"{message}\n"

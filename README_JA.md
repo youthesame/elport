@@ -45,9 +45,10 @@ elab push                             # 参照ファイルをアップロード�
 | `elab comments [<doc>]` | リモートのコメントスレッドを表示します（端末のみ。本文には書き込みません）。 |
 | `elab comment [<doc>] "<text>"` | コメントを1件投稿します（編集・削除はしません。Web UI で行ってください）。 |
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | 記録を作成し、フロントマターの雛形を生成します。 |
-| `elab whoami [--profile <name>]` | 認証を確認し、ユーザーと現在のチームを表示します。 |
+| `elab whoami [--profile <name>]` | 認証確認。ユーザー・チームと権限・API キーの read/write・サーバーバージョン・スコープを表示します。 |
 | `elab login [<profile>]` | `base_url` を `config.toml` に、`api_key` を OS キーリングに保存します。入力はプロンプト式で、キーは画面に出ません。 |
 | `elab logout [<profile>]` | プロファイルの保存済み `api_key` を削除し、`base_url` は残します。 |
+| `elab profile [use <name>]` | プロファイル一覧（既定を明示）、または既定プロファイルを設定します。 |
 
 オプション: `-n`/`--dry-run`（push のリハーサル。送信しない）、`--profile <name>`、`-f`/`--force`（変更済みのリモートに
 上書き push。Web 側の変更は失われる）、`-y`/`--yes`（`read`/`write` をチーム外へ広げるときの確認を省略）、
@@ -115,6 +116,7 @@ verify_ssl = true
 資格情報の解決順は **環境変数 → キーリング+config → 平文** です。CI 用の `ELABFTW_BASE_URL`+`ELABFTW_API_KEY`、通常は
 キーリングの組、そしてキーリングのバックエンドが無いときだけ警告つきで config 平文にフォールバックします。プロファイルは
 settings.json のように重なります（`config.toml` → `<project>/.elab.toml` → `<dir>/.elab.toml`、1 プロファイル 1 チーム）。
+最初の `elab login` が既定になり、`elab profile use <name>` で切り替え（またはノートごとに `profile:` 指定）。
 `.elabignore` は参照ファイルを `.gitignore` 形式で、上の層をまたいで加算的に除外します。
 
 ## さらに詳しく

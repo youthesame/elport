@@ -74,7 +74,13 @@ def _profile_name(data: dict, profile: str | None, meta: dict) -> str:
     mp, cp = meta.get("profile"), profile
     if mp and cp and mp != cp:
         raise ValueError("profile mismatch between frontmatter and CLI")
-    return mp or cp or data.get("default_profile") or "default"
+    selected = mp or cp or data.get("default_profile")
+    if selected:
+        return selected
+    profiles = data.get("profiles", {})
+    if not profiles or "default" in profiles:
+        return "default"
+    raise ValueError("no default profile set; run 'elab profile use <name>'")
 
 
 def base_target(data: dict, profile: str | None, meta: dict) -> tuple[str, str, bool]:
@@ -120,6 +126,8 @@ def login(name: str, url: str, api_key: str) -> None:
     profile = data.setdefault("profiles", {}).setdefault(name, {})
     profile["base_url"] = url.rstrip("/")
     profile.pop("api_key", None)
+    if not data.get("default_profile"):
+        data["default_profile"] = name
     _atomic_write(p, tomli_w.dumps(data))
     try:
         keyring.set_password("elab", name, api_key)
@@ -144,8 +152,21 @@ def logout(name: str) -> bool:
     p = config_path()
     data = _read(p)
     profile = data.get("profiles", {}).get(name, {})
+    config_changed = False
     if "api_key" in profile:
         del profile["api_key"]
-        _atomic_write(p, tomli_w.dumps(data))
         removed = True
+        config_changed = True
+    if data.get("default_profile") == name:
+        del data["default_profile"]
+        config_changed = True
+    if config_changed:
+        _atomic_write(p, tomli_w.dumps(data))
     return removed
+
+
+def set_default(name: str) -> None:
+    p = config_path()
+    data = _read(p)
+    data["default_profile"] = name
+    _atomic_write(p, tomli_w.dumps(data))

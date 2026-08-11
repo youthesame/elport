@@ -245,3 +245,82 @@ def test_login_writes_config_before_setting_keyring(tmp_path, monkeypatch):
     config.login("lab", "https://e.example", "secret")
 
     assert observed == {"base_url": "https://e.example"}
+
+
+def test_login_sets_first_profile_as_default(tmp_path, monkeypatch):
+    user = tmp_path / "config.toml"
+    monkeypatch.setattr(config, "config_path", lambda: user)
+    monkeypatch.setattr(config.keyring, "set_password", lambda *args: None)
+
+    config.login("lab", "https://e.example", "secret")
+
+    assert config._read(user)["default_profile"] == "lab"
+
+
+def test_login_preserves_existing_default_profile(tmp_path, monkeypatch):
+    user = tmp_path / "config.toml"
+    user.write_text(
+        'default_profile = "other"\n\n[profiles.other]\nbase_url = "https://other.example"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "config_path", lambda: user)
+    monkeypatch.setattr(config.keyring, "set_password", lambda *args: None)
+
+    config.login("lab", "https://e.example", "secret")
+
+    assert config._read(user)["default_profile"] == "other"
+
+
+@pytest.mark.parametrize(
+    ("default_profile", "expected_default"),
+    [("lab", None), ("other", "other")],
+)
+def test_logout_clears_default_only_for_logged_out_profile(
+    tmp_path, monkeypatch, default_profile, expected_default
+):
+    user = tmp_path / "config.toml"
+    user.write_text(
+        f'default_profile = "{default_profile}"\n\n'
+        '[profiles.lab]\nbase_url = "https://e.example"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "config_path", lambda: user)
+    monkeypatch.setattr(
+        config.keyring,
+        "delete_password",
+        lambda *args: (_ for _ in ()).throw(keyring.errors.PasswordDeleteError()),
+    )
+
+    assert config.logout("lab") is False
+    assert config._read(user).get("default_profile") == expected_default
+
+
+def test_set_default_writes_config_key(tmp_path, monkeypatch):
+    user = tmp_path / "config.toml"
+    user.write_text(
+        '[profiles.lab]\nbase_url = "https://e.example"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(config, "config_path", lambda: user)
+
+    config.set_default("lab")
+
+    assert config._read(user)["default_profile"] == "lab"
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        ({}, "default"),
+        ({"profiles": {}}, "default"),
+        ({"profiles": {"default": {}}}, "default"),
+    ],
+)
+def test_profile_name_keeps_default_happy_paths(data, expected):
+    assert config._profile_name(data, None, {}) == expected
+
+
+def test_profile_name_requires_default_for_named_profiles():
+    with pytest.raises(
+        ValueError, match="no default profile set; run 'elab profile use <name>'"
+    ):
+        config._profile_name({"profiles": {"lab": {}}}, None, {})

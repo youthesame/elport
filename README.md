@@ -44,9 +44,10 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 | `elab comments [<doc>]` | Print the remote comment thread (terminal only; never written into the body). |
 | `elab comment [<doc>] "<text>"` | Post one comment to the entity (no edit/delete — use the Web UI). |
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Create an entity + scaffold front matter. |
-| `elab whoami [--profile <name>]` | Auth check; shows user and active team. |
+| `elab whoami [--profile <name>]` | Auth check: user, team + role, API-key read/write, server version, scopes. |
 | `elab login [<profile>]` | Store base_url → `config.toml`, api_key → OS keyring. Prompts; the key is not echoed. |
 | `elab logout [<profile>]` | Remove the stored api_key for a profile; keeps base_url. |
+| `elab profile [use <name>]` | List profiles (default marked), or set the default profile. |
 
 Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>`, `-f/--force` (push over a changed remote — the
 Web-side change is lost), `-y/--yes` (skip the confirmation when widening `read`/`write` beyond your team),
@@ -113,7 +114,8 @@ verify_ssl = true
 
 Credentials resolve **env → keyring+config → plaintext**: `ELABFTW_BASE_URL`+`ELABFTW_API_KEY` for CI, the keyring
 pair as the normal default, then a warned plaintext-in-config fallback only when no keyring backend exists. Profiles
-layer like settings.json (`config.toml` → `<project>/.elab.toml` → `<dir>/.elab.toml`, one per team); `.elabignore`
+layer like settings.json (`config.toml` → `<project>/.elab.toml` → `<dir>/.elab.toml`, one per team); your first
+`elab login` becomes the default, `elab profile use <name>` switches it, or set `profile:` per note. `.elabignore`
 excludes referenced files `.gitignore`-style, additive across those layers.
 
 ## Learn more
