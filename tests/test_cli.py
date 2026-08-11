@@ -128,6 +128,24 @@ def test_frontmatter_accepts_positive_integer_elab_id():
     assert body == "Body\n"
 
 
+@pytest.mark.parametrize("key", ["read", "write"])
+def test_frontmatter_rejects_invalid_permission_keyword(key):
+    with pytest.raises(
+        ValueError,
+        match=(rf"{key} must be one of: owner, owner\+admin, team, account, public"),
+    ):
+        frontmatter.parse(f"---\n{key}: laboratory\n---\nBody\n")
+
+
+def test_frontmatter_allows_permission_keys():
+    meta, body = frontmatter.parse("---\nread: team\nwrite: owner+admin\n---\nBody\n")
+
+    assert {"read", "write"} <= frontmatter.ALLOWED
+    assert meta["read"] == "team"
+    assert meta["write"] == "owner+admin"
+    assert body == "Body\n"
+
+
 def test_new_rejects_invalid_server_id_before_followup_requests(tmp_path, monkeypatch):
     class InvalidIdClient(NewClient):
         def create(self, entity, title):
@@ -411,6 +429,17 @@ def test_selected_profile_verify_ssl_is_forwarded(monkeypatch):
 def test_irrelevant_flags_are_rejected(argv):
     with pytest.raises(SystemExit):
         cli._parser().parse_args(argv)
+
+
+@pytest.mark.parametrize("flag", ["-y", "--yes"])
+def test_push_yes_is_threaded_to_sync(monkeypatch, flag):
+    client = object()
+    calls = []
+    monkeypatch.setattr(cli, "_target", lambda *args: ({}, client))
+    monkeypatch.setattr(cli, "push", lambda *args: calls.append(args))
+
+    assert cli.main(["push", "report.md", flag]) == 0
+    assert calls == [(Path("report.md"), client, {}, None, False, False, True)]
 
 
 def test_comments_defaults_to_report_and_dispatches_through_target(monkeypatch):

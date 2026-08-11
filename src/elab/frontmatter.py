@@ -8,7 +8,23 @@ from pathlib import Path
 
 import yaml
 
-ALLOWED = {"elab_id", "entity", "title", "tags", "category", "profile"}
+PERMISSION_LEVELS = {
+    "owner": 10,
+    "owner+admin": 20,
+    "team": 30,
+    "account": 40,
+    "public": 50,
+}
+ALLOWED = {
+    "elab_id",
+    "entity",
+    "title",
+    "tags",
+    "category",
+    "profile",
+    "read",
+    "write",
+}
 
 
 def validate_elab_id(value: object) -> int:
@@ -45,6 +61,10 @@ def parse(text: str) -> tuple[dict, str]:
     for key in ("title", "profile"):
         if key in data and data[key] is not None:
             data[key] = str(data[key])
+    for key in ("read", "write"):
+        if key in data and data[key] not in PERMISSION_LEVELS:
+            valid = ", ".join(PERMISSION_LEVELS)
+            raise ValueError(f"{key} must be one of: {valid}")
     if "tags" in data:
         tags = data["tags"]
         if tags is None:

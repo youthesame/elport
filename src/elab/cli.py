@@ -63,6 +63,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="overwrite even if the remote has diverged",
     )
+    push_parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="skip confirmation when widening access to account or public",
+    )
 
     pull_parser = commands.add_parser(
         "pull", help="download the remote body and attachments"
@@ -272,7 +278,15 @@ def main(argv=None) -> int:
         path = Path(args.doc)
         data, client = _target(path, args.profile, args.entity)
         if args.cmd == "push":
-            push(path, client, data, args.profile, args.dry_run, args.force)
+            push(
+                path,
+                client,
+                data,
+                args.profile,
+                args.dry_run,
+                args.force,
+                args.yes,
+            )
         elif args.cmd == "pull":
             pull(path, client, data, args.profile)
         elif args.cmd == "status":

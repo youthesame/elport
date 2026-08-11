@@ -12,21 +12,30 @@ from elab import frontmatter, sync
 
 
 class FakeClient:
-    def __init__(self, gets=None, uploads=None, comments=None):
+    def __init__(
+        self, gets=None, uploads=None, comments=None, remote_doc=None, identity=None
+    ):
         self.gets = list(gets or [])
         self.upload_list = list(uploads or [])
         self.comment_list = list(comments or [])
+        self.remote_doc = dict(remote_doc or {})
+        self.identity = {
+            "team": 7,
+            "default_read_base": 30,
+            "default_write_base": 20,
+            **(identity or {}),
+        }
         self.calls = []
         self.saved_payload = None
         self.comment_posts = []
 
     def me(self):
         self.calls.append("me")
-        return {"team": 7}
+        return self.identity
 
     def get(self, entity, eid):
         self.calls.append("get")
-        return self.gets.pop(0)
+        return self.gets.pop(0) if self.gets else dict(self.remote_doc)
 
     def uploads(self, entity, eid):
         self.calls.append("uploads")
@@ -46,6 +55,7 @@ class FakeClient:
     def patch(self, entity, eid, payload):
         self.calls.append("patch")
         self.saved_payload = payload
+        self.remote_doc.update(payload)
         return {}
 
     def add_tag(self, entity, eid, tag):
@@ -383,6 +393,271 @@ def test_push_summary_omits_empty_sharelink(tmp_path, monkeypatch, configured, c
         "  body unchanged (markdown)\n"
         "  uploads: 0 reused, 0 new\n"
     )
+
+
+def test_push_folds_declared_permission_bases_into_payload(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="team", write="owner")
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "tags": "",
+            "canread_base": 30,
+            "canwrite_base": 20,
+            "canread": '{"teams":[3],"users":[],"teamgroups":[]}',
+            "canwrite": '{"teams":[],"users":[],"teamgroups":[]}',
+        }
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["canread_base"] == 30
+    assert client.saved_payload["canwrite_base"] == 10
+    assert "canread" not in client.saved_payload
+    assert "canwrite" not in client.saved_payload
+    assert client.calls.count("patch") == 1
+    assert "  permissions: read=team write=owner\n" in capsys.readouterr().out
+
+
+def test_push_omits_undeclared_permissions(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "canread_base": 50,
+            "canwrite_base": 40,
+            "canread": '{"teams":[3],"users":[],"teamgroups":[]}',
+            "canwrite": '{"teams":[],"users":[4],"teamgroups":[]}',
+        }
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert (
+        not {
+            "canread_base",
+            "canwrite_base",
+            "canread",
+            "canwrite",
+        }
+        & client.saved_payload.keys()
+    )
+
+
+def test_permission_widening_interactive_yes_applies_once(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="public", write="account")
+    client = FakeClient(
+        remote_doc={"body": "remote", "canread_base": 30, "canwrite_base": 20}
+    )
+    prompts = []
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: prompts.append(prompt) or "YES"
+    )
+
+    sync.push(doc, client, {})
+
+    assert len(prompts) == 1
+    assert "read → public" in prompts[0]
+    assert "anonymous" in prompts[0]
+    assert "no login required" in prompts[0]
+    assert "write → account" in prompts[0]
+    assert client.saved_payload is not None
+    assert client.saved_payload["canread_base"] == 50
+    assert client.saved_payload["canwrite_base"] == 40
+
+
+def test_permission_widening_interactive_no_stops_before_uploads(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_text("new", encoding="utf-8")
+    write_doc(doc, "[data](data.csv)", read="account")
+    client = FakeClient(remote_doc={"body": "remote", "canread_base": 30})
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    monkeypatch.setattr(
+        sync,
+        "_confirm_large_uploads",
+        lambda paths: pytest.fail("large-upload confirmation must run later"),
+    )
+
+    with pytest.raises(RuntimeError, match="permission widening cancelled"):
+        sync.push(doc, client, {})
+
+    assert "patch" not in client.calls
+    assert "upload" not in client.calls
+
+
+def test_permission_widening_noninteractive_requires_yes(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", write="account")
+    client = FakeClient(remote_doc={"body": "remote", "canwrite_base": 20})
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: pytest.fail("input must not be called")
+    )
+
+    with pytest.raises(RuntimeError, match=r"re-run with --yes"):
+        sync.push(doc, client, {})
+
+    assert "patch" not in client.calls
+    assert "upload" not in client.calls
+
+
+def test_permission_widening_yes_applies_without_prompt(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="public")
+    client = FakeClient(remote_doc={"body": "remote", "canread_base": 30})
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: pytest.fail("input must not be called")
+    )
+
+    sync.push(doc, client, {}, assume_yes=True)
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["canread_base"] == 50
+
+
+def test_permission_already_at_target_does_not_prompt_noninteractive(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="public", write="account")
+    client = FakeClient(
+        remote_doc={"body": "remote", "canread_base": 50, "canwrite_base": 40}
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: pytest.fail("input must not be called")
+    )
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["canread_base"] == 50
+    assert client.saved_payload["canwrite_base"] == 40
+
+
+@pytest.mark.parametrize(
+    ("field", "keyword", "base"),
+    [
+        ("read", "owner", 10),
+        ("write", "owner+admin", 20),
+    ],
+)
+@pytest.mark.parametrize(
+    "grants",
+    [
+        '{"teams":[3],"users":[],"teamgroups":[]}',
+        '{"teams":[],"users":[4],"teamgroups":[]}',
+        '{"teams":[],"users":[],"teamgroups":[5]}',
+    ],
+)
+def test_permission_narrowing_warns_when_individual_grants_remain(
+    tmp_path, monkeypatch, configured, capsys, field, keyword, base, grants
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", **{field: keyword})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            f"can{field}_base": 30,
+            f"can{field}": grants,
+        }
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    error = capsys.readouterr().err
+    assert f"warning: report.md declares {field}: {keyword}" in error
+    assert "individual grants remain" in error
+    assert "effective access is wider" in error
+    assert client.saved_payload is not None
+    assert client.saved_payload[f"can{field}_base"] == base
+
+
+@pytest.mark.parametrize("field", ["read", "write"])
+def test_permission_narrowing_with_empty_grants_does_not_warn(
+    tmp_path, monkeypatch, configured, capsys, field
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", **{field: "owner"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            f"can{field}_base": 30,
+            f"can{field}": '{"teams":[],"users":[],"teamgroups":[]}',
+        }
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert "individual grants remain" not in capsys.readouterr().err
+
+
+def test_permission_dry_run_prints_plan_without_prompt_or_patch(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="public", write="owner")
+    client = FakeClient(
+        remote_doc={"body": "remote", "canread_base": 30, "canwrite_base": 30}
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: False)
+    monkeypatch.setattr(
+        "builtins.input", lambda prompt: pytest.fail("input must not be called")
+    )
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    assert "permissions: read→public, write→owner" in capsys.readouterr().out
+    assert "patch" not in client.calls
+
+
+def test_new_entity_widening_uses_identity_default(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    doc.write_text(
+        frontmatter.render({"title": "Test", "read": "account"}, "local"),
+        encoding="utf-8",
+    )
+    client = FakeClient(identity={"default_read_base": 30})
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: False)
+
+    with pytest.raises(RuntimeError, match=r"re-run with --yes"):
+        sync.push(doc, client, {})
+
+    assert "create" not in client.calls
+    assert "patch" not in client.calls
 
 
 def test_identical_files_with_same_basename_share_one_upload(

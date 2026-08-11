@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import errno
 import hashlib
+import json
 import os
 import shlex
 import shutil
@@ -19,6 +20,10 @@ from .transclude import download_url, plan, replace_spans, reverse, safe_name
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
 CONTROL_FILENAMES = {".elab.toml", ".elabignore"}
+PERMISSION_AUDIENCES = {
+    "account": "everyone with an account",
+    "public": "everyone incl. anonymous; no login required",
+}
 
 
 @dataclass
@@ -190,6 +195,62 @@ def _check_team_match(saved: dict | None, identity: dict) -> None:
         raise RuntimeError("active team differs from saved state")
 
 
+def _permission_changes(
+    meta: dict, remote_doc: dict, identity: dict, existing: bool
+) -> list[tuple[str, str, int, int]]:
+    changes = []
+    for field in ("read", "write"):
+        if field not in meta:
+            continue
+        keyword = meta[field]
+        target = frontmatter.PERMISSION_LEVELS[keyword]
+        current = (
+            remote_doc[f"can{field}_base"]
+            if existing
+            else identity[f"default_{field}_base"]
+        )
+        changes.append((field, keyword, target, current))
+    return changes
+
+
+def _confirm_permission_widening(
+    changes: list[tuple[str, str, int, int]], assume_yes: bool
+) -> None:
+    widening = [
+        change for change in changes if change[2] >= 40 and change[2] > change[3]
+    ]
+    if not widening or assume_yes:
+        return
+    summary = ", ".join(
+        f"{field} → {keyword} ({PERMISSION_AUDIENCES[keyword]})"
+        for field, keyword, _, _ in widening
+    )
+    if not sys.stdin.isatty():
+        raise RuntimeError(
+            f"permission widening requires confirmation ({summary}); re-run with --yes"
+        )
+    answer = input(f"{summary}: leave the team? [y/N] ").strip().lower()
+    if answer not in ("y", "yes"):
+        raise RuntimeError("permission widening cancelled")
+
+
+def _has_individual_grants(remote_doc: dict, field: str) -> bool:
+    grants = json.loads(remote_doc.get(f"can{field}", "{}"))
+    return any(grants.get(key, []) for key in ("teams", "users", "teamgroups"))
+
+
+def _warn_permission_narrowing(
+    path: Path, changes: list[tuple[str, str, int, int]], remote_doc: dict
+) -> None:
+    for field, keyword, target, _ in changes:
+        if target <= 20 and _has_individual_grants(remote_doc, field):
+            print(
+                f"warning: {path.name} declares {field}: {keyword} but individual "
+                "grants remain (managed in the Web UI); effective access is wider",
+                file=sys.stderr,
+            )
+
+
 def push(
     path: Path,
     client,
@@ -197,6 +258,7 @@ def push(
     profile=None,
     dry_run: bool = False,
     force: bool = False,
+    assume_yes: bool = False,
 ) -> None:
     meta, body, entity, eid = _document(path, config)
     if not force:
@@ -245,11 +307,24 @@ def push(
             message,
         )
 
+    permission_changes = _permission_changes(
+        meta, remote_doc, identity, eid is not None
+    )
+    if not dry_run:
+        _confirm_permission_widening(permission_changes, assume_yes)
+        if eid is not None:
+            _warn_permission_narrowing(path, permission_changes, remote_doc)
+
     uploads = remote.uploads() if remote is not None else []
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
     if dry_run:
         print("Upload plan:", *(path.name for path in files), sep="\n  ")
+        if permission_changes:
+            planned = ", ".join(
+                f"{field}→{keyword}" for field, keyword, _, _ in permission_changes
+            )
+            print(f"permissions: {planned}")
         for ref in refs:
             if ref.file is None:
                 continue
@@ -288,6 +363,8 @@ def push(
         payload["title"] = meta["title"]
     if category is not None:
         payload["category"] = category
+    for field, _, target, _ in permission_changes:
+        payload[f"can{field}_base"] = target
 
     if saved and not force:
         latest = remote.get()
@@ -330,6 +407,11 @@ def push(
     print(f"pushed {entity}/{eid}: {title}")
     print(f"  body {'updated' if body_changed else 'unchanged'} (markdown)")
     print(f"  uploads: {reused_count} reused, {new_count} new")
+    if permission_changes:
+        applied = " ".join(
+            f"{field}={keyword}" for field, keyword, _, _ in permission_changes
+        )
+        print(f"  permissions: {applied}")
     url = stored.get("sharelink")
     if url:
         print(f"  → {url}")
