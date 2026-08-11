@@ -427,8 +427,8 @@ def test_conflicted_merge_promotes_pending_remote_and_allows_regular_push(
     assert ">>>>>>> " in merged
     base = tmp_path / "report.base.md"
     remote = tmp_path / "report.remote.md"
-    assert base.exists()
-    assert remote.exists()
+    assert not base.exists()
+    assert not remote.exists()
     assert stored_state == {
         "local_base": base_body,
         "remote_base": remote_body,
@@ -465,6 +465,9 @@ def test_conflicted_merge_regular_push_reconflicts_if_remote_changed_again(
         sync.push(doc, client, {})
     with pytest.raises(RuntimeError, match="conflict.*run 'elab push'"):
         sync.merge(doc, {})
+
+    assert not (tmp_path / "report.base.md").exists()
+    assert not (tmp_path / "report.remote.md").exists()
 
     write_doc(doc, "resolved\n")
     with pytest.raises(RuntimeError, match="remote changed"):
@@ -2472,15 +2475,15 @@ def test_remote_tags_handles_null():
     assert sync._remote_tags({"tags": None}) == set()
 
 
-def test_successful_push_removes_leftover_conflict_sidecars(
+def test_successful_push_preserves_unrelated_sidecar_named_documents(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
-    write_doc(doc, "resolved\n")
+    write_doc(doc, "local\n")
     base_sidecar = tmp_path / "report.base.md"
     remote_sidecar = tmp_path / "report.remote.md"
-    base_sidecar.write_text("stale base\n", encoding="utf-8")
-    remote_sidecar.write_text("stale remote\n", encoding="utf-8")
+    base_sidecar.write_text("unrelated base document\n", encoding="utf-8")
+    remote_sidecar.write_text("unrelated remote document\n", encoding="utf-8")
     monkeypatch.setattr(
         sync.state, "load", lambda *args: saved_state(local="old\n", remote="R\n")
     )
@@ -2496,5 +2499,5 @@ def test_successful_push_removes_leftover_conflict_sidecars(
     sync.push(doc, client, {})
 
     assert client.saved_payload is not None
-    assert not base_sidecar.exists()
-    assert not remote_sidecar.exists()
+    assert base_sidecar.read_text(encoding="utf-8") == "unrelated base document\n"
+    assert remote_sidecar.read_text(encoding="utf-8") == "unrelated remote document\n"

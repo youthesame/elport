@@ -403,11 +403,6 @@ def push(
         },
     )
 
-    # A successful push means any prior conflict is resolved; drop stale sidecars
-    # so a later 'elab merge' does not re-apply obsolete base/remote content.
-    _sidecar_path(path).unlink(missing_ok=True)
-    _base_sidecar_path(path).unlink(missing_ok=True)
-
     existing_tags = _remote_tags(remote_doc)
     for tag in meta.get("tags", []) or []:
         if tag not in existing_tags:
@@ -481,9 +476,9 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
     if result.returncode < 0 or result.returncode >= 128:
         raise RuntimeError(result.stderr.strip() or "git merge-file failed")
     _promote_pending_remote(base_url, entity, eid)
+    base.unlink()
+    remote.unlink()
     if result.returncode == 0:
-        base.unlink()
-        remote.unlink()
         print(f"merged cleanly into {path}; review and run 'elab push'")
         return
     raise RuntimeError(
