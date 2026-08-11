@@ -24,7 +24,8 @@ elab merge                     # after a conflict: git merge-file .base.md/.remo
 elab comments                  # print the remote comment thread (read-only, terminal only)
 elab comment "text"            # post one comment (no edit/delete)
 elab new "title" --entity experiments -o report.md   # create entity + scaffold frontmatter
-elab whoami                    # confirm auth + active team
+elab whoami                    # auth check: user, team+role, API-key read/write, server version, scopes
+elab profile [use <name>]      # list profiles (default marked), or switch the default
 elab login [profile]           # store base_url (config) + api_key (OS keyring); prompts, no echo
 ```
 
