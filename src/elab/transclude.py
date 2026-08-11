@@ -17,6 +17,9 @@ _ANGLE_DESTINATION = re.compile(
 _HTML_TAG = re.compile(
     r"""</?[A-Za-z][A-Za-z0-9:-]*(?=[\s/>])(?:"[^"]*"|'[^']*'|[^'">])*>"""
 )
+_REFERENCE_DEFINITION = re.compile(
+    r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))"
+)
 
 
 @dataclass
@@ -244,11 +247,27 @@ def _candidate(
     return p, False, fragment
 
 
+def _warn_reference_definitions(text: str, doc_dir: Path, ignore: list[str]) -> None:
+    for match in _REFERENCE_DEFINITION.finditer(_masked(text)):
+        destination = (match.group(1) or match.group(2) or "").strip()
+        if not destination:
+            continue
+        candidate, _, _ = _candidate(doc_dir, destination, ignore)
+        if candidate is not None:
+            print(
+                "warning: reference-style link not uploaded "
+                f"(elab rewrites inline links only): {destination}",
+                file=sys.stderr,
+            )
+
+
 def plan(text: str, doc_dir: Path, ignore: list[str] | None = None) -> list[Reference]:
+    ignore = ignore or []
+    _warn_reference_definitions(text, doc_dir, ignore)
     refs = extract(text)
     names: dict[str, Path] = {}
     for ref in refs:
-        p, warn, fragment = _candidate(doc_dir, ref.path, ignore or [])
+        p, warn, fragment = _candidate(doc_dir, ref.path, ignore)
         if warn:
             print(
                 f"warning: local reference not uploaded: {ref.path}",

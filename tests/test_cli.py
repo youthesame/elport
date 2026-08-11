@@ -205,6 +205,39 @@ def test_frontmatter_accepts_positive_integer_elab_id():
     assert body == "Body\n"
 
 
+def test_frontmatter_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="unknown front matter key"):
+        frontmatter.parse("---\ncatetory: x\n---\nBody\n")
+
+
+def test_frontmatter_accepts_only_allowed_keys():
+    text = """---
+elab_id: 42
+entity: experiments
+title: Test
+tags: [one]
+category: 3
+status: 2
+profile: lab
+read: team
+write: owner
+---
+Body
+"""
+
+    meta, body = frontmatter.parse(text)
+
+    assert set(meta) == frontmatter.ALLOWED
+    assert body == "Body\n"
+
+
+def test_frontmatter_rejects_duplicate_yaml_keys():
+    with pytest.raises(
+        ValueError, match="invalid frontmatter YAML: found duplicate key"
+    ):
+        frontmatter.parse("---\nelab_id: 1\nelab_id: 2\n---\nBody\n")
+
+
 @pytest.mark.parametrize("key", ["read", "write"])
 def test_frontmatter_rejects_invalid_permission_keyword(key):
     with pytest.raises(

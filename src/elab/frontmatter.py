@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 
 import yaml
+import yaml.constructor
+import yaml.resolver
 
 PERMISSION_LEVELS = {
     "owner": 10,
@@ -26,6 +28,27 @@ ALLOWED = {
     "read",
     "write",
 }
+
+
+class _StrictLoader(yaml.SafeLoader):
+    pass
+
+
+def _forbid_duplicate_keys(loader, node):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"found duplicate key {key!r}", key_node.start_mark
+            )
+        mapping[key] = loader.construct_object(value_node, deep=True)
+    return mapping
+
+
+_StrictLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _forbid_duplicate_keys
+)
 
 
 def validate_elab_id(value: object) -> int:
@@ -52,11 +75,14 @@ def parse(text: str) -> tuple[dict, str]:
     if closer is None:
         return {}, text
     try:
-        data = yaml.safe_load(text[opener.end() : closer.start()])
+        data = yaml.load(text[opener.end() : closer.start()], Loader=_StrictLoader)
     except yaml.YAMLError as error:
         raise ValueError(f"invalid frontmatter YAML: {error}") from error
     if not isinstance(data, dict):
         return {}, text
+    unknown = sorted(set(data) - ALLOWED)
+    if unknown:
+        raise ValueError(f"unknown front matter key(s): {', '.join(unknown)}")
     if "elab_id" in data:
         data["elab_id"] = validate_elab_id(data["elab_id"])
     for key in ("title", "profile"):

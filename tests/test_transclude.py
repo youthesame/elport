@@ -204,6 +204,36 @@ def test_query_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
     assert "manual.pdf?download=1" in capsys.readouterr().err
 
 
+def test_existing_reference_definition_warns_that_it_is_not_uploaded(
+    tmp_path: Path, capsys
+):
+    (tmp_path / "results.png").write_bytes(b"image")
+
+    assert plan("[x][fig]\n\n[fig]: results.png\n", tmp_path) == []
+
+    assert "reference-style link not uploaded" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "definition",
+    ["[x]: https://example.org/a.png", "[y]: missing.png"],
+)
+def test_nonlocal_reference_definition_does_not_warn(
+    tmp_path: Path, capsys, definition: str
+):
+    plan(definition, tmp_path)
+
+    assert "reference-style link not uploaded" not in capsys.readouterr().err
+
+
+def test_reference_definition_inside_fence_does_not_warn(tmp_path: Path, capsys):
+    (tmp_path / "results.png").write_bytes(b"image")
+
+    plan("```markdown\n[fig]: results.png\n```\n", tmp_path)
+
+    assert "reference-style link not uploaded" not in capsys.readouterr().err
+
+
 def test_escaped_markdown_link_is_not_extracted(tmp_path: Path):
     (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
 
