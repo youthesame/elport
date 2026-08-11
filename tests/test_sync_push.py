@@ -620,6 +620,109 @@ def test_category_name_is_resolved(tmp_path, monkeypatch, configured):
     assert client.saved_payload["category"] == 9
 
 
+def test_category_valid_numeric_id_is_validated_and_sent(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", category=9)
+    client = FakeClient(
+        gets=[
+            {"body": "remote"},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert "categories" in client.calls
+    assert client.saved_payload is not None
+    assert client.saved_payload["category"] == 9
+
+
+def test_category_unknown_numeric_id_is_rejected_before_mutation(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", category=99)
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="category not found: 99"):
+        sync.push(doc, client, {})
+
+    assert client.calls == ["me", "categories"]
+
+
+@pytest.mark.parametrize("status", ["Running", 5])
+def test_status_name_or_valid_numeric_id_is_resolved_and_sent(
+    tmp_path, monkeypatch, configured, status
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", status=status)
+    client = FakeClient(
+        gets=[
+            {"body": "remote"},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert "statuses" in client.calls
+    assert client.saved_payload is not None
+    assert client.saved_payload["status"] == 5
+
+
+@pytest.mark.parametrize("status", ["Missing", 99])
+def test_unknown_status_is_rejected_before_mutation(tmp_path, configured, status):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", status=status)
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match=f"status not found: {status}"):
+        sync.push(doc, client, {})
+
+    assert client.calls == ["me", "statuses"]
+
+
+def test_push_without_status_does_not_send_status(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(
+        gets=[
+            {"body": "remote"},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert "status" not in client.saved_payload
+    assert "statuses" not in client.calls
+
+
+def test_dry_run_previews_declared_status_without_mutation(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", status="Running")
+    client = FakeClient(gets=[{"body": "remote"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: pytest.fail("state changed"))
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    assert "status: Running\n" in capsys.readouterr().out
+    assert client.calls == ["me", "statuses", "get", "uploads"]
+
+
 def test_content_type_must_be_exactly_markdown(tmp_path, monkeypatch, configured):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")

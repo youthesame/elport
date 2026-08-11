@@ -81,6 +81,7 @@ entity: experiments    # experiments か items。デフォルトは experiments
 title: "260806 experiment title"
 tags: [CRISPR, PCR]    # 任意。追加のみ
 category: Molecular Biology   # 任意。ID または既存のカテゴリ名
+status: Running        # 任意。ID または既存のエンティティステータス名
 profile: labA          # 任意。送信先プロファイル
 read: team             # 任意。owner | owner+admin | team | account | public
 write: owner           # 任意。同じ段階
@@ -91,8 +92,10 @@ write: owner           # 任意。同じ段階
 
 - 保持するのは `elab_id` と人が読むメタデータ、任意の `profile` だけです。ベースやハッシュは state に持ち、ここには
   置きません。
-- `title` と `category` は反映されます。`tags` は追加のみで、削除は Web UI で行います。フロントマターは本文を送る前に
-  取り除かれます。
+- `title` と `category` は反映されます。`category` は既存のものに限り、elab はカテゴリを作成しません。`tags` は追加のみで、
+  削除は Web UI で行います。フロントマターは本文を送る前に取り除かれます。
+- `status` は既存のエンティティステータス名または ID に限ります。書いたときだけ反映し、無ければリモートのステータスには
+  触れません。elab はステータスを作成しません。
 - `read`/`write` は eLabFTW の**ベース公開範囲**を設定します。書いたときだけ反映し、無ければ権限には一切触れません。
   送るのはベース段階のみなので、Web UI で設定した個別共有は保持されます。`account`/`public`（チーム外）へ広げるときは
   確認します（`-y` で省略。非対話では `-y` が必要）。

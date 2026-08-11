@@ -21,6 +21,7 @@ ALLOWED = {
     "title",
     "tags",
     "category",
+    "status",
     "profile",
     "read",
     "write",

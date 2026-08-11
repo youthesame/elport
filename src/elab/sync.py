@@ -135,16 +135,28 @@ def _confirm_large_uploads(paths: list[Path]) -> None:
         raise RuntimeError("large upload cancelled")
 
 
+def _resolve_catalog_id(entries, value, kind: str):
+    if isinstance(value, int) or (isinstance(value, str) and value.isdigit()):
+        target = int(value)
+        if any(entry.get("id") == target for entry in entries):
+            return target
+        raise RuntimeError(f"{kind} not found: {value}")
+    match = next((entry for entry in entries if entry.get("title") == value), None)
+    if match is None:
+        raise RuntimeError(f"{kind} not found: {value}")
+    return match["id"]
+
+
 def _resolve_category(client, entity: str, team_id, category):
     if category is None:
         return None
-    if isinstance(category, int) or (isinstance(category, str) and category.isdigit()):
-        return int(category)
-    categories = client.categories(team_id, entity)
-    match = next((item for item in categories if item.get("title") == category), None)
-    if match is None:
-        raise RuntimeError(f"category not found: {category}")
-    return match["id"]
+    return _resolve_catalog_id(client.categories(team_id, entity), category, "category")
+
+
+def _resolve_status(client, entity: str, team_id, status):
+    if status is None:
+        return None
+    return _resolve_catalog_id(client.statuses(team_id, entity), status, "status")
 
 
 def _remote_tags(remote: dict) -> set[str]:
@@ -275,7 +287,7 @@ def push(
             "refusing to push an empty body; "
             "use --force to overwrite with an empty body"
         )
-    for key in ("entity", "category"):
+    for key in ("entity", "category", "status"):
         if key in meta and meta[key] is not None:
             meta[key] = str(meta[key])
     if "tags" in meta:
@@ -291,6 +303,9 @@ def push(
     _check_team_match(saved, identity)
     category = _resolve_category(
         client, entity, identity.get("team"), meta.get("category")
+    )
+    status_id = _resolve_status(
+        client, entity, identity.get("team"), meta.get("status")
     )
     remote_doc = remote.get() if remote is not None else {}
     permission_changes = _permission_changes(
@@ -382,6 +397,8 @@ def push(
             print(f"title: {meta['title']}")
         if category is not None:
             print(f"category: {category}")
+        if meta.get("status") is not None:
+            print(f"status: {meta['status']}")
         existing = _remote_tags(remote_doc)
         new_tags = [tag for tag in (meta.get("tags") or []) if tag not in existing]
         if new_tags:
@@ -432,6 +449,8 @@ def push(
         payload["title"] = meta["title"]
     if category is not None:
         payload["category"] = category
+    if status_id is not None:
+        payload["status"] = status_id
     for field, _, target, current in permission_changes:
         if target != current:
             payload[f"can{field}_base"] = target

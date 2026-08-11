@@ -74,6 +74,7 @@ entity: experiments    # experiments | items (default experiments)
 title: "260806 experiment title"
 tags: [CRISPR, PCR]    # optional; add-only
 category: Molecular Biology   # optional (ID or existing category name)
+status: Running        # optional (ID or existing entity status name)
 profile: labA          # optional; destination profile
 read: team             # optional; owner | owner+admin | team | account | public
 write: owner           # optional; same scale
@@ -83,8 +84,10 @@ write: owner           # optional; same scale
 ```
 
 - Holds **only** `elab_id` + human metadata + optional `profile`. Base and hashes live in state, not here.
-- `title`/`category` are reflected; **`tags` are add-only** (remove tags in the Web UI). Front matter is stripped
-  before the body is sent.
+- `title`/`category` are reflected. `category` must already exist; elab never creates categories. **`tags` are
+  add-only** (remove tags in the Web UI). Front matter is stripped before the body is sent.
+- `status` must be an existing entity status name or ID. It is reflected only when present; if omitted, the remote
+  status is untouched. elab never creates statuses.
 - `read`/`write` set the eLabFTW **base visibility**, and only when present — omit them and elab leaves permissions
   untouched. Only the base level is sent, so individual grants you set in the Web UI are preserved. Widening to
   `account`/`public` (i.e. beyond your team) asks for confirmation (`-y` skips it; a non-interactive run needs `-y`).

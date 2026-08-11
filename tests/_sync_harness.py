@@ -67,6 +67,10 @@ class FakeClient:
         self.calls.append("categories")
         return [{"id": 9, "title": "Synthesis"}]
 
+    def statuses(self, team_id, entity):
+        self.calls.append("statuses")
+        return [{"id": 5, "title": "Running"}]
+
     def create(self, entity, title):
         self.calls.append("create")
         return {"id": 42}

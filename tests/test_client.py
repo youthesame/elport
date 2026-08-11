@@ -140,3 +140,23 @@ def test_categories_uses_entity_category_endpoint(monkeypatch, entity, resource)
 
     assert client.categories(7, entity) == []
     assert calls == [(("GET", f"/teams/7/{resource}"), {})]
+
+
+@pytest.mark.parametrize(
+    ("entity", "resource"),
+    [
+        ("items", "items_status"),
+        ("experiments", "experiments_status"),
+    ],
+)
+def test_statuses_uses_entity_status_endpoint(monkeypatch, entity, resource):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _Response([]),
+    )
+
+    assert client.statuses(7, entity) == []
+    assert calls == [(("GET", f"/teams/7/{resource}"), {})]

@@ -108,6 +108,10 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   `GET /api/v2/teams/{team_id}/experiments_categories` for experiments or
   `GET /api/v2/teams/{team_id}/resources_categories` for items, reading the `{id, title}` list and matching on
   `title`. The `items_types` submodel returns 400 on the current instance. No auto-creation.
+- Entity status is a team-scoped catalog read from `experiments_status` for experiments or `items_status` for
+  items, matching the returned `{id, title}` entries. Setting uses `PATCH` with `{"status": <id>}`. A bad ID 500s
+  because of the foreign-key constraint, while a name string is ignored, so elab resolves and validates names and
+  IDs locally against existing entries. No auto-creation.
 
 ## Comments (measured 5.6.12, 2026-08-11)
 

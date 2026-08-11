@@ -107,3 +107,7 @@ class Client:
             else "resources_categories"
         )
         return self.request("GET", f"/teams/{team_id}/{resource}").json()
+
+    def statuses(self, team_id, entity):
+        resource = "experiments_status" if entity == "experiments" else "items_status"
+        return self.request("GET", f"/teams/{team_id}/{resource}").json()
