@@ -67,6 +67,9 @@ class Client:
     def uploads(self, entity, eid):
         return self.request("GET", _entity_path(entity, eid, "/uploads")).json()
 
+    def comments(self, entity, eid):
+        return self.request("GET", _entity_path(entity, eid, "/comments")).json()
+
     def upload(self, entity, eid, path: Path):
         with path.open("rb") as stream:
             r = self.request(
@@ -86,6 +89,13 @@ class Client:
 
     def add_tag(self, entity, eid, tag):
         self.request("POST", _entity_path(entity, eid, "/tags"), json={"tag": tag})
+
+    def add_comment(self, entity, eid, text):
+        self.request(
+            "POST",
+            _entity_path(entity, eid, "/comments"),
+            json={"comment": text},
+        )
 
     def categories(self, team_id, entity):
         resource = (

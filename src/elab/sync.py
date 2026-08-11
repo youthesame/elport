@@ -154,6 +154,33 @@ def _document(path: Path, config: dict) -> tuple[dict, str, str, object]:
     return meta, body, entity, meta.get("elab_id")
 
 
+def comments(path: Path, client, config: dict, profile=None) -> None:
+    _, _, entity, eid = _document(path, config)
+    if not eid:
+        raise RuntimeError("elab_id is required")
+    thread = client.comments(entity, eid)
+    if not thread:
+        print("no comments")
+        return
+    blocks = []
+    for item in thread:
+        edited = " (edited)" if item["modified_at"] != item["created_at"] else ""
+        blocks.append(
+            f"{item['fullname']} {item['created_at']}{edited}\n{item['comment']}"
+        )
+    print("\n\n".join(blocks))
+
+
+def comment(path: Path, client, config: dict, profile=None, text="") -> None:
+    if not text.strip():
+        raise RuntimeError("comment text is empty")
+    _, _, entity, eid = _document(path, config)
+    if not eid:
+        raise RuntimeError("elab_id is required")
+    client.add_comment(entity, eid, text)
+    print(f"commented on {entity}/{eid}")
+
+
 def _check_team_match(saved: dict | None, identity: dict) -> None:
     if (
         saved

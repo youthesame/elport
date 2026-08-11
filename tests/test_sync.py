@@ -12,11 +12,13 @@ from elab import frontmatter, sync
 
 
 class FakeClient:
-    def __init__(self, gets=None, uploads=None):
+    def __init__(self, gets=None, uploads=None, comments=None):
         self.gets = list(gets or [])
         self.upload_list = list(uploads or [])
+        self.comment_list = list(comments or [])
         self.calls = []
         self.saved_payload = None
+        self.comment_posts = []
 
     def me(self):
         self.calls.append("me")
@@ -48,6 +50,14 @@ class FakeClient:
 
     def add_tag(self, entity, eid, tag):
         self.calls.append(f"tag:{tag}")
+
+    def comments(self, entity, eid):
+        self.calls.append("comments")
+        return self.comment_list
+
+    def add_comment(self, entity, eid, text):
+        self.calls.append("add_comment")
+        self.comment_posts.append((entity, eid, {"comment": text}))
 
     def categories(self, team_id, entity):
         self.calls.append("categories")
@@ -83,6 +93,96 @@ def write_doc(path: Path, body: str, **extra):
 
 def saved_state(local="local", remote="remote"):
     return {"local_base": local, "remote_base": remote, "team": 7}
+
+
+def test_comments_prints_thread_without_writing_files(tmp_path, configured, capsys):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "Local body\n")
+    before = doc.read_bytes()
+    existing = set(tmp_path.iterdir())
+    client = FakeClient(
+        comments=[
+            {
+                "fullname": "Ada Lovelace",
+                "created_at": "2026-08-11 09:00:00",
+                "modified_at": "2026-08-11 09:00:00",
+                "comment": "First comment",
+            },
+            {
+                "fullname": "Grace Hopper",
+                "created_at": "2026-08-11 10:00:00",
+                "modified_at": "2026-08-11 10:05:00",
+                "comment": "Edited comment",
+            },
+        ]
+    )
+
+    sync.comments(doc, client, {})
+
+    assert capsys.readouterr().out == (
+        "Ada Lovelace 2026-08-11 09:00:00\n"
+        "First comment\n\n"
+        "Grace Hopper 2026-08-11 10:00:00 (edited)\n"
+        "Edited comment\n"
+    )
+    assert client.calls == ["comments"]
+    assert doc.read_bytes() == before
+    assert set(tmp_path.iterdir()) == existing
+
+
+def test_comments_prints_empty_thread(tmp_path, configured, capsys):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "Local body\n")
+    client = FakeClient()
+
+    sync.comments(doc, client, {})
+
+    assert capsys.readouterr().out == "no comments\n"
+
+
+def test_comments_requires_elab_id(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    doc.write_text("Local body\n", encoding="utf-8")
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="^elab_id is required$"):
+        sync.comments(doc, client, {})
+
+    assert client.calls == []
+
+
+def test_comment_posts_to_document_target(tmp_path, configured, capsys):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "Local body\n", elab_id=17, entity="items")
+    client = FakeClient()
+
+    sync.comment(doc, client, {}, text="A useful note")
+
+    assert client.comment_posts == [("items", 17, {"comment": "A useful note"})]
+    assert capsys.readouterr().out == "commented on items/17\n"
+
+
+@pytest.mark.parametrize("text", ["", "   ", "\t\n"])
+def test_comment_rejects_empty_text_before_network(tmp_path, configured, text):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "Local body\n")
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="^comment text is empty$"):
+        sync.comment(doc, client, {}, text=text)
+
+    assert client.calls == []
+
+
+def test_comment_requires_elab_id(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    doc.write_text("Local body\n", encoding="utf-8")
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="^elab_id is required$"):
+        sync.comment(doc, client, {}, text="hello")
+
+    assert client.calls == []
 
 
 def test_merge_requires_both_sidecars(tmp_path):

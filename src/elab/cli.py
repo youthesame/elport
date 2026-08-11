@@ -8,7 +8,7 @@ from pathlib import Path
 
 from . import config, frontmatter, state
 from .client import Client
-from .sync import diff, merge, pull, push, status
+from .sync import comment, comments, diff, merge, pull, push, status
 
 ENTITIES = ("experiments", "items")
 
@@ -83,6 +83,27 @@ def _parser() -> argparse.ArgumentParser:
         help="local document (default: report.md)",
     )
     _add_target_options(status_parser)
+
+    comments_parser = commands.add_parser(
+        "comments", help="show the remote comment thread"
+    )
+    comments_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
+    )
+    _add_target_options(comments_parser)
+
+    comment_parser = commands.add_parser("comment", help="post a remote comment")
+    comment_parser.add_argument("text", help="comment text")
+    comment_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
+    )
+    _add_target_options(comment_parser)
 
     diff_parser = commands.add_parser("diff", help="show changes against the base")
     diff_parser.add_argument(
@@ -256,6 +277,10 @@ def main(argv=None) -> int:
             pull(path, client, data, args.profile)
         elif args.cmd == "status":
             status(path, client, data, args.profile)
+        elif args.cmd == "comments":
+            comments(path, client, data, args.profile)
+        elif args.cmd == "comment":
+            comment(path, client, data, args.profile, text=args.text)
         elif args.cmd == "diff":
             diff(path, client, data, args.profile, args.base)
         return 0

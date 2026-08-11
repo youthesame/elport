@@ -44,6 +44,10 @@ def test_request_uses_bounded_timeout(monkeypatch):
         lambda client, path: client.upload("experiments", "../items/42", path),
         lambda client, path: client.download("experiments", "../items/42", 3),
         lambda client, path: client.add_tag("experiments", "../items/42", "tag"),
+        lambda client, path: client.comments("experiments", "../items/42"),
+        lambda client, path: client.add_comment(
+            "experiments", "../items/42", "comment"
+        ),
     ],
 )
 def test_entity_api_paths_reject_traversal_id_before_request(
@@ -73,3 +77,30 @@ def test_entity_api_paths_reject_other_non_positive_integer_ids(monkeypatch, eid
 
     with pytest.raises(ValueError, match="elab_id must be a positive integer"):
         client.get("experiments", eid)
+
+
+def test_comments_lists_entity_comments(monkeypatch):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _Response([{"id": 5}]),
+    )
+
+    assert client.comments("experiments", 42) == [{"id": 5}]
+    assert calls == [(("GET", "/experiments/42/comments"), {})]
+
+
+def test_add_comment_posts_comment_text(monkeypatch):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _Response({}),
+    )
+
+    client.add_comment("items", 9, "hello")
+
+    assert calls == [(("POST", "/items/9/comments"), {"json": {"comment": "hello"}})]

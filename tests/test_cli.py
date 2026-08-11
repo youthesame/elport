@@ -413,6 +413,52 @@ def test_irrelevant_flags_are_rejected(argv):
         cli._parser().parse_args(argv)
 
 
+def test_comments_defaults_to_report_and_dispatches_through_target(monkeypatch):
+    target_calls = []
+    comment_calls = []
+    client = object()
+    monkeypatch.setattr(
+        cli,
+        "_target",
+        lambda *args: target_calls.append(args) or ({"entity": "items"}, client),
+    )
+    monkeypatch.setattr(cli, "comments", lambda *args: comment_calls.append(args))
+
+    assert cli.main(["comments", "--profile", "lab", "--entity", "items"]) == 0
+    assert target_calls == [(Path("report.md"), "lab", "items")]
+    assert comment_calls == [(Path("report.md"), client, {"entity": "items"}, "lab")]
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_path"),
+    [
+        (["comment", "hello"], Path("report.md")),
+        (["comment", "hello", "note.md"], Path("note.md")),
+    ],
+)
+def test_comment_parses_text_first_and_dispatches(argv, expected_path, monkeypatch):
+    target_calls = []
+    comment_calls = []
+    client = object()
+    monkeypatch.setattr(
+        cli,
+        "_target",
+        lambda *args: target_calls.append(args) or ({}, client),
+    )
+    monkeypatch.setattr(
+        cli, "comment", lambda *args, **kwargs: comment_calls.append((args, kwargs))
+    )
+
+    assert cli.main(argv) == 0
+    assert target_calls == [(expected_path, None, None)]
+    assert comment_calls == [((expected_path, client, {}, None), {"text": "hello"})]
+
+
+def test_comment_text_is_required():
+    with pytest.raises(SystemExit):
+        cli._parser().parse_args(["comment"])
+
+
 def test_merge_defaults_to_report_without_loading_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     calls = []
