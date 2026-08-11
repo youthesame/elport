@@ -681,7 +681,7 @@ def test_push_folds_declared_permission_bases_into_payload(
         remote_doc={
             "body": "remote",
             "tags": "",
-            "canread_base": 30,
+            "canread_base": 20,
             "canwrite_base": 20,
             "canread": '{"teams":[3],"users":[],"teamgroups":[]}',
             "canwrite": '{"teams":[],"users":[],"teamgroups":[]}',
@@ -801,7 +801,33 @@ def test_push_omits_undeclared_permissions(tmp_path, monkeypatch, configured):
 
 @pytest.mark.parametrize("field", ["read", "write"])
 @pytest.mark.parametrize("immutable_key", ["is_immutable", "base_is_immutable"])
-def test_locked_declared_permission_stops_before_upload_or_patch(
+def test_locked_declared_permission_at_current_level_is_omitted(
+    tmp_path, monkeypatch, configured, field, immutable_key
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "updated", **{field: "team"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            f"can{field}_base": 30,
+            f"can{field}_{immutable_key}": True,
+        }
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["body"] == "updated"
+    assert f"can{field}_base" not in client.saved_payload
+    assert f"can{field}" not in client.saved_payload
+    assert client.calls.count("patch") == 1
+
+
+@pytest.mark.parametrize("field", ["read", "write"])
+@pytest.mark.parametrize("immutable_key", ["is_immutable", "base_is_immutable"])
+def test_locked_declared_permission_change_stops_before_upload_or_patch(
     tmp_path, monkeypatch, configured, field, immutable_key
 ):
     doc = tmp_path / "report.md"
@@ -811,7 +837,7 @@ def test_locked_declared_permission_stops_before_upload_or_patch(
     client = FakeClient(
         remote_doc={
             "body": "remote",
-            f"can{field}_base": 30,
+            f"can{field}_base": 20,
             f"can{field}_{immutable_key}": True,
         }
     )
@@ -858,6 +884,33 @@ def test_non_owner_cannot_narrow_existing_entity_to_owner(
     assert client.calls == ["me", "get"]
     assert "patch" not in client.calls
     assert "upload" not in client.calls
+
+
+@pytest.mark.parametrize("field", ["read", "write"])
+def test_non_owner_can_retain_existing_owner_base(
+    tmp_path, monkeypatch, configured, field
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "updated", **{field: "owner"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "userid": 2,
+            f"can{field}_base": 10,
+            f"can{field}": '{"teams":[],"users":[1],"teamgroups":[]}',
+        },
+        identity={"userid": 1},
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["body"] == "updated"
+    assert f"can{field}_base" not in client.saved_payload
+    assert f"can{field}" not in client.saved_payload
+    assert client.calls.count("patch") == 1
 
 
 @pytest.mark.parametrize("field", ["read", "write"])
@@ -1010,8 +1063,8 @@ def test_permission_already_at_target_does_not_prompt_noninteractive(
     sync.push(doc, client, {})
 
     assert client.saved_payload is not None
-    assert client.saved_payload["canread_base"] == 50
-    assert client.saved_payload["canwrite_base"] == 40
+    assert "canread_base" not in client.saved_payload
+    assert "canwrite_base" not in client.saved_payload
 
 
 @pytest.mark.parametrize(

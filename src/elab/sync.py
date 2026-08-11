@@ -287,8 +287,11 @@ def push(
         client, entity, identity.get("team"), meta.get("category")
     )
     remote_doc = remote.get() if remote is not None else {}
-    for field in ("read", "write"):
-        if field in meta and (
+    permission_changes = _permission_changes(
+        meta, remote_doc, identity, eid is not None
+    )
+    for field, _, target, current in permission_changes:
+        if target != current and (
             remote_doc.get(f"can{field}_is_immutable")
             or remote_doc.get(f"can{field}_base_is_immutable")
         ):
@@ -297,10 +300,9 @@ def push(
                 f"remove '{field}:' or ask an admin"
             )
         if (
-            field in meta
-            and frontmatter.PERMISSION_LEVELS[meta[field]]
-            == frontmatter.PERMISSION_LEVELS["owner"]
-            and remote_doc.get("userid") is not None
+            target == frontmatter.PERMISSION_LEVELS["owner"]
+            and target < current
+            and eid is not None
             and remote_doc.get("userid") != identity.get("userid")
         ):
             raise RuntimeError(
@@ -327,9 +329,6 @@ def push(
             message,
         )
 
-    permission_changes = _permission_changes(
-        meta, remote_doc, identity, eid is not None
-    )
     if not dry_run:
         _confirm_permission_widening(permission_changes, assume_yes)
         if eid is not None:
@@ -391,8 +390,9 @@ def push(
         payload["title"] = meta["title"]
     if category is not None:
         payload["category"] = category
-    for field, _, target, _ in permission_changes:
-        payload[f"can{field}_base"] = target
+    for field, _, target, current in permission_changes:
+        if target != current:
+            payload[f"can{field}_base"] = target
 
     if saved and not force:
         latest = remote.get()
