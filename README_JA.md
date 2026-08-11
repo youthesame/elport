@@ -25,7 +25,7 @@ uv tool install git+https://github.com/youthesame/elport
 
 ```sh
 elport login labA                       # base_url を config に、api_key を OS キーリングに保存。対話式
-elport new "CRISPR titration"    # 記録を作成し、id 付きの report.md を雛形生成
+elport new "CRISPR titration"           # 記録を作成し、id 付きの report.md を雛形生成
 # ...report.md を編集し、fig1.png や data.csv を隣に置く...
 elport status                           # 何が同期されるか確認。送信はしない
 elport push                             # 参照ファイルをアップロードして本文を push
@@ -63,9 +63,9 @@ elport push                             # 参照ファイルをアップロー�
 
 ```markdown
 ---
-id: 42                   # 記録の ID。作成時に自動で埋まる
+id: 42                        # 記録の ID。作成時に自動で埋まる
 entity: experiments           # experiments か items。デフォルトは experiments
-title: "experiment title"     # 任意（未指定なら作成時にファイル名）
+title: "experiment title"     # 任意。未指定なら作成時にファイル名
 tags: [CRISPR, PCR]           # 任意。追加のみ（削除は Web UI で）
 category: Molecular Biology   # 任意。ID または既存のカテゴリ名（elport は作成しない）
 status: Running               # 任意。ID または既存のステータス名（elport は作成しない）

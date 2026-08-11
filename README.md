@@ -24,7 +24,7 @@ uploading, just write its eLabFTW URL. Code fences, inline code, and HTML commen
 
 ```sh
 elport login labA                       # store base_url (config) + api_key (OS keyring), interactively
-elport new "CRISPR titration"    # create the entity, scaffold report.md with id
+elport new "CRISPR titration"           # create the entity, scaffold report.md with id
 # ...edit report.md, drop fig1.png / data.csv next to it...
 elport status                           # what would sync? (read-only)
 elport push                             # upload references + push the body
@@ -62,9 +62,9 @@ A YAML block at the top (generated/completed on push if absent):
 
 ```markdown
 ---
-id: 42                   # entity ID (auto-filled on creation)
+id: 42                        # entity ID (auto-filled on creation)
 entity: experiments           # experiments | items (default experiments)
-title: "experiment title"     # optional (defaults to the file name on creation)
+title: "experiment title"     # optional; defaults to the file name on creation
 tags: [CRISPR, PCR]           # optional; add-only (remove tags in the Web UI)
 category: Molecular Biology   # optional; ID or existing category name (elport never creates categories)
 status: Running               # optional; ID or existing status name (elport never creates statuses)
