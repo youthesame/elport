@@ -51,6 +51,9 @@ elab push                             # 参照ファイルをアップロード�
 | `elab pull [<doc>]` | 本文を取得し、URL をローカルパスへ戻し、参照ファイルをダウンロードします。 |
 | `elab status [<doc>]` | 副作用なし。ローカルの変更、リモートの編集、アップロードされるファイル、モードを表示します。 |
 | `elab diff [<doc>]` | ソース形式の差分。デフォルトはローカルとリモートの比較で、`--base` を付けるとローカルと最後の push の比較になります。送信しません。 |
+| `elab merge [<doc>]` | コンフリクト後、`.base.md`/`.remote.md` サイドカーを `git merge-file` で `<doc>` に3-wayマージします。ローカルのみ・git は任意。 |
+| `elab comments [<doc>]` | リモートのコメントスレッドを表示します（端末のみ。本文には書き込みません）。 |
+| `elab comment [<doc>] "<text>"` | コメントを1件投稿します（編集・削除はしません。Web UI で行ってください）。 |
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | 記録を作成し、フロントマターの雛形を生成します。 |
 | `elab whoami [--profile <name>]` | 認証を確認し、ユーザーと現在のチームを表示します。 |
 | `elab login [<profile>]` | `base_url` を `config.toml` に、`api_key` を OS キーリングに保存します。入力はプロンプト式で、キーは画面に出ません。 |
@@ -60,6 +63,7 @@ elab push                             # 参照ファイルをアップロード�
 - `-n` / `--dry-run` … push のリハーサル。送信しません。
 - `--profile <name>` … 使うプロファイル。解決順はフロントマター、CLI、デフォルトの順です。
 - `-f` / `--force` … 変更済みのリモートに上書きで push します。Web 側の変更は失われます。
+- `-y` / `--yes` … push で `read`/`write` を `account`/`public` へ広げるときの確認を省略します。
 - `--entity experiments|items` … フロントマターの指定が優先されます。
 
 > pull でファイルを書き戻すときはベース名だけを使います。`assets/fig.png` のようなサブディレクトリ付きのパスは
@@ -77,6 +81,8 @@ title: "260806 experiment title"
 tags: [CRISPR, PCR]    # 任意。追加のみ
 category: Molecular Biology   # 任意。ID または既存のカテゴリ名
 profile: labA          # 任意。送信先プロファイル
+read: team             # 任意。owner | owner+admin | team | account | public
+write: owner           # 任意。同じ段階
 ---
 
 # 本文。Markdown で書き、HTML 断片も混ぜてよい ...
@@ -86,6 +92,9 @@ profile: labA          # 任意。送信先プロファイル
   置きません。
 - `title` と `category` は反映されます。`tags` は追加のみで、削除は Web UI で行います。フロントマターは本文を送る前に
   取り除かれます。
+- `read`/`write` は eLabFTW の**ベース公開範囲**を設定します。書いたときだけ反映し、無ければ権限には一切触れません。
+  送るのはベース段階のみなので、Web UI で設定した個別共有は保持されます。`account`/`public`（チーム外）へ広げるときは
+  確認します（`-y` で省略。非対話では `-y` が必要）。
 - フロントマターと CLI が profile や entity、elab_id で食い違ったら、elab は推測せずに停止します。
 
 ## コンフリクト
@@ -93,8 +102,9 @@ profile: labA          # 任意。送信先プロファイル
 本文は Web UI でも編集できるため、`push` はまず現在のリモートを保存済みのベースと比べます。
 
 - 変更なし … そのまま続行します。
-- 変更あり … 中止します。メッセージは `remote changed; use pull or --force` です。`elab pull` してから git のツールで
-  解消し、それから push します。elab は `git merge-file` で扱えるソース形式のファイルを出力します。
+- 変更あり … 中止します。メッセージは `remote changed; use pull or --force` です。elab は `<name>.base.md`（祖先）と
+  `<name>.remote.md` を出力するので、`elab merge` で `<doc>` に3-wayマージ（または手動でマージ）してから push します。
+  `<<<<<<<`/`>>>>>>>` マーカーが残った本文は push が拒否します。
 - このマシンにベースが無い … 中止します。先に `elab pull` するか、`--force` で上書きします。
 
 `--force` は Web 側の変更を捨てます。意図して使ってください。eLabFTW は Web UI から復元できるサーバー側の履歴を安全網

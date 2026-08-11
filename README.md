@@ -48,13 +48,16 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 | `elab pull [<doc>]` | Fetch the body, reverse-transclude URLs back to local paths, download referenced files. |
 | `elab status [<doc>]` | Side-effect-free: is local changed? was the remote edited? which files upload? what mode? |
 | `elab diff [<doc>]` | Source-form diff. Default local ↔ remote; `--base` for local ↔ last push. Never sends. |
+| `elab merge [<doc>]` | After a conflict, run `git merge-file` on the `.base.md`/`.remote.md` sidecars into `<doc>`. Local-only; git optional. |
+| `elab comments [<doc>]` | Print the remote comment thread (terminal only; never written into the body). |
+| `elab comment [<doc>] "<text>"` | Post one comment to the entity (no edit/delete — use the Web UI). |
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Create an entity + scaffold front matter. |
 | `elab whoami [--profile <name>]` | Auth check; shows user and active team. |
 | `elab login [<profile>]` | Store base_url → `config.toml`, api_key → OS keyring. Prompts; the key is not echoed. |
 
 Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>` (resolution: front matter → CLI → default),
-`-f/--force` (push over a changed remote — the Web-side change is lost), `--entity {experiments,items}` (front
-matter wins).
+`-f/--force` (push over a changed remote — the Web-side change is lost), `-y/--yes` (push: skip the confirmation when
+widening `read`/`write` to `account`/`public`), `--entity {experiments,items}` (front matter wins).
 
 > Reverse transclusion (pull) writes files back by **basename only** — a subdirectory path like `assets/fig.png` is
 > flattened to `fig.png`.
@@ -71,6 +74,8 @@ title: "260806 experiment title"
 tags: [CRISPR, PCR]    # optional; add-only
 category: Molecular Biology   # optional (ID or existing category name)
 profile: labA          # optional; destination profile
+read: team             # optional; owner | owner+admin | team | account | public
+write: owner           # optional; same scale
 ---
 
 # Body — Markdown, inline HTML allowed ...
@@ -79,6 +84,9 @@ profile: labA          # optional; destination profile
 - Holds **only** `elab_id` + human metadata + optional `profile`. Base and hashes live in state, not here.
 - `title`/`category` are reflected; **`tags` are add-only** (remove tags in the Web UI). Front matter is stripped
   before the body is sent.
+- `read`/`write` set the eLabFTW **base visibility**, and only when present — omit them and elab leaves permissions
+  untouched. Only the base level is sent, so individual grants you set in the Web UI are preserved. Widening to
+  `account`/`public` (i.e. beyond your team) asks for confirmation (`-y` skips it; a non-interactive run needs `-y`).
 - If front matter and CLI disagree on profile / entity / elab_id, elab **stops** rather than guessing.
 
 ## Conflicts
@@ -86,8 +94,9 @@ profile: labA          # optional; destination profile
 Since you may edit the body in the Web UI, `push` compares the current remote against the stored base first:
 
 - **unchanged** → proceeds.
-- **changed** → aborts (`remote changed; use pull or --force`). `elab pull`, reconcile with your git tooling (elab
-  emits source-form files for `git merge-file`), then push.
+- **changed** → aborts (`remote changed; use pull or --force`). elab writes `<name>.base.md` (ancestor) and
+  `<name>.remote.md`; run `elab merge` to 3-way them into your file (or merge them by hand), then push. push refuses
+  a body that still has `<<<<<<<`/`>>>>>>>` markers.
 - **no base on this machine** → aborts; `elab pull` first, or `--force` to overwrite blind.
 
 `--force` discards the Web-side change — use it deliberately. eLabFTW keeps server-side history recoverable from the
