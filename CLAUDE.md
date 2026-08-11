@@ -1,6 +1,6 @@
-# elab — project guide for AI agents
+# elport — project guide for AI agents
 
-`elab` is a **git-like sync CLI for eLabFTW**. It push/pulls locally-written lab notes (Markdown/HTML + referenced
+`elport` is a **git-like sync CLI for eLabFTW**. It push/pulls locally-written lab notes (Markdown/HTML + referenced
 files) to/from eLabFTW entities. **Local is the source of truth.**
 
 ## Documentation map (what is authoritative for what)
@@ -15,7 +15,7 @@ files) to/from eLabFTW entities. **Local is the source of truth.**
 - **Measured eLabFTW API facts = [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** (observation log of the external
   world; update only when the target instance version changes).
 - **User-facing usage = [README.md](README.md)** (commands, front matter, config).
-- **Driving elab from an agent = [skills/elab/SKILL.md](skills/elab/SKILL.md)** (for the downstream operating
+- **Driving elport from an agent = [skills/elport/SKILL.md](skills/elport/SKILL.md)** (for the downstream operating
   context).
 
 Design principles (DESIGN §2.1): single engine / markdown-native / explicit-and-simple / secret isolation. Keep

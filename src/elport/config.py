@@ -18,7 +18,7 @@ PLAINTEXT_WARNING = "warning: using plaintext api_key (chmod 600 recommended)"
 
 
 def config_path() -> Path:
-    return Path.home() / ".config/elab/config.toml"
+    return Path.home() / ".config/elport/config.toml"
 
 
 def _read(path: Path) -> dict:
@@ -45,7 +45,7 @@ def load(project: Path, doc_dir: Path) -> dict:
     data = _read(config_path())
     user_profile_names = set(data.get("profiles", {}))
     seen: set[Path] = set()
-    for p in (project / ".elab.toml", doc_dir / ".elab.toml"):
+    for p in (project / ".elport.toml", doc_dir / ".elport.toml"):
         resolved = p.resolve()
         if resolved in seen:
             continue
@@ -80,7 +80,7 @@ def _profile_name(data: dict, profile: str | None, meta: dict) -> str:
     profiles = data.get("profiles", {})
     if not profiles or "default" in profiles:
         return "default"
-    raise ValueError("no default profile set; run 'elab profile use <name>'")
+    raise ValueError("no default profile set; run 'elport profile use <name>'")
 
 
 def base_target(data: dict, profile: str | None, meta: dict) -> tuple[str, str, bool]:
@@ -88,7 +88,7 @@ def base_target(data: dict, profile: str | None, meta: dict) -> tuple[str, str, 
     prof = data.get("profiles", {}).get(name, {})
     url = os.getenv("ELABFTW_BASE_URL") or prof.get("base_url")
     if not url:
-        raise ValueError(f"base_url unavailable for profile {name}; run elab login")
+        raise ValueError(f"base_url unavailable for profile {name}; run elport login")
     return name, url.rstrip("/"), prof.get("verify_ssl", True)
 
 
@@ -102,7 +102,7 @@ def resolve(data: dict, profile: str | None, meta: dict) -> tuple[str, str, str,
     prof = data.get("profiles", {}).get(name, {})
     url = prof.get("base_url")
     try:
-        key = keyring.get_password("elab", name)
+        key = keyring.get_password("elport", name)
     except KeyringError:
         fallback = _read(config_path()).get("profiles", {}).get(name, {})
         url = fallback.get("base_url")
@@ -110,12 +110,14 @@ def resolve(data: dict, profile: str | None, meta: dict) -> tuple[str, str, str,
         if not url or not key:
             raise ValueError(
                 "keyring unavailable; set ELABFTW_BASE_URL and "
-                "ELABFTW_API_KEY together, or run elab login"
+                "ELABFTW_API_KEY together, or run elport login"
             ) from None
         print(PLAINTEXT_WARNING, file=sys.stderr)
         return name, url.rstrip("/"), key, fallback.get("verify_ssl", True)
     if not url or not key:
-        raise ValueError(f"credentials unavailable for profile {name}; run elab login")
+        raise ValueError(
+            f"credentials unavailable for profile {name}; run elport login"
+        )
     return name, url.rstrip("/"), key, prof.get("verify_ssl", True)
 
 
@@ -130,7 +132,7 @@ def login(name: str, url: str, api_key: str) -> None:
         data["default_profile"] = name
     _atomic_write(p, tomli_w.dumps(data))
     try:
-        keyring.set_password("elab", name, api_key)
+        keyring.set_password("elport", name, api_key)
     except KeyringError:
         profile["api_key"] = api_key
         _atomic_write(p, tomli_w.dumps(data))
@@ -144,7 +146,7 @@ def logout(name: str) -> bool:
     """
     removed = False
     try:
-        keyring.delete_password("elab", name)
+        keyring.delete_password("elport", name)
         removed = True
     except KeyringError:
         pass

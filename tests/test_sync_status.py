@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from _sync_harness import FakeClient, saved_state, write_doc
 
-from elab import sync
+from elport import sync
 
 
 def test_status_distinguishes_missing_base(tmp_path, monkeypatch, configured, capsys):
@@ -38,7 +38,7 @@ def test_status_degrades_remote_fields_when_offline(
 
     lines = capsys.readouterr().out.splitlines()
     assert lines[:2] == [
-        'local: dirty (use "elab push")',
+        'local: dirty (use "elport push")',
         "uploads local: data.csv",
     ]
     assert "uploads reuse: unavailable (offline?)" in lines
@@ -82,8 +82,8 @@ def test_status_suggests_actions_for_local_and_remote_changes(
     sync.status(doc, client, {})
 
     lines = capsys.readouterr().out.splitlines()
-    assert 'local: dirty (use "elab push")' in lines
-    assert 'remote: changed (use "elab pull")' in lines
+    assert 'local: dirty (use "elport push")' in lines
+    assert 'remote: changed (use "elport pull")' in lines
 
 
 def test_status_prints_pending_declared_permission_change(

@@ -1,7 +1,7 @@
 import pytest
 import requests
 
-from elab.client import REQUEST_TIMEOUT, Client
+from elport.client import REQUEST_TIMEOUT, Client
 
 
 class _Response:
@@ -51,7 +51,7 @@ def test_request_uses_bounded_timeout(monkeypatch):
         captured.update(kwargs)
         return _Response({})
 
-    monkeypatch.setattr("elab.client.requests.request", request)
+    monkeypatch.setattr("elport.client.requests.request", request)
 
     Client("https://example.org", "key").request("GET", "/users/me")
 
@@ -62,7 +62,7 @@ def test_request_reports_connection_failure_without_internal_details(monkeypatch
     def request(*args, **kwargs):
         raise requests.exceptions.ConnectionError("boom")
 
-    monkeypatch.setattr("elab.client.requests.request", request)
+    monkeypatch.setattr("elport.client.requests.request", request)
 
     with pytest.raises(OSError) as error:
         Client("https://example.org", "key").request("GET", "/users/me")
@@ -100,7 +100,7 @@ def test_entity_api_paths_reject_traversal_id_before_request(
         lambda *args, **kwargs: pytest.fail("request should not be sent"),
     )
 
-    with pytest.raises(ValueError, match="elab_id must be a positive integer"):
+    with pytest.raises(ValueError, match="id must be a positive integer"):
         call(client, attachment)
 
 
@@ -113,7 +113,7 @@ def test_entity_api_paths_reject_other_non_positive_integer_ids(monkeypatch, eid
         lambda *args, **kwargs: pytest.fail("request should not be sent"),
     )
 
-    with pytest.raises(ValueError, match="elab_id must be a positive integer"):
+    with pytest.raises(ValueError, match="id must be a positive integer"):
         client.get("experiments", eid)
 
 

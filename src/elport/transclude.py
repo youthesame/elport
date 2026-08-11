@@ -256,7 +256,7 @@ def _warn_reference_definitions(text: str, doc_dir: Path, ignore: list[str]) -> 
         if candidate is not None:
             print(
                 "warning: reference-style link not uploaded "
-                f"(elab rewrites inline links only): {destination}",
+                f"(elport rewrites inline links only): {destination}",
                 file=sys.stderr,
             )
 

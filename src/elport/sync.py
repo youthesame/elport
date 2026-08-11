@@ -20,7 +20,7 @@ from . import frontmatter, state
 from .transclude import download_url, plan, replace_spans, reverse, safe_name
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
-CONTROL_FILENAMES = {".elab.toml", ".elabignore"}
+CONTROL_FILENAMES = {".elport.toml", ".elportignore"}
 PERMISSION_AUDIENCES = {
     "account": "everyone with an account",
     "public": "everyone incl. anonymous; no login required",
@@ -66,7 +66,7 @@ def _reversible_uploads(uploads: list[dict]) -> list[dict]:
 
 
 def ignore_patterns(doc_dir: Path, config: dict) -> list[str]:
-    ignore_file = doc_dir / ".elabignore"
+    ignore_file = doc_dir / ".elportignore"
     file_patterns = (
         ignore_file.read_text(encoding="utf-8").splitlines()
         if ignore_file.exists()
@@ -169,13 +169,13 @@ def _remote_tags(remote: dict) -> set[str]:
 def _document(path: Path, config: dict) -> tuple[dict, str, str, object]:
     meta, body = frontmatter.parse(path.read_text(encoding="utf-8"))
     entity = meta.get("entity", config.get("entity", "experiments"))
-    return meta, body, entity, meta.get("elab_id")
+    return meta, body, entity, meta.get("id")
 
 
 def comments(path: Path, client, config: dict, profile=None) -> None:
     _, _, entity, eid = _document(path, config)
     if not eid:
-        raise RuntimeError("elab_id is required")
+        raise RuntimeError("id is required")
     thread = client.comments(entity, eid)
     if not thread:
         print("no comments")
@@ -194,7 +194,7 @@ def comment(path: Path, client, config: dict, profile=None, text="") -> None:
         raise RuntimeError("comment text is empty")
     _, _, entity, eid = _document(path, config)
     if not eid:
-        raise RuntimeError("elab_id is required")
+        raise RuntimeError("id is required")
     client.add_comment(entity, eid, text)
     print(f"commented on {entity}/{eid}")
 
@@ -420,8 +420,8 @@ def push(
 
     if not eid:
         created = client.create(entity, meta.get("title", path.stem))
-        eid = frontmatter.parse_server_elab_id(created.get("id"))
-        meta["elab_id"] = eid
+        eid = frontmatter.parse_server_id(created.get("id"))
+        meta["id"] = eid
         meta["entity"] = entity
         meta["profile"] = resolved_profile
         frontmatter.atomic_write(path, frontmatter.render(meta, body))
@@ -539,12 +539,12 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
         _promote_pending_remote(base_url, entity, eid)
         base.unlink()
         remote.unlink()
-        print(f"marked resolved: {path}; run 'elab push'")
+        print(f"marked resolved: {path}; run 'elport push'")
         return
     if shutil.which("git") is None:
         raise RuntimeError(
             f"git is not installed; merge {base} and {remote} by hand, "
-            "then run 'elab merge --resolved'"
+            "then run 'elport merge --resolved'"
         )
 
     result = subprocess.run(
@@ -559,11 +559,11 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
     base.unlink()
     remote.unlink()
     if result.returncode == 0:
-        print(f"merged cleanly into {path}; review and run 'elab push'")
+        print(f"merged cleanly into {path}; review and run 'elport push'")
         return
     raise RuntimeError(
         f"{result.returncode} conflict(s) remain in {path}; "
-        "resolve the markers, then run 'elab push'"
+        "resolve the markers, then run 'elport push'"
     )
 
 
@@ -759,7 +759,7 @@ def _place_attachments(
 def pull(path: Path, client, config: dict, profile=None) -> None:
     meta, body, entity, eid = _document(path, config)
     if not eid:
-        raise RuntimeError("elab_id is required")
+        raise RuntimeError("id is required")
     _, base_url, _, _ = config_module.resolve(config, profile, meta)
     remote = Remote(client, entity, eid, base_url)
     saved = state.load(base_url, entity, str(eid))
@@ -853,13 +853,13 @@ def status(path: Path, client, config: dict, profile=None) -> None:
     elif body == saved.get("local_base", ""):
         print("local: clean")
     else:
-        print('local: dirty (use "elab push")')
+        print('local: dirty (use "elport push")')
     print("uploads local:", ", ".join(path.name for path in files) or "none")
 
     if remote is None:
         print("uploads new:", ", ".join(path.name for path in files) or "none")
         print("uploads reuse: none")
-        print("remote: no elab_id (comparison unavailable)")
+        print("remote: no id (comparison unavailable)")
         return
     try:
         uploads = remote.uploads()
@@ -897,7 +897,7 @@ def status(path: Path, client, config: dict, profile=None) -> None:
     elif remote_doc.get("body", "") == saved.get("remote_base", ""):
         print("remote: unchanged")
     else:
-        print('remote: changed (use "elab pull")')
+        print('remote: changed (use "elport pull")')
 
 
 def _normalize_remote_diff(text: str) -> str:
@@ -921,7 +921,7 @@ def diff(path: Path, client, config: dict, profile=None, base_only=False) -> Non
         fromfile = "base"
     else:
         if remote is None:
-            raise RuntimeError("elab_id is required")
+            raise RuntimeError("id is required")
         remote_doc = remote.get()
         other = reverse(remote_doc.get("body", ""), remote.uploads(), remote.base_url)[
             0

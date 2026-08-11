@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from _sync_harness import FakeClient, saved_state, write_doc
 
-from elab import frontmatter, sync
+from elport import frontmatter, sync
 
 
 @pytest.mark.parametrize("resolved", [False, True])
@@ -38,7 +38,7 @@ def test_merge_cleanly_updates_document_and_deletes_sidecars(tmp_path, capsys):
     assert not base.exists()
     assert not remote.exists()
     assert capsys.readouterr().out == (
-        f"merged cleanly into {doc}; review and run 'elab push'\n"
+        f"merged cleanly into {doc}; review and run 'elport push'\n"
     )
 
 
@@ -144,7 +144,7 @@ def test_resolved_merge_without_git_promotes_pending_remote_and_allows_regular_p
     }
     assert not (tmp_path / "report.base.md").exists()
     assert not (tmp_path / "report.remote.md").exists()
-    assert capsys.readouterr().out == f"marked resolved: {doc}; run 'elab push'\n"
+    assert capsys.readouterr().out == f"marked resolved: {doc}; run 'elport push'\n"
 
     sync.push(doc, client, {})
 
@@ -195,7 +195,7 @@ def test_resolved_merge_regular_push_reconflicts_if_remote_changed_again(
     remote_meta, sidecar_body = frontmatter.parse(
         (tmp_path / "report.remote.md").read_text(encoding="utf-8")
     )
-    assert remote_meta["elab_id"] == 1
+    assert remote_meta["id"] == 1
     assert sidecar_body == newer_remote_body
 
 
@@ -232,7 +232,7 @@ def test_conflicted_merge_promotes_pending_remote_and_allows_regular_push(
 
     message = str(exc_info.value)
     assert message == (
-        f"1 conflict(s) remain in {doc}; resolve the markers, then run 'elab push'"
+        f"1 conflict(s) remain in {doc}; resolve the markers, then run 'elport push'"
     )
     assert "--force" not in message
     merged = doc.read_text(encoding="utf-8")
@@ -277,7 +277,7 @@ def test_conflicted_merge_regular_push_reconflicts_if_remote_changed_again(
 
     with pytest.raises(RuntimeError, match="remote changed"):
         sync.push(doc, client, {})
-    with pytest.raises(RuntimeError, match="conflict.*run 'elab push'"):
+    with pytest.raises(RuntimeError, match="conflict.*run 'elport push'"):
         sync.merge(doc, {})
 
     assert not (tmp_path / "report.base.md").exists()
@@ -297,7 +297,7 @@ def test_conflicted_merge_regular_push_reconflicts_if_remote_changed_again(
     remote_meta, sidecar_body = frontmatter.parse(
         (tmp_path / "report.remote.md").read_text(encoding="utf-8")
     )
-    assert remote_meta["elab_id"] == 1
+    assert remote_meta["id"] == 1
     assert sidecar_body == newer_remote_body
 
 
@@ -346,7 +346,7 @@ def test_merge_without_git_leaves_document_untouched(tmp_path, monkeypatch, caps
         RuntimeError,
         match=(
             r"merge .*report\.base\.md.*report\.remote\.md by hand, then run "
-            r"'elab merge --resolved'"
+            r"'elport merge --resolved'"
         ),
     ):
         sync.merge(doc, {})

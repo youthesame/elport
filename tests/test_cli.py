@@ -4,7 +4,7 @@ from pathlib import Path
 import keyring.errors
 import pytest
 
-from elab import cli, config, frontmatter, sync
+from elport import cli, config, frontmatter, sync
 
 
 class NewClient:
@@ -42,7 +42,7 @@ def test_logout_removes_plaintext_api_key_and_calls_keyring(tmp_path, monkeypatc
 
     assert config.logout("lab") is True
 
-    assert calls == [("elab", "lab")]
+    assert calls == [("elport", "lab")]
     assert config._read(user)["profiles"]["lab"] == {"base_url": "https://e.example"}
 
 
@@ -119,7 +119,7 @@ def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch, cap
 
     meta, body = frontmatter.parse(output.read_text())
     assert client.created == [("experiments", "Experiment")]
-    assert meta["elab_id"] == 42
+    assert meta["id"] == 42
     assert meta["title"] == "Experiment"
     assert meta["profile"] == "test"
     assert body == ""
@@ -193,15 +193,15 @@ def test_non_list_non_scalar_frontmatter_tags_are_rejected(tags_yaml):
         "{value: 42}",
     ],
 )
-def test_frontmatter_rejects_non_positive_integer_elab_id(value):
-    with pytest.raises(ValueError, match="elab_id must be a positive integer"):
-        frontmatter.parse(f"---\nelab_id: {value}\n---\nBody\n")
+def test_frontmatter_rejects_non_positive_integer_id(value):
+    with pytest.raises(ValueError, match="id must be a positive integer"):
+        frontmatter.parse(f"---\nid: {value}\n---\nBody\n")
 
 
-def test_frontmatter_accepts_positive_integer_elab_id():
-    meta, body = frontmatter.parse("---\nelab_id: 42\n---\nBody\n")
+def test_frontmatter_accepts_positive_integer_id():
+    meta, body = frontmatter.parse("---\nid: 42\n---\nBody\n")
 
-    assert meta["elab_id"] == 42
+    assert meta["id"] == 42
     assert body == "Body\n"
 
 
@@ -212,7 +212,7 @@ def test_frontmatter_rejects_unknown_keys():
 
 def test_frontmatter_accepts_only_allowed_keys():
     text = """---
-elab_id: 42
+id: 42
 entity: experiments
 title: Test
 tags: [one]
@@ -235,7 +235,7 @@ def test_frontmatter_rejects_duplicate_yaml_keys():
     with pytest.raises(
         ValueError, match="invalid frontmatter YAML: found duplicate key"
     ):
-        frontmatter.parse("---\nelab_id: 1\nelab_id: 2\n---\nBody\n")
+        frontmatter.parse("---\nid: 1\nid: 2\n---\nBody\n")
 
 
 @pytest.mark.parametrize("key", ["read", "write"])
@@ -289,7 +289,7 @@ def test_new_rejects_invalid_server_id_before_followup_requests(tmp_path, monkey
     assert cli.main(["new", "Experiment", "-o", str(output)]) == 1
 
     meta, _ = frontmatter.parse(output.read_text(encoding="utf-8"))
-    assert "elab_id" not in meta
+    assert "id" not in meta
 
 
 def test_invalid_frontmatter_yaml_is_reported_as_cli_error(tmp_path, capsys):
@@ -376,7 +376,7 @@ def test_new_persists_created_id_before_state_initialization_failure(
     assert cli.main(["new", "Experiment", "-o", str(output)]) == 1
 
     meta, body = frontmatter.parse(output.read_text(encoding="utf-8"))
-    assert meta["elab_id"] == 42
+    assert meta["id"] == 42
     assert meta["profile"] == "test"
     assert body == ""
 
@@ -476,9 +476,7 @@ def test_target_rejects_invalid_entity_before_client_use(
     assert "entity must be one of: experiments, items" in capsys.readouterr().err
 
 
-def test_status_without_elab_id_does_not_resolve_credentials(
-    tmp_path, monkeypatch, capsys
-):
+def test_status_without_id_does_not_resolve_credentials(tmp_path, monkeypatch, capsys):
     document = tmp_path / "report.md"
     document.write_text("local body\n", encoding="utf-8")
     monkeypatch.setattr(cli.config, "load", lambda *args: {})
@@ -489,14 +487,12 @@ def test_status_without_elab_id_does_not_resolve_credentials(
     )
 
     assert cli.main(["status", str(document)]) == 0
-    assert "remote: no elab_id" in capsys.readouterr().out
+    assert "remote: no id" in capsys.readouterr().out
 
 
 def test_base_diff_does_not_resolve_credentials(tmp_path, monkeypatch, capsys):
     document = tmp_path / "report.md"
-    document.write_text(
-        "---\nelab_id: 42\nprofile: lab\n---\nchanged\n", encoding="utf-8"
-    )
+    document.write_text("---\nid: 42\nprofile: lab\n---\nchanged\n", encoding="utf-8")
     monkeypatch.setattr(
         cli.config,
         "load",
@@ -521,7 +517,7 @@ def test_status_prints_local_result_when_credentials_are_unavailable(
     tmp_path, monkeypatch, capsys
 ):
     document = tmp_path / "report.md"
-    document.write_text("---\nelab_id: 42\nprofile: lab\n---\nbody\n", encoding="utf-8")
+    document.write_text("---\nid: 42\nprofile: lab\n---\nbody\n", encoding="utf-8")
     monkeypatch.setattr(
         cli.config,
         "load",
@@ -663,7 +659,7 @@ def test_merge_loads_config_without_creating_client(
 
 def test_merge_threads_cli_entity_override(tmp_path, monkeypatch):
     document = tmp_path / "report.md"
-    document.write_text("---\nelab_id: 42\n---\nbody\n", encoding="utf-8")
+    document.write_text("---\nid: 42\n---\nbody\n", encoding="utf-8")
     data = {}
     calls = []
     monkeypatch.setattr(cli.config, "load", lambda *args: data)
@@ -676,9 +672,7 @@ def test_merge_threads_cli_entity_override(tmp_path, monkeypatch):
 
 def test_merge_rejects_entity_mismatch_as_cli_error(tmp_path, monkeypatch, capsys):
     document = tmp_path / "report.md"
-    document.write_text(
-        "---\nelab_id: 42\nentity: items\n---\nbody\n", encoding="utf-8"
-    )
+    document.write_text("---\nid: 42\nentity: items\n---\nbody\n", encoding="utf-8")
     monkeypatch.setattr(cli.config, "load", lambda *args: {})
     monkeypatch.setattr(
         cli,
@@ -718,7 +712,7 @@ def test_merge_without_git_is_reported_as_cli_error(tmp_path, monkeypatch, capsy
     assert str(base) in error
     assert str(remote) in error
     assert "by hand" in error
-    assert "elab merge --resolved" in error
+    assert "elport merge --resolved" in error
     assert "Traceback" not in error
     assert document.read_text(encoding="utf-8") == "local\n"
 
@@ -728,7 +722,7 @@ def test_merge_without_git_is_reported_as_cli_error(tmp_path, monkeypatch, capsy
 )
 def test_whoami_prints_auth_status_block(monkeypatch, capsys, can_write, key_label):
     class IdentityClient:
-        root = "https://elab-a.example.org"
+        root = "https://lab-a.example.org"
         key = "42-secret"
 
         def me(self):
@@ -765,7 +759,7 @@ def test_whoami_prints_auth_status_block(monkeypatch, capsys, can_write, key_lab
     assert cli.main(["whoami"]) == 0
     output = capsys.readouterr().out
     assert output == (
-        "✓ elab-a.example.org — Ada Lovelace (uid 9)\n"
+        "✓ lab-a.example.org — Ada Lovelace (uid 9)\n"
         "  Profile   labA\n"
         "  Email     ada@example.org\n"
         "  Team      Lab A (#7) · owner\n"
@@ -778,7 +772,7 @@ def test_whoami_prints_auth_status_block(monkeypatch, capsys, can_write, key_lab
 
 def test_whoami_omits_missing_optional_fields(monkeypatch, capsys):
     class IdentityClient:
-        root = "https://elab-a.example.org"
+        root = "https://lab-a.example.org"
         key = "unprefixed"
 
         def me(self):
@@ -797,7 +791,7 @@ def test_whoami_omits_missing_optional_fields(monkeypatch, capsys):
 
     assert cli.main(["whoami"]) == 0
     assert capsys.readouterr().out == (
-        "✓ elab-a.example.org — Ada Lovelace\n  Profile   labA\n"
+        "✓ lab-a.example.org — Ada Lovelace\n  Profile   labA\n"
     )
 
 
@@ -808,15 +802,15 @@ def test_profile_list_marks_default(monkeypatch, capsys):
         lambda *args: {
             "default_profile": "labA",
             "profiles": {
-                "labA": {"base_url": "https://elab-a.example.org"},
-                "labB": {"base_url": "https://elab-b.example.org"},
+                "labA": {"base_url": "https://lab-a.example.org"},
+                "labB": {"base_url": "https://lab-b.example.org"},
             },
         },
     )
 
     assert cli.main(["profile"]) == 0
     assert capsys.readouterr().out == (
-        "* labA  https://elab-a.example.org\n  labB  https://elab-b.example.org\n"
+        "* labA  https://lab-a.example.org\n  labB  https://lab-b.example.org\n"
     )
 
 
@@ -825,7 +819,7 @@ def test_profile_list_reports_when_empty(monkeypatch, capsys):
 
     assert cli.main(["profile", "list"]) == 0
     assert capsys.readouterr().out == (
-        "no profiles configured; run 'elab login <name>'\n"
+        "no profiles configured; run 'elport login <name>'\n"
     )
 
 
@@ -846,7 +840,7 @@ def test_profile_use_sets_default(monkeypatch, capsys):
 @pytest.mark.parametrize(
     ("argv", "message"),
     [
-        (["profile", "use"], "elab profile use requires a profile name"),
+        (["profile", "use"], "elport profile use requires a profile name"),
         (["profile", "use", "missing"], "no such profile: missing"),
     ],
 )

@@ -4,7 +4,7 @@ import hashlib
 
 from _sync_harness import FakeClient, saved_state, write_doc
 
-from elab import frontmatter, sync
+from elport import frontmatter, sync
 
 
 def test_identical_files_with_same_basename_share_one_upload(

@@ -1,5 +1,5 @@
 [project]
-name = "elab"
+name = "elport"
 version = "0.1.0"
 description = "Git-like sync CLI for eLabFTW (local-first push/pull of Markdown/HTML lab notes)"
 requires-python = ">=3.10"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-elab = "elab.cli:main"
+elport = "elport.cli:main"
 
 [build-system]
 requires = ["hatchling"]

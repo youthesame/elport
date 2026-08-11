@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from _sync_harness import FakeClient, saved_state, write_doc
 
-from elab import frontmatter, sync
+from elport import frontmatter, sync
 
 
 def test_push_folds_declared_permission_bases_into_payload(

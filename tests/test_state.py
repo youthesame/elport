@@ -1,4 +1,4 @@
-from elab import state
+from elport import state
 
 
 def test_load_treats_missing_and_corrupt_state_as_unavailable(tmp_path, monkeypatch):

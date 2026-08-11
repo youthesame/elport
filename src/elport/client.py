@@ -4,13 +4,13 @@ from pathlib import Path
 
 import requests
 
-from .frontmatter import validate_elab_id
+from .frontmatter import validate_id
 
 REQUEST_TIMEOUT = (10, 120)
 
 
 def _entity_path(entity: str, eid: object, suffix: str = "") -> str:
-    return f"/{entity}/{validate_elab_id(eid)}{suffix}"
+    return f"/{entity}/{validate_id(eid)}{suffix}"
 
 
 class Client:

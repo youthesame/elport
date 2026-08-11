@@ -34,4 +34,4 @@ wheels/
 
 # Secrets / local config
 .env
-.elab.toml
+.elport.toml

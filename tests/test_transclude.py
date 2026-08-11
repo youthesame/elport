@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from elab.transclude import (
+from elport.transclude import (
     download_url,
     extract,
     parse_download_url,

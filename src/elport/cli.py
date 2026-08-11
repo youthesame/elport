@@ -16,11 +16,11 @@ ENTITIES = ("experiments", "items")
 
 _EXAMPLES = """\
 examples:
-  elab login                       store credentials for the default profile
-  elab new "Cell viability assay"  create a remote entity and report.md
-  elab push                        upload report.md (add -n to preview first)
-  elab status                      show local/remote sync state
-  elab pull                        download the remote body and attachments
+  elport login                       store credentials for the default profile
+  elport new "Cell viability assay"  create a remote entity and report.md
+  elport push                        upload report.md (add -n to preview first)
+  elport status                      show local/remote sync state
+  elport pull                        download the remote body and attachments
 """
 
 
@@ -33,13 +33,13 @@ def _add_target_options(parser: argparse.ArgumentParser) -> None:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="elab",
+        prog="elport",
         description="git-like sync CLI for eLabFTW (local is authoritative)",
         epilog=_EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {_pkg_version('elab')}"
+        "--version", action="version", version=f"%(prog)s {_pkg_version('elport')}"
     )
     commands = parser.add_subparsers(dest="cmd", required=True)
 
@@ -240,8 +240,8 @@ def _new(args) -> None:
     meta["profile"] = resolved_profile
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
     created = client.create(args.entity, args.title)
-    eid = frontmatter.parse_server_elab_id(created.get("id"))
-    meta["elab_id"] = eid
+    eid = frontmatter.parse_server_id(created.get("id"))
+    meta["id"] = eid
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
     remote = client.get(args.entity, eid)
     state.save(
@@ -345,14 +345,14 @@ def _profile(action: str, name: str | None) -> None:
     profiles = data.get("profiles", {})
     if action == "use":
         if not name:
-            raise ValueError("elab profile use requires a profile name")
+            raise ValueError("elport profile use requires a profile name")
         if name not in profiles:
             raise ValueError(f"no such profile: {name}")
         config.set_default(name)
         print(f"default profile is now {name}")
         return
     if not profiles:
-        print("no profiles configured; run 'elab login <name>'")
+        print("no profiles configured; run 'elport login <name>'")
         return
     default = data.get("default_profile")
     for profile_name, values in profiles.items():

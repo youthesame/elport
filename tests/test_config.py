@@ -3,7 +3,7 @@ import os
 import keyring.errors
 import pytest
 
-from elab import config
+from elport import config
 
 
 def test_load_merges_ignore_across_all_layers(tmp_path, monkeypatch):
@@ -13,10 +13,10 @@ def test_load_merges_ignore_across_all_layers(tmp_path, monkeypatch):
     project.mkdir()
     document.mkdir()
     user.write_text('entity = "experiments"\nignore = ["*.key"]\n', encoding="utf-8")
-    (project / ".elab.toml").write_text(
+    (project / ".elport.toml").write_text(
         'entity = "items"\nignore = ["*.zip"]\n', encoding="utf-8"
     )
-    (document / ".elab.toml").write_text(
+    (document / ".elport.toml").write_text(
         'entity = "experiments"\nignore = ["scratch/**"]\n', encoding="utf-8"
     )
     monkeypatch.setattr(config, "config_path", lambda: user)
@@ -32,7 +32,7 @@ def test_load_does_not_apply_same_project_and_document_layer_twice(
 ):
     user = tmp_path / "user.toml"
     user.write_text('ignore = ["user"]\n', encoding="utf-8")
-    (tmp_path / ".elab.toml").write_text('ignore = ["local"]\n', encoding="utf-8")
+    (tmp_path / ".elport.toml").write_text('ignore = ["local"]\n', encoding="utf-8")
     monkeypatch.setattr(config, "config_path", lambda: user)
 
     assert config.load(tmp_path, tmp_path)["ignore"] == ["user", "local"]
@@ -47,11 +47,11 @@ def test_load_ignores_protected_user_profile_overrides(tmp_path, monkeypatch, ca
         '[profiles.lab]\nbase_url = "https://e.example"\nverify_ssl = true\n',
         encoding="utf-8",
     )
-    (project / ".elab.toml").write_text(
+    (project / ".elport.toml").write_text(
         '[profiles.lab]\nbase_url = "https://attacker.example"\nverify_ssl = false\n',
         encoding="utf-8",
     )
-    (document / ".elab.toml").write_text(
+    (document / ".elport.toml").write_text(
         '[profiles.lab]\nbase_url = "https://other-attacker.example"\n'
         "verify_ssl = false\n",
         encoding="utf-8",
@@ -86,10 +86,10 @@ def test_load_allows_new_profile_in_project_and_document_layers(
     document = project / "notes"
     document.mkdir(parents=True)
     user.write_text('[profiles.lab]\nbase_url = "https://e.example"\n')
-    (project / ".elab.toml").write_text(
+    (project / ".elport.toml").write_text(
         '[profiles.new]\nbase_url = "https://new.example"\nverify_ssl = true\n'
     )
-    (document / ".elab.toml").write_text("[profiles.new]\nverify_ssl = false\n")
+    (document / ".elport.toml").write_text("[profiles.new]\nverify_ssl = false\n")
     monkeypatch.setattr(config, "config_path", lambda: user)
 
     loaded = config.load(project, document)
@@ -321,6 +321,6 @@ def test_profile_name_keeps_default_happy_paths(data, expected):
 
 def test_profile_name_requires_default_for_named_profiles():
     with pytest.raises(
-        ValueError, match="no default profile set; run 'elab profile use <name>'"
+        ValueError, match="no default profile set; run 'elport profile use <name>'"
     ):
         config._profile_name({"profiles": {"lab": {}}}, None, {})

@@ -6,7 +6,7 @@ import shlex
 import pytest
 from _sync_harness import FakeClient, saved_state, write_doc
 
-from elab import frontmatter, sync
+from elport import frontmatter, sync
 
 
 def test_pull_clean_updates_document(tmp_path, monkeypatch, configured, capsys):
@@ -212,7 +212,7 @@ def test_pull_dirty_writes_three_way_sidecars(
 
 @pytest.mark.parametrize(
     "real_name",
-    [".elab.toml", ".ELAB.TOML", ".elabignore", "nested/.ELABIGNORE"],
+    [".elport.toml", ".ELPORT.TOML", ".elportignore", "nested/.ELPORTIGNORE"],
 )
 def test_pull_skips_control_file_attachment(
     tmp_path, monkeypatch, configured, capsys, real_name
@@ -272,7 +272,7 @@ def test_pull_dirty_control_file_urls_remain_in_three_way_sidecars(
     upload = {
         "id": 3,
         "long_name": "aa/existing",
-        "real_name": ".elab.toml",
+        "real_name": ".elport.toml",
         "storage": 1,
     }
     url = sync.download_url("https://e.example", upload)
@@ -293,7 +293,7 @@ def test_pull_dirty_control_file_urls_remain_in_three_way_sidecars(
         f"base [file]({url})"
     )
     assert "download" not in client.calls
-    assert not (tmp_path / ".elab.toml").exists()
+    assert not (tmp_path / ".elport.toml").exists()
 
 
 def test_pull_without_base_keeps_control_file_url_in_sidecar(
@@ -304,7 +304,7 @@ def test_pull_without_base_keeps_control_file_url_in_sidecar(
     upload = {
         "id": 3,
         "long_name": "aa/existing",
-        "real_name": ".elabignore",
+        "real_name": ".elportignore",
         "storage": 1,
     }
     url = sync.download_url("https://e.example", upload)
@@ -316,7 +316,7 @@ def test_pull_without_base_keeps_control_file_url_in_sidecar(
 
     assert (tmp_path / "report.remote.md").read_text() == f"remote [file]({url})"
     assert "download" not in client.calls
-    assert not (tmp_path / ".elabignore").exists()
+    assert not (tmp_path / ".elportignore").exists()
 
 
 def test_pull_dirty_preserves_differing_remote_attachment(

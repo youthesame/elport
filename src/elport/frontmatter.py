@@ -18,7 +18,7 @@ PERMISSION_LEVELS = {
     "public": 50,
 }
 ALLOWED = {
-    "elab_id",
+    "id",
     "entity",
     "title",
     "tags",
@@ -51,17 +51,17 @@ _StrictLoader.add_constructor(
 )
 
 
-def validate_elab_id(value: object) -> int:
+def validate_id(value: object) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-        raise ValueError("elab_id must be a positive integer")
+        raise ValueError("id must be a positive integer")
     return value
 
 
-def parse_server_elab_id(value: object) -> int:
+def parse_server_id(value: object) -> int:
     if not isinstance(value, (int, str)) or not str(value).isdigit():
         raise RuntimeError("server did not return a valid entity id")
     try:
-        return validate_elab_id(int(value))
+        return validate_id(int(value))
     except ValueError as error:
         raise RuntimeError("server did not return a valid entity id") from error
 
@@ -83,8 +83,8 @@ def parse(text: str) -> tuple[dict, str]:
     unknown = sorted(set(data) - ALLOWED)
     if unknown:
         raise ValueError(f"unknown front matter key(s): {', '.join(unknown)}")
-    if "elab_id" in data:
-        data["elab_id"] = validate_elab_id(data["elab_id"])
+    if "id" in data:
+        data["id"] = validate_id(data["id"])
     for key in ("title", "profile"):
         if key in data and data[key] is not None:
             data[key] = str(data[key])

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from _sync_harness import FakeClient, write_doc
 
-from elab import sync
+from elport import sync
 
 
 def test_comments_prints_thread_without_writing_files(tmp_path, configured, capsys):
@@ -51,12 +51,12 @@ def test_comments_prints_empty_thread(tmp_path, configured, capsys):
     assert capsys.readouterr().out == "no comments\n"
 
 
-def test_comments_requires_elab_id(tmp_path, configured):
+def test_comments_requires_id(tmp_path, configured):
     doc = tmp_path / "report.md"
     doc.write_text("Local body\n", encoding="utf-8")
     client = FakeClient()
 
-    with pytest.raises(RuntimeError, match="^elab_id is required$"):
+    with pytest.raises(RuntimeError, match="^id is required$"):
         sync.comments(doc, client, {})
 
     assert client.calls == []
@@ -64,7 +64,7 @@ def test_comments_requires_elab_id(tmp_path, configured):
 
 def test_comment_posts_to_document_target(tmp_path, configured, capsys):
     doc = tmp_path / "report.md"
-    write_doc(doc, "Local body\n", elab_id=17, entity="items")
+    write_doc(doc, "Local body\n", id=17, entity="items")
     client = FakeClient()
 
     sync.comment(doc, client, {}, text="A useful note")
@@ -85,12 +85,12 @@ def test_comment_rejects_empty_text_before_network(tmp_path, configured, text):
     assert client.calls == []
 
 
-def test_comment_requires_elab_id(tmp_path, configured):
+def test_comment_requires_id(tmp_path, configured):
     doc = tmp_path / "report.md"
     doc.write_text("Local body\n", encoding="utf-8")
     client = FakeClient()
 
-    with pytest.raises(RuntimeError, match="^elab_id is required$"):
+    with pytest.raises(RuntimeError, match="^id is required$"):
         sync.comment(doc, client, {}, text="hello")
 
     assert client.calls == []

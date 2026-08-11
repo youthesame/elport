@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def _dir(create: bool = False) -> Path:
-    p = Path.home() / ".config/elab/state"
+    p = Path.home() / ".config/elport/state"
     if create:
         p.mkdir(parents=True, exist_ok=True)
         p.chmod(0o700)

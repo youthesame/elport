@@ -6,7 +6,7 @@ import shlex
 import pytest
 from _sync_harness import FakeClient, saved_state, write_doc
 
-from elab import frontmatter, sync
+from elport import frontmatter, sync
 
 
 @pytest.mark.parametrize(
@@ -469,7 +469,7 @@ def test_new_push_persists_resolved_target(tmp_path, monkeypatch):
     sync.push(doc, client, {"entity": "items"})
 
     meta, _ = frontmatter.parse(doc.read_text(encoding="utf-8"))
-    assert meta["elab_id"] == 42
+    assert meta["id"] == 42
     assert meta["entity"] == "items"
     assert meta["profile"] == "lab"
 
@@ -772,7 +772,7 @@ def test_push_rejects_invalid_server_id_before_entity_requests(
         sync.push(doc, client, {})
 
     meta, _ = frontmatter.parse(doc.read_text(encoding="utf-8"))
-    assert "elab_id" not in meta
+    assert "id" not in meta
     assert client.calls == ["me", "create"]
 
 

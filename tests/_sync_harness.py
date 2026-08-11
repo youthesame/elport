@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from elab import frontmatter
+from elport import frontmatter
 
 
 class FakeClient:
@@ -81,7 +81,7 @@ class FakeClient:
 
 
 def write_doc(path: Path, body: str, **extra):
-    meta = {"elab_id": 1, "entity": "experiments", "title": "Test", **extra}
+    meta = {"id": 1, "entity": "experiments", "title": "Test", **extra}
     path.write_text(frontmatter.render(meta, body))
 
 

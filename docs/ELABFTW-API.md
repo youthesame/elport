@@ -2,12 +2,12 @@
 
 > **This is not a full API reference.** For the complete endpoint list, see the official docs
 > ([doc.elabftw.net/api.html](https://doc.elabftw.net/api.html)). This file records only the
-> *measured, non-obvious* behaviours that elab depends on.
+> *measured, non-obvious* behaviours that elport depends on.
 
 - **Nature**: a living reference. It records **observations of the external world that is eLabFTW**. Re-acquiring
   these facts requires hitting a live server (expensive), so they are kept as settled findings. **Update it only
   when the target instance's version changes.**
-- **What it is not**: not elab's own design rationale (that is [DESIGN.md](DESIGN.md)); not the behavioral contract
+- **What it is not**: not elport's own design rationale (that is [DESIGN.md](DESIGN.md)); not the behavioral contract
   (that is the **tests**). It holds only "how eLabFTW actually behaves."
 - **Observation environment**: unless noted, "measured" means confirmed on **demo.elabftw.net 5.6.12
   (2026-08-07..08)**. Base URL is `{base_url}/api/v2`. **Re-confirm version-dependent behavior on the target
@@ -26,7 +26,7 @@
   - **Returns both `body` (stored as saved: md or html) and `body_html` (always rendered HTML)** → pull can
     recover `body` (raw source, not run through `markdownify`), avoiding `elab-doc-sync`'s lossy round-trip.
 - Create: `POST /api/v2/{entity}` (created with empty body). **The server assigns the ID**, returned at the end of
-  the `Location` header (e.g. `/api/v2/experiments/42`) or as JSON `id`. **`elab_id` is never client-generated; it
+  the `Location` header (e.g. `/api/v2/experiments/42`) or as JSON `id`. **`id` is never client-generated; it
   is always the server-assigned value.**
 - Update: `PATCH /api/v2/{entity}/{id}` (JSON: `title`/`body`/`content_type`, etc.).
 - User: `GET /api/v2/users/me` (`team` = active team ID, `teams`).
@@ -68,7 +68,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   respects `content_type:2`.** Only the older 5.3.11..5.5.2 range is affected.
 - **Measured (5.6.12)**: even on a `use_markdown:0` account, sending `content_type:2` via `PATCH` kept it **as 2 and
   rendered markdown** (`#`→`<h1>`, etc.).
-  → Policy: elab sends `content_type:2` and **verifies `content_type == 2` after push**. On old (still-buggy)
+  → Policy: elport sends `content_type:2` and **verifies `content_type == 2` after push**. On old (still-buggy)
   instances it will not become 2, so abort and advise only in that case.
 - **MathJax is enabled in both md/html modes** (inline `$`, block `$$`, AMS extensions.
   [issue #892](https://github.com/elabftw/elabftw/issues/892)). Measured: `$\eta = 1 - e^{-kt}$` passes through
@@ -91,8 +91,8 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - **Display URL embedded in the body**: `{base_url}/app/download.php?f={long_name}&name={real_name}&storage={storage}`.
   This is **for a user viewing in a browser (Cookie session)**. It is **not authenticated by the API key
   (`Authorization`)** (measured: with or without the key, a login-page HTML is returned). Embed it in the body, but
-  elab cannot use it for its own downloads.
-- **For elab's own file retrieval during pull**: `GET /api/v2/{entity}/{id}/uploads/{upload_id}?format=binary`.
+  elport cannot use it for its own downloads.
+- **For elport's own file retrieval during pull**: `GET /api/v2/{entity}/{id}/uploads/{upload_id}?format=binary`.
   This **returns the real binary with the API key** (measured: got `text/csv` content). Reverse transclusion
   downloads use this.
 - Delete: `DELETE /api/v2/{entity}/{id}/uploads/{upload_id}` (not used by push).
@@ -101,7 +101,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 
 - Add tag: `POST /api/v2/{entity}/{id}/tags` (JSON `{"tag": "<name>"}`; a non-existent one is auto-created).
   Measured 201; the current demo joins tag names with `|` in `"tags":"CRISPR|PCR|RNA"`, while `tags_id` remains
-  comma-joined. elab tolerates both `|` and `,` separators. **Add-only** (delete via Web UI).
+  comma-joined. elport tolerates both `|` and `,` separators. **Add-only** (delete via Web UI).
 - Metadata: `PATCH` with `{"metadata": "<JSON string>"}`.
 - Category: `PATCH` with `category` (ID). Resolve name→ID via
   `GET /api/v2/teams/{team_id}/experiments_categories` for experiments or
@@ -109,7 +109,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   `title`. The `items_types` submodel returns 400 on the current instance. No auto-creation.
 - Entity status is a team-scoped catalog read from `experiments_status` for experiments or `items_status` for
   items, matching the returned `{id, title}` entries. Setting uses `PATCH` with `{"status": <id>}`. A bad ID 500s
-  because of the foreign-key constraint, while a name string is ignored, so elab resolves and validates names and
+  because of the foreign-key constraint, while a name string is ignored, so elport resolves and validates names and
   IDs locally against existing entries. No auto-creation.
 
 ## Comments (measured 5.6.12, 2026-08-11)
@@ -163,7 +163,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   applied to newly created entities.
 - GET also exposes `canread_is_immutable` / `canwrite_is_immutable` and `canread_base_is_immutable`-style flags
   (an admin may lock permissions; a PATCH would then be refused — not observed as locked on demo).
-- **Security-critical → apply only when declared.** If elab syncs permissions, act **only when the front matter
+- **Security-critical → apply only when declared.** If elport syncs permissions, act **only when the front matter
   carries `read:`/`write:`**; never touch permissions otherwise (a routine push must not silently revert an
   intentional Web-UI change).
 
@@ -191,7 +191,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 | upload hash | Returns `hash` + `hash_algorithm:"sha256"`, matches local sha256 |
 | `long_name` shape | Contains `/` (percent-encode required) |
 | download.php auth | **Not possible with the API key** (login page). pull uses the `?format=binary` API |
-| elab_id assignment | POST returns the assigned ID via `Location` |
+| id assignment | POST returns the assigned ID via `Location` |
 | category resolution | Resolve `{id,title}` from `GET /teams/{id}/experiments_categories` by title match |
 | tags | Added via POST, reflected in `tags`/`tags_id` (add-only) |
 | comments | **Full CRUD** (POST 201 / GET / PATCH 200 / DELETE 204); sub-id server-assigned, not 1-based |
