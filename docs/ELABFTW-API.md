@@ -108,6 +108,61 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   `GET /api/v2/teams/{team_id}/experiments_categories` (items use the corresponding types endpoint), reading the
   `{id, title}` list and matching on `title` (measured: `{"id":13,"title":"Synthesis"}`, etc.). No auto-creation.
 
+## Comments (measured 5.6.12, 2026-08-11)
+
+- **Full CRUD** on `{entity}/{id}/comments`:
+  - Create: `POST .../comments` (JSON `{"comment": "..."}`) → **201**, `Location: .../comments/{cid}`.
+  - List: `GET .../comments` → `[{id, created_at, modified_at, item_id, comment, userid, immutable,
+    fullname, firstname, lastname, orcid, email}, …]` (author info embedded; `modified_at` reflects edits).
+  - Edit: `PATCH .../comments/{cid}` (JSON `{"comment": "..."}`) → **200**.
+  - Delete: `DELETE .../comments/{cid}` → **204**.
+  - Note: the sub-id is server-assigned and **not 1-based per entity** (measured first comment got id 5). Read it
+    from the POST `Location` / the GET list; do not assume `{id}/comments/1`.
+- **Comments are out-of-sync data → do not embed in the body** (CLAUDE.md invariant). Surface via sidecar / terminal.
+
+## Steps (task checklist; measured 5.6.12, 2026-08-11)
+
+- **Full CRUD** on `{entity}/{id}/steps`:
+  - Create: `POST .../steps` (JSON `{"body": "..."}`) → **201**. `ordering` is **auto-assigned** (1, 2, …).
+  - List: `GET .../steps` → `[{id, body, finished, finished_time, ordering}, …]`.
+  - Mark done: `PATCH .../steps/{sid}` (JSON `{"action": "finish"}`) → **200**, sets `finished:1` +
+    `finished_time` timestamp. (Also editable via `{"body": "..."}` → 200.)
+  - Delete: `DELETE .../steps/{sid}` → **204**.
+
+## Links (reciprocal links; measured 5.6.12, 2026-08-11)
+
+- `POST .../items_links/{itemid}` and `POST .../experiments_links/{expid}` create a link; `DELETE` the same path
+  removes it (**204**).
+- **Trap: `Content-Type: application/json` is mandatory even with an empty body.** Without it → **400 "Incorrect
+  content-type header."** (Sending `-d '{}'` with the header → 201.)
+- On `GET {entity}/{id}` the links come back expanded under `items_links[]` / `experiments_links[]` (each with
+  `title`, `category_title`, …). A self-link (exp→itself) is rejected (400).
+
+## Permissions (canread / canwrite; measured 5.6.12, 2026-08-11)
+
+- Each entity has `canread` / `canwrite`, each split into **a base level (integer) + an explicit JSON allow-list**.
+- **Base level** — set via `PATCH` `{"canread_base": N}` / `{"canwrite_base": N}` (→ 200, reflected immediately).
+  The GET also returns a `*_base_human` label (measured exactly):
+
+  | N | `canread_base_human` |
+  |---|---|
+  | 10 | Only owner |
+  | 20 | Only owner and admins |
+  | 30 | Only members of the team |
+  | 40 | Everyone with an account |
+  | 50 | Everyone including anonymous users |
+
+  `canwrite_base` uses the same integers (measured 10 → "Only owner").
+- **Explicit allow-list** — `canread` / `canwrite` accept a **JSON *string*** like
+  `"{\"teams\":[3],\"users\":[],\"teamgroups\":[]}"` (reflected on GET).
+- User defaults (from `GET /users/me`): `default_read_base` / `default_write_base` (measured 30 / 20) — the base
+  applied to newly created entities.
+- GET also exposes `canread_is_immutable` / `canwrite_is_immutable` and `canread_base_is_immutable`-style flags
+  (an admin may lock permissions; a PATCH would then be refused — not observed as locked on demo).
+- **Security-critical → apply only when declared.** If elab syncs permissions, act **only when the front matter
+  carries `read:`/`write:`**; never touch permissions otherwise (a routine push must not silently revert an
+  intentional Web-UI change).
+
 ## Revisions (body version history)
 
 - **Retrievable, as measured** (opposite of the old assumption):
@@ -135,6 +190,10 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 | elab_id assignment | POST returns the assigned ID via `Location` |
 | category resolution | Resolve `{id,title}` from `GET /teams/{id}/experiments_categories` by title match |
 | tags | Added via POST, reflected in `tags`/`tags_id` (add-only) |
+| comments | **Full CRUD** (POST 201 / GET / PATCH 200 / DELETE 204); sub-id server-assigned, not 1-based |
+| steps | **Full CRUD**; `ordering` auto-assigned; `{"action":"finish"}` sets `finished`+`finished_time` |
+| links | `POST`/`DELETE .../items_links/{id}` & `.../experiments_links/{id}`; **`Content-Type: application/json` required even when empty** |
+| permissions | `canread_base`/`canwrite_base` (10/20/30/40/50) PATCH → 200 + `*_base_human` label; explicit allow-list via JSON-string `canread`/`canwrite` |
 | revision retrieval | Both list and individual body are **retrievable** (opposite of old assumption) |
 | revision creation frequency | **Not every save** (2 for 5 PATCHes) |
 | re-upload of same name | Old entry remains; **both coexist as `state:1`** (no auto-archive) |

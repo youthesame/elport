@@ -93,6 +93,9 @@ Since you may edit the body in the Web UI, `push` compares the current remote ag
 `--force` discards the Web-side change — use it deliberately. eLabFTW keeps server-side history recoverable from the
 Web UI as a safety net (not on every save — see [docs/ELABFTW-API.md](docs/ELABFTW-API.md)).
 
+> elab keeps no local history of its own — its base lives under `~/.config`, not your tree. Want per-edit history?
+> `git init` your notes folder and commit as usual; the files are plain Markdown.
+
 ## Configuration & auth
 
 **No credentials in the project.** API key → OS keyring (Keychain / Credential Manager / Secret Service), set via

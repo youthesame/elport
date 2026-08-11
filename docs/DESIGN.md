@@ -126,6 +126,49 @@ similar, **consult it and pull in only what is needed** when a missing feature b
 
 ---
 
+## 4. Settled decisions — 2026-08-11 (git relationship, merge, permissions, comments)
+
+A grilling session sharpened the git story and set the next feature batch. These **append** to §3; they refine §3.6
+rather than revising the earlier decisions.
+
+**Not git-backed; git is used for one thing only.** elab is git-*like* in UX (push/pull/status/diff) but is **not**
+git-*backed*: no repository is required, the base lives in `~/.config/elab/state/` (never in the user's tree), and
+elab never commits or touches the user's git history. "Local is the source of truth" does not entail git — forcing a
+git workflow would constrain how researchers organize notes. The **only** place elab reaches for git is conflict
+merge. (Want per-edit local history? That is the user's own `git init`, which elab neither requires nor manages.)
+
+**`elab merge` wraps `git merge-file`.** The stored two-form base is a genuine common ancestor, so conflict
+resolution is a real 3-way merge: `git merge-file <local> <base> <remote>`, with the reverse-transcluded remote/base
+written as `<name>.remote.md` / `<name>.base.md`. Refinement of §3.6: rather than only *printing* that command,
+`elab merge <note>` *runs* it (writing the result — with markers on overlap — into the local file). push/pull stay
+**non-mutating on conflict**: they emit the sidecars and stop; `elab merge` is the explicit, opt-in step that
+rewrites local, and it **never auto-pushes**. git stays **optional** (fallback: if `git` is absent, `elab merge`
+points at the sidecars for a manual merge — the sidecars are always written regardless). git is a system binary, so
+it is a documented runtime requirement for merge only — never a `pyproject.toml` / PyPI dependency.
+
+**push refuses unresolved conflict markers.** If the outgoing body carries `<<<<<<<` / `=======` / `>>>>>>>` marker
+lines, push aborts (bypass with `--force`). This closes the one hole this stance would otherwise leave: a
+half-resolved merge silently pushed to the server.
+
+**Permissions sync (planned).** Front matter gains independent `read:` / `write:`, mapping keywords to eLabFTW base
+levels: `owner`=10, `owner+admin`=20, `team`=30, `account`=40, `public`=50 (`canread_base` / `canwrite_base`).
+Applied **only when declared** (absent ⇒ untouched, so a routine push never reverts an intentional Web-UI change —
+the add-only-tags safety stance). **Base-level only**: elab never sends the individual allow-list JSON, so
+Web-UI-set individual grants survive (measured: PATCHing only `*_base` preserves the `canread`/`canwrite` JSON).
+Because base and the individual list are OR'd, two warnings guard the surprises — widening to `account`/`public`
+(leaves the team) prompts confirmation; narrowing to `owner`/`owner+admin` while individual grants persist warns
+that effective access is still wider than the keyword implies. `--yes` skips; a non-interactive run without it aborts
+rather than act blindly.
+
+**Comments (planned).** Read via `elab comments <note>` to the terminal only — comments are out-of-sync data and
+must not enter the body or a written sidecar. Post via `elab comment <note> "..."`. No edit/delete (rare from a CLI;
+the Web UI handles it).
+
+**Deferred.** Revision browsing (`elab log` / `elab show`, read-only), task steps, and reciprocal links are out of
+this batch (their measured API shape is in [ELABFTW-API.md](ELABFTW-API.md)).
+
+---
+
 ## Appendix. `elab-doc-sync` reference
 
 - Repository: <https://github.com/Kosaku-Noba/elab-doc-sync> (0.4.2 at time of trial).
