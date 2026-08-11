@@ -62,7 +62,9 @@ def parse(text: str) -> tuple[dict, str]:
         if key in data and data[key] is not None:
             data[key] = str(data[key])
     for key in ("read", "write"):
-        if key in data and data[key] not in PERMISSION_LEVELS:
+        if key in data and (
+            not isinstance(data[key], str) or data[key] not in PERMISSION_LEVELS
+        ):
             valid = ", ".join(PERMISSION_LEVELS)
             raise ValueError(f"{key} must be one of: {valid}")
     if "tags" in data:

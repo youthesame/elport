@@ -288,7 +288,10 @@ def push(
     )
     remote_doc = remote.get() if remote is not None else {}
     for field in ("read", "write"):
-        if field in meta and remote_doc.get(f"can{field}_is_immutable"):
+        if field in meta and (
+            remote_doc.get(f"can{field}_is_immutable")
+            or remote_doc.get(f"can{field}_base_is_immutable")
+        ):
             raise RuntimeError(
                 f"{field} permission is locked on this entity (admin-set); "
                 f"remove '{field}:' or ask an admin"
@@ -431,7 +434,17 @@ def _base_sidecar_path(path: Path) -> Path:
     return path.with_name(path.stem + ".base.md")
 
 
-def merge(path: Path, config: dict, profile=None) -> None:
+def _promote_pending_remote(base_url: str | None, entity: str, eid: object) -> None:
+    if not eid or base_url is None:
+        return
+    saved = state.load(base_url, entity, str(eid))
+    if saved is not None and "pending_remote" in saved:
+        updated = {**saved, "remote_base": saved["pending_remote"]}
+        del updated["pending_remote"]
+        state.save(base_url, entity, str(eid), updated)
+
+
+def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
     base = _base_sidecar_path(path)
     remote = _sidecar_path(path)
     if not base.exists() or not remote.exists():
@@ -442,8 +455,17 @@ def merge(path: Path, config: dict, profile=None) -> None:
     base_url = None
     if eid:
         _, base_url, _ = config_module.base_target(config, profile, meta)
+    if resolved:
+        _promote_pending_remote(base_url, entity, eid)
+        base.unlink()
+        remote.unlink()
+        print(f"marked resolved: {path}; run 'elab push'")
+        return
     if shutil.which("git") is None:
-        raise RuntimeError(f"git is not installed; merge {base} and {remote} manually")
+        raise RuntimeError(
+            f"git is not installed; merge {base} and {remote} by hand, "
+            "then run 'elab merge --resolved'"
+        )
 
     result = subprocess.run(
         ["git", "merge-file", str(path), str(base), str(remote)],
@@ -453,15 +475,7 @@ def merge(path: Path, config: dict, profile=None) -> None:
     )
     if result.returncode < 0 or result.returncode >= 128:
         raise RuntimeError(result.stderr.strip() or "git merge-file failed")
-    if eid and base_url is not None:
-        saved = state.load(base_url, entity, str(eid))
-        if saved is not None and "pending_remote" in saved:
-            updated = {
-                **saved,
-                "remote_base": saved["pending_remote"],
-            }
-            del updated["pending_remote"]
-            state.save(base_url, entity, str(eid), updated)
+    _promote_pending_remote(base_url, entity, eid)
     if result.returncode == 0:
         base.unlink()
         remote.unlink()

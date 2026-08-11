@@ -137,6 +137,17 @@ def test_frontmatter_rejects_invalid_permission_keyword(key):
         frontmatter.parse(f"---\n{key}: laboratory\n---\nBody\n")
 
 
+@pytest.mark.parametrize(
+    ("key", "value"), [("read", "[team]"), ("write", "{level: team}")]
+)
+def test_frontmatter_rejects_non_string_permission_value(key, value):
+    with pytest.raises(
+        ValueError,
+        match=(rf"{key} must be one of: owner, owner\+admin, team, account, public"),
+    ):
+        frontmatter.parse(f"---\n{key}: {value}\n---\nBody\n")
+
+
 def test_frontmatter_allows_permission_keys():
     meta, body = frontmatter.parse("---\nread: team\nwrite: owner+admin\n---\nBody\n")
 
@@ -488,7 +499,12 @@ def test_comment_text_is_required():
         cli._parser().parse_args(["comment"])
 
 
-def test_merge_loads_config_without_creating_client(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("extra_args", "resolved"), [([], False), (["--resolved"], True)]
+)
+def test_merge_loads_config_without_creating_client(
+    tmp_path, monkeypatch, extra_args, resolved
+):
     monkeypatch.chdir(tmp_path)
     data = {"profiles": {"lab": {"base_url": "https://e.example"}}}
     load_calls = []
@@ -505,9 +521,9 @@ def test_merge_loads_config_without_creating_client(tmp_path, monkeypatch):
         lambda *args: pytest.fail("merge must not create a client"),
     )
 
-    assert cli.main(["merge", "--profile", "lab"]) == 0
+    assert cli.main(["merge", "--profile", "lab", *extra_args]) == 0
     assert load_calls == [(tmp_path, Path("."))]
-    assert calls == [(Path("report.md"), data, "lab")]
+    assert calls == [(Path("report.md"), data, "lab", resolved)]
 
 
 def test_merge_missing_sidecars_is_reported_as_cli_error(tmp_path, capsys):
@@ -535,7 +551,8 @@ def test_merge_without_git_is_reported_as_cli_error(tmp_path, monkeypatch, capsy
     error = capsys.readouterr().err
     assert str(base) in error
     assert str(remote) in error
-    assert "manually" in error
+    assert "by hand" in error
+    assert "elab merge --resolved" in error
     assert "Traceback" not in error
     assert document.read_text(encoding="utf-8") == "local\n"
 

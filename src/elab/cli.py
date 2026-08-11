@@ -135,6 +135,11 @@ def _parser() -> argparse.ArgumentParser:
         help="local document (default: report.md)",
     )
     merge_parser.add_argument("--profile", help="config profile to use")
+    merge_parser.add_argument(
+        "--resolved",
+        action="store_true",
+        help="mark a hand-merged conflict as resolved",
+    )
 
     new_parser = commands.add_parser(
         "new", help="create a new remote entity and local document"
@@ -275,7 +280,7 @@ def main(argv=None) -> int:
         if args.cmd == "merge":
             path = Path(args.doc)
             data = config.load(Path.cwd(), path.parent)
-            merge(path, data, args.profile)
+            merge(path, data, args.profile, args.resolved)
             return 0
 
         path = Path(args.doc)
