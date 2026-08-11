@@ -438,6 +438,10 @@ def merge(path: Path, config: dict, profile=None) -> None:
         raise RuntimeError(
             f"no conflict to merge; run push/pull first (expected {base} and {remote})"
         )
+    meta, _, entity, eid = _document(path, config)
+    base_url = None
+    if eid:
+        _, base_url, _ = config_module.base_target(config, profile, meta)
     if shutil.which("git") is None:
         raise RuntimeError(f"git is not installed; merge {base} and {remote} manually")
 
@@ -447,33 +451,26 @@ def merge(path: Path, config: dict, profile=None) -> None:
         text=True,
         check=False,
     )
+    if result.returncode < 0 or result.returncode >= 128:
+        raise RuntimeError(result.stderr.strip() or "git merge-file failed")
+    if eid and base_url is not None:
+        saved = state.load(base_url, entity, str(eid))
+        if saved is not None and "pending_remote" in saved:
+            updated = {
+                **saved,
+                "remote_base": saved["pending_remote"],
+            }
+            del updated["pending_remote"]
+            state.save(base_url, entity, str(eid), updated)
     if result.returncode == 0:
-        meta, _, entity, eid = _document(path, config)
-        if eid:
-            try:
-                _, base_url, _ = config_module.base_target(config, profile, meta)
-            except ValueError:
-                pass
-            else:
-                saved = state.load(base_url, entity, str(eid))
-                if saved is not None and "pending_remote" in saved:
-                    updated = {
-                        **saved,
-                        "remote_base": saved["pending_remote"],
-                    }
-                    del updated["pending_remote"]
-                    state.save(base_url, entity, str(eid), updated)
         base.unlink()
         remote.unlink()
         print(f"merged cleanly into {path}; review and run 'elab push'")
         return
-    if result.returncode < 0 or result.returncode >= 128:
-        raise RuntimeError(result.stderr.strip() or "git merge-file failed")
-    if result.returncode > 0:
-        raise RuntimeError(
-            f"{result.returncode} conflict(s) remain in {path}; "
-            "resolve the markers, then run 'elab push --force'"
-        )
+    raise RuntimeError(
+        f"{result.returncode} conflict(s) remain in {path}; "
+        "resolve the markers, then run 'elab push'"
+    )
 
 
 def _reject_sidecar_attachment_collisions(

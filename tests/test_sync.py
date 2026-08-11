@@ -287,24 +287,131 @@ def test_clean_merge_promotes_pending_remote_and_allows_regular_push(
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
-def test_merge_conflict_keeps_sidecars_and_writes_markers(tmp_path):
+def test_conflicted_merge_promotes_pending_remote_and_allows_regular_push(
+    tmp_path, monkeypatch, configured
+):
     doc = tmp_path / "report.md"
-    base = tmp_path / "report.base.md"
-    remote = tmp_path / "report.remote.md"
-    doc.write_text("local\n", encoding="utf-8")
-    base.write_text("base\n", encoding="utf-8")
-    remote.write_text("remote\n", encoding="utf-8")
+    base_body = "base\n"
+    remote_body = "remote\n"
+    write_doc(doc, "local\n")
+    stored_state = saved_state(local=base_body, remote=base_body)
 
-    with pytest.raises(
-        RuntimeError,
-        match=f"1 conflict.*{doc}.*then run 'elab push --force'",
-    ):
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+    monkeypatch.setattr(
+        sync.state,
+        "save",
+        lambda *args: stored_state.clear() or stored_state.update(args[3]),
+    )
+    client = FakeClient(
+        gets=[
+            {"body": remote_body},
+            {"body": remote_body},
+            {"body": remote_body},
+            {"body": "resolved", "content_type": 2},
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="remote changed"):
+        sync.push(doc, client, {})
+
+    with pytest.raises(RuntimeError) as exc_info:
         sync.merge(doc, {})
 
+    message = str(exc_info.value)
+    assert message == (
+        f"1 conflict(s) remain in {doc}; resolve the markers, then run 'elab push'"
+    )
+    assert "--force" not in message
     merged = doc.read_text(encoding="utf-8")
     assert "<<<<<<< " in merged
     assert "=======\n" in merged
     assert ">>>>>>> " in merged
+    base = tmp_path / "report.base.md"
+    remote = tmp_path / "report.remote.md"
+    assert base.exists()
+    assert remote.exists()
+    assert stored_state == {
+        "local_base": base_body,
+        "remote_base": remote_body,
+        "team": 7,
+    }
+
+    write_doc(doc, "resolved\n")
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["body"] == "resolved\n"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_conflicted_merge_regular_push_reconflicts_if_remote_changed_again(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    base_body = "base\n"
+    remote_body = "remote\n"
+    newer_remote_body = "newer remote\n"
+    write_doc(doc, "local\n")
+    stored_state = saved_state(local=base_body, remote=base_body)
+
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+    monkeypatch.setattr(
+        sync.state,
+        "save",
+        lambda *args: stored_state.clear() or stored_state.update(args[3]),
+    )
+    client = FakeClient(gets=[{"body": remote_body}, {"body": newer_remote_body}])
+
+    with pytest.raises(RuntimeError, match="remote changed"):
+        sync.push(doc, client, {})
+    with pytest.raises(RuntimeError, match="conflict.*run 'elab push'"):
+        sync.merge(doc, {})
+
+    write_doc(doc, "resolved\n")
+    with pytest.raises(RuntimeError, match="remote changed"):
+        sync.push(doc, client, {})
+
+    assert stored_state == {
+        "local_base": base_body,
+        "remote_base": remote_body,
+        "team": 7,
+        "pending_remote": newer_remote_body,
+    }
+    assert (tmp_path / "report.base.md").exists()
+    remote_meta, sidecar_body = frontmatter.parse(
+        (tmp_path / "report.remote.md").read_text(encoding="utf-8")
+    )
+    assert remote_meta["elab_id"] == 1
+    assert sidecar_body == newer_remote_body
+
+
+def test_merge_profile_mismatch_stops_before_git_and_keeps_sidecars(
+    tmp_path, monkeypatch
+):
+    doc = tmp_path / "report.md"
+    base = tmp_path / "report.base.md"
+    remote = tmp_path / "report.remote.md"
+    write_doc(doc, "local\n", profile="labA")
+    base.write_text("base\n", encoding="utf-8")
+    remote.write_text("remote\n", encoding="utf-8")
+    config = {
+        "profiles": {
+            "labA": {"base_url": "https://a.example"},
+            "labB": {"base_url": "https://b.example"},
+        }
+    }
+    monkeypatch.setattr(
+        sync.subprocess,
+        "run",
+        lambda *args, **kwargs: pytest.fail("git merge-file must not run"),
+    )
+
+    with pytest.raises(
+        ValueError, match="profile mismatch between frontmatter and CLI"
+    ):
+        sync.merge(doc, config, profile="labB")
+
+    assert frontmatter.parse(doc.read_text(encoding="utf-8"))[1] == "local\n"
     assert base.exists()
     assert remote.exists()
 
