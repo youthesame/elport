@@ -506,6 +506,7 @@ def test_merge_loads_config_without_creating_client(
     tmp_path, monkeypatch, extra_args, resolved
 ):
     monkeypatch.chdir(tmp_path)
+    Path("report.md").write_text("body\n", encoding="utf-8")
     data = {"profiles": {"lab": {"base_url": "https://e.example"}}}
     load_calls = []
     calls = []
@@ -524,6 +525,37 @@ def test_merge_loads_config_without_creating_client(
     assert cli.main(["merge", "--profile", "lab", *extra_args]) == 0
     assert load_calls == [(tmp_path, Path("."))]
     assert calls == [(Path("report.md"), data, "lab", resolved)]
+
+
+def test_merge_threads_cli_entity_override(tmp_path, monkeypatch):
+    document = tmp_path / "report.md"
+    document.write_text("---\nelab_id: 42\n---\nbody\n", encoding="utf-8")
+    data = {}
+    calls = []
+    monkeypatch.setattr(cli.config, "load", lambda *args: data)
+    monkeypatch.setattr(cli, "merge", lambda *args: calls.append(args))
+
+    assert cli.main(["merge", str(document), "--entity", "items"]) == 0
+    assert data["entity"] == "items"
+    assert calls == [(document, data, None, False)]
+
+
+def test_merge_rejects_entity_mismatch_as_cli_error(tmp_path, monkeypatch, capsys):
+    document = tmp_path / "report.md"
+    document.write_text(
+        "---\nelab_id: 42\nentity: items\n---\nbody\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli,
+        "merge",
+        lambda *args: pytest.fail("merge should not be called"),
+    )
+
+    assert cli.main(["merge", str(document), "--entity", "experiments"]) == 1
+    error = capsys.readouterr().err
+    assert "entity mismatch between frontmatter and CLI" in error
+    assert "Traceback" not in error
 
 
 def test_merge_missing_sidecars_is_reported_as_cli_error(tmp_path, capsys):

@@ -134,7 +134,7 @@ def _parser() -> argparse.ArgumentParser:
         default="report.md",
         help="local document (default: report.md)",
     )
-    merge_parser.add_argument("--profile", help="config profile to use")
+    _add_target_options(merge_parser)
     merge_parser.add_argument(
         "--resolved",
         action="store_true",
@@ -279,7 +279,7 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "merge":
             path = Path(args.doc)
-            data = config.load(Path.cwd(), path.parent)
+            data, _ = _target(path, args.profile, args.entity)
             merge(path, data, args.profile, args.resolved)
             return 0
 
