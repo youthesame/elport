@@ -1,8 +1,9 @@
-# elab
+# elab — a git-like sync CLI for eLabFTW
 
-**Git-like sync CLI for eLabFTW.** Write lab notes locally in Markdown/HTML (with referenced figures and data
-files), then `push`/`pull` them to eLabFTW entities. **Local is the source of truth.** Not Markdown-only — it
-handles md/HTML bodies plus arbitrary referenced attachments.
+[English](README.md) | [日本語](README_JA.md)
+
+Write lab notes locally in Markdown — inline HTML like `<figure>` is fine — then `push`/`pull` them, along with
+every figure and data file the body references, to eLabFTW entities. **Local is the source of truth.**
 
 - **Why it works this way** → [docs/DESIGN.md](docs/DESIGN.md)
 - **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
@@ -14,19 +15,18 @@ handles md/HTML bodies plus arbitrary referenced attachments.
 Python 3.10+, installed as a `uv` tool (provides the `elab` command):
 
 ```sh
-uv tool install elab
+uv tool install git+https://github.com/youthesame/elab
 ```
 
 ## The core idea
 
-One document = one eLabFTW entity. A note is a Markdown/HTML file (default `report.md`) with a YAML front matter
-block. On `push`, elab finds every **real local file the body references** — regardless of notation (`<img src>`,
-`[text](path)`, `![alt](path)`, `href`) — uploads each, and **replaces the local path with the real eLabFTW URL**
-(only the URL; `width`, alt text, `<figcaption>` are preserved). The body is sent as **raw Markdown**
-(`content_type:2`); `<figure>` and `$...$` math render on eLabFTW as-is.
+One local file maps to one eLabFTW entry: Markdown with a YAML front matter block (inline HTML is allowed). On `push`,
+elab collects every real local file the body references — in any notation — uploads them, and swaps each path for
+its real eLabFTW URL. `width`, alt text, and `<figcaption>` survive; the body goes up as **raw Markdown**, so
+`<figure>` and `$...$` render as-is.
 
-To only **link** another entity (no upload), reference it by its full eLabFTW `http(s)` URL — schemed URLs are
-skipped. Paths inside code fences, inline code, and HTML comments are never parsed.
+To link another entry instead of uploading, just write its eLabFTW URL. Code fences, inline code, and HTML comments
+are never parsed.
 
 ## Quick start
 
@@ -73,7 +73,7 @@ category: Molecular Biology   # optional (ID or existing category name)
 profile: labA          # optional; destination profile
 ---
 
-# Body (Markdown / HTML may be mixed) ...
+# Body — Markdown, inline HTML allowed ...
 ```
 
 - Holds **only** `elab_id` + human metadata + optional `profile`. Base and hashes live in state, not here.
@@ -122,3 +122,11 @@ Structure: `client.py` (API wrapper) / `transclude.py` (both directions) / `conf
 `sync.py` (push/pull/status/diff) / `cli.py`. **The tests are the authoritative behavioral contract — change tests
 first.** Live API behavior can be checked against <https://demo.elabftw.net>; confirm version-dependent behavior on
 the real target instance too.
+
+## Related
+
+- [elab-doc-sync](https://github.com/Kosaku-Noba/elab-doc-sync)
+
+## License
+
+MIT

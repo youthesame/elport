@@ -1,5 +1,9 @@
 # eLabFTW API v2 — Measured Reference (observation log)
 
+> **This is not a full API reference.** For the complete endpoint list, see the official docs
+> ([doc.elabftw.net/api.html](https://doc.elabftw.net/api.html)). This file records only the
+> *measured, non-obvious* behaviours that elab depends on.
+
 - **Nature**: a living reference. It records **observations of the external world that is eLabFTW**. Re-acquiring
   these facts requires hitting a live server (expensive), so they are kept as settled findings. **Update it only
   when the target instance's version changes.**
