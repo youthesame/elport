@@ -468,7 +468,7 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
         )
 
     result = subprocess.run(
-        ["git", "merge-file", str(path), str(base), str(remote)],
+        ["git", "merge-file", "--", str(path), str(base), str(remote)],
         capture_output=True,
         text=True,
         check=False,
@@ -544,7 +544,7 @@ def _raise_conflict(
         _base_sidecar_path(path), frontmatter.render(meta, base_source)
     )
     print(
-        "git merge-file "
+        "git merge-file -- "
         f"{shlex.quote(str(path))} "
         f"{shlex.quote(str(_base_sidecar_path(path)))} "
         f"{shlex.quote(str(_sidecar_path(path)))}",

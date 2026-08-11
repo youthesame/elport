@@ -1072,6 +1072,7 @@ def test_push_stops_on_initial_conflict_with_merge_inputs(
             [
                 "git",
                 "merge-file",
+                "--",
                 str(doc),
                 str(doc.with_name("report.base.md")),
                 str(doc.with_name("report.remote.md")),
@@ -1169,6 +1170,7 @@ def test_post_upload_conflict_refreshes_merge_inputs(
             [
                 "git",
                 "merge-file",
+                "--",
                 str(doc),
                 str(doc.with_name("report.base.md")),
                 str(doc.with_name("report.remote.md")),
@@ -1750,6 +1752,7 @@ def test_pull_dirty_writes_three_way_sidecars(
             [
                 "git",
                 "merge-file",
+                "--",
                 str(doc),
                 str(doc.with_name("report.base.md")),
                 str(doc.with_name("report.remote.md")),
@@ -1773,7 +1776,7 @@ def test_merge_command_preserves_and_quotes_relative_document_path(
         sync.pull(doc, client, {})
 
     assert (
-        "git merge-file 'notes/my report.md' 'notes/my report.base.md' "
+        "git merge-file -- 'notes/my report.md' 'notes/my report.base.md' "
         "'notes/my report.remote.md'"
     ) in capsys.readouterr().err
 
@@ -2473,6 +2476,24 @@ def test_remote_diff_ignores_line_endings_and_trailing_newlines(
 
 def test_remote_tags_handles_null():
     assert sync._remote_tags({"tags": None}) == set()
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_merge_handles_document_name_starting_with_dash(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "-note.md").write_text("local first\nmiddle\nlast\n", encoding="utf-8")
+    (tmp_path / "-note.base.md").write_text("first\nmiddle\nlast\n", encoding="utf-8")
+    (tmp_path / "-note.remote.md").write_text(
+        "first\nmiddle\nremote last\n", encoding="utf-8"
+    )
+
+    sync.merge(Path("-note.md"), {})
+
+    assert (tmp_path / "-note.md").read_text(encoding="utf-8") == (
+        "local first\nmiddle\nremote last\n"
+    )
+    assert not (tmp_path / "-note.base.md").exists()
+    assert not (tmp_path / "-note.remote.md").exists()
 
 
 def test_successful_push_preserves_unrelated_sidecar_named_documents(
