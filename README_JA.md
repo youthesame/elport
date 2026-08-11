@@ -133,6 +133,7 @@ settings.json のように重なります（`config.toml` → `<project>/.elab.t
 ## 関連
 
 - [elab-doc-sync](https://github.com/Kosaku-Noba/elab-doc-sync)
+- [elAPI](https://github.com/uhd-urz/elAPI)
 
 ## ライセンス
 

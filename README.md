@@ -132,6 +132,7 @@ first.** Live API behavior can be checked against <https://demo.elabftw.net>.
 ## Related
 
 - [elab-doc-sync](https://github.com/Kosaku-Noba/elab-doc-sync)
+- [elAPI](https://github.com/uhd-urz/elAPI)
 
 ## License
 
