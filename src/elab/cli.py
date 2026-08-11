@@ -195,7 +195,7 @@ class _LazyClient:
 
 def _target(path: Path, profile: str | None, entity: str | None):
     data = config.load(Path.cwd(), path.parent)
-    if not path.exists():
+    if not path.is_file():
         raise RuntimeError(f"document not found: {path}")
     meta = frontmatter.parse(path.read_text(encoding="utf-8"))[0]
     if "entity" in meta:

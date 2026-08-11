@@ -203,6 +203,19 @@ def test_push_missing_document_reports_friendly_error(tmp_path, monkeypatch, cap
     assert "[Errno 2]" not in error
 
 
+def test_status_directory_reports_friendly_error(tmp_path, monkeypatch, capsys):
+    document = tmp_path / "report.md"
+    document.mkdir()
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+
+    assert cli.main(["status", str(document)]) == 1
+
+    error = capsys.readouterr().err
+    assert f"document not found: {document}" in error
+    assert "[Errno 21]" not in error
+    assert "Is a directory" not in error
+
+
 def test_atomic_write_preserves_existing_permissions(tmp_path):
     path = tmp_path / "report.md"
     path.write_text("before", encoding="utf-8")

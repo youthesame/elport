@@ -22,7 +22,7 @@ def key(base: str, entity: str, eid: str) -> str:
 def load(base: str, entity: str, eid: str) -> dict | None:
     try:
         return json.loads((_dir() / key(base, entity, eid)).read_text(encoding="utf-8"))
-    except FileNotFoundError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return None
 
 

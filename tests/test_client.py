@@ -1,4 +1,5 @@
 import pytest
+import requests
 
 from elab.client import REQUEST_TIMEOUT, Client
 
@@ -33,6 +34,21 @@ def test_request_uses_bounded_timeout(monkeypatch):
     Client("https://example.org", "key").request("GET", "/users/me")
 
     assert captured["timeout"] == REQUEST_TIMEOUT == (10, 120)
+
+
+def test_request_reports_connection_failure_without_internal_details(monkeypatch):
+    def request(*args, **kwargs):
+        raise requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr("elab.client.requests.request", request)
+
+    with pytest.raises(OSError) as error:
+        Client("https://example.org", "key").request("GET", "/users/me")
+
+    message = str(error.value)
+    assert "could not reach" in message
+    assert "ConnectionError" not in message
+    assert "boom" not in message
 
 
 @pytest.mark.parametrize(

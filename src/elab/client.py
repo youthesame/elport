@@ -23,14 +23,17 @@ class Client:
     def request(self, method, path, **kwargs):
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = self.key
-        r = requests.request(
-            method,
-            self.base + path,
-            headers=headers,
-            verify=self.verify,
-            timeout=REQUEST_TIMEOUT,
-            **kwargs,
-        )
+        try:
+            r = requests.request(
+                method,
+                self.base + path,
+                headers=headers,
+                verify=self.verify,
+                timeout=REQUEST_TIMEOUT,
+                **kwargs,
+            )
+        except requests.exceptions.RequestException as exc:
+            raise OSError(f"could not reach {self.root} (connection failed)") from exc
         if not r.ok:
             raise RuntimeError(f"API {r.status_code}: {r.text[:300]}")
         return r
