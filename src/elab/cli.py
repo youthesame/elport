@@ -170,6 +170,12 @@ def _parser() -> argparse.ArgumentParser:
     login_parser.add_argument(
         "profile", nargs="?", default="default", help="profile name (default: default)"
     )
+    logout_parser = commands.add_parser(
+        "logout", help="remove the stored api_key for a profile"
+    )
+    logout_parser.add_argument(
+        "profile", nargs="?", default="default", help="profile name (default: default)"
+    )
     return parser
 
 
@@ -272,6 +278,13 @@ def main(argv=None) -> int:
             base_url = input("base_url: ").strip()
             api_key = getpass.getpass("api_key: ")
             config.login(args.profile, base_url, api_key)
+            return 0
+        if args.cmd == "logout":
+            removed = config.logout(args.profile)
+            if removed:
+                print(f"logged out profile {args.profile}")
+            else:
+                print(f"no stored credentials for profile {args.profile}")
             return 0
         if args.cmd == "new":
             _new(args)

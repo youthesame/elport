@@ -57,6 +57,7 @@ elab push                             # 参照ファイルをアップロード�
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | 記録を作成し、フロントマターの雛形を生成します。 |
 | `elab whoami [--profile <name>]` | 認証を確認し、ユーザーと現在のチームを表示します。 |
 | `elab login [<profile>]` | `base_url` を `config.toml` に、`api_key` を OS キーリングに保存します。入力はプロンプト式で、キーは画面に出ません。 |
+| `elab logout [<profile>]` | プロファイルの保存済み `api_key` をキーリングと config の平文から削除し、`base_url` は残します。 |
 
 オプション:
 

@@ -54,6 +54,7 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Create an entity + scaffold front matter. |
 | `elab whoami [--profile <name>]` | Auth check; shows user and active team. |
 | `elab login [<profile>]` | Store base_url → `config.toml`, api_key → OS keyring. Prompts; the key is not echoed. |
+| `elab logout [<profile>]` | Remove the stored api_key for a profile (keyring + config plaintext); keeps base_url. |
 
 Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>` (resolution: front matter → CLI → default),
 `-f/--force` (push over a changed remote — the Web-side change is lost), `-y/--yes` (push: skip the confirmation when

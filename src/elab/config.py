@@ -127,3 +127,25 @@ def login(name: str, url: str, api_key: str) -> None:
         profile["api_key"] = api_key
         _atomic_write(p, tomli_w.dumps(data))
         print(PLAINTEXT_WARNING, file=sys.stderr)
+
+
+def logout(name: str) -> bool:
+    """Remove the stored api_key for a profile from keyring and config.toml.
+
+    Returns True if anything was removed. Leaves base_url intact.
+    """
+    removed = False
+    try:
+        keyring.delete_password("elab", name)
+        removed = True
+    except KeyringError:
+        pass
+
+    p = config_path()
+    data = _read(p)
+    profile = data.get("profiles", {}).get(name, {})
+    if "api_key" in profile:
+        del profile["api_key"]
+        _atomic_write(p, tomli_w.dumps(data))
+        removed = True
+    return removed

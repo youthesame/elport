@@ -1,9 +1,10 @@
 import stat
 from pathlib import Path
 
+import keyring.errors
 import pytest
 
-from elab import cli, frontmatter, sync
+from elab import cli, config, frontmatter, sync
 
 
 class NewClient:
@@ -23,6 +24,82 @@ class NewClient:
 
     def me(self):
         return {"team": 7}
+
+
+def test_logout_removes_plaintext_api_key_and_calls_keyring(tmp_path, monkeypatch):
+    user = tmp_path / "config.toml"
+    user.write_text(
+        '[profiles.lab]\nbase_url = "https://e.example"\napi_key = "secret"\n',
+        encoding="utf-8",
+    )
+    calls = []
+    monkeypatch.setattr(config, "config_path", lambda: user)
+    monkeypatch.setattr(
+        config.keyring,
+        "delete_password",
+        lambda *args: calls.append(args),
+    )
+
+    assert config.logout("lab") is True
+
+    assert calls == [("elab", "lab")]
+    assert config._read(user)["profiles"]["lab"] == {"base_url": "https://e.example"}
+
+
+def test_logout_returns_false_when_no_credentials_are_stored(tmp_path, monkeypatch):
+    user = tmp_path / "config.toml"
+    user.write_text(
+        '[profiles.lab]\nbase_url = "https://e.example"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(config, "config_path", lambda: user)
+    monkeypatch.setattr(
+        config.keyring,
+        "delete_password",
+        lambda *args: (_ for _ in ()).throw(keyring.errors.PasswordDeleteError()),
+    )
+
+    assert config.logout("lab") is False
+    assert config._read(user)["profiles"]["lab"] == {"base_url": "https://e.example"}
+
+
+def test_logout_removes_plaintext_key_when_keyring_is_unavailable(
+    tmp_path, monkeypatch
+):
+    user = tmp_path / "config.toml"
+    user.write_text(
+        '[profiles.lab]\nbase_url = "https://e.example"\napi_key = "secret"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(config, "config_path", lambda: user)
+    monkeypatch.setattr(
+        config.keyring,
+        "delete_password",
+        lambda *args: (_ for _ in ()).throw(keyring.errors.KeyringError()),
+    )
+
+    assert config.logout("lab") is True
+    assert config._read(user)["profiles"]["lab"] == {"base_url": "https://e.example"}
+
+
+@pytest.mark.parametrize(
+    ("argv", "removed", "expected"),
+    [
+        (["logout", "labX"], True, "logged out profile labX\n"),
+        (["logout"], False, "no stored credentials for profile default\n"),
+    ],
+)
+def test_logout_reports_result(argv, removed, expected, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(
+        cli.config,
+        "logout",
+        lambda name: calls.append(name) or removed,
+        raising=False,
+    )
+
+    assert cli.main(argv) == 0
+    assert calls == [argv[1] if len(argv) > 1 else "default"]
+    assert capsys.readouterr().out == expected
 
 
 def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch, capsys):
