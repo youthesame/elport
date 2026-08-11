@@ -59,9 +59,10 @@ hard-to-undo change to someone else's work, so treat it like any irreversible ou
 action: **use `--force` only with the user's explicit go-ahead.**
 
 - Normal path: `elab pull`; on a conflict elab writes `<name>.base.md` (ancestor) and
-  `<name>.remote.md`, then run `elab merge` to 3-way them into the note (git optional —
-  falls back to a manual-merge hint), resolve any `<<<<<<<` markers, and `push`. push
-  refuses a body that still carries conflict markers.
+  `<name>.remote.md`, then run `elab merge` to 3-way them into the note (git optional),
+  resolve any `<<<<<<<` markers, and `push`. If you merge the sidecars by hand instead
+  (no git), run `elab merge --resolved` before pushing — it records the reconciled remote
+  so `push` doesn't re-report the same conflict. push refuses a body that still carries markers.
 - If you can't tell whether the remote change matters, show `elab diff` and ask —
   don't guess, and don't reach for `--force` just to clear the error.
 

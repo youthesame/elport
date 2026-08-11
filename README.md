@@ -95,8 +95,10 @@ Since you may edit the body in the Web UI, `push` compares the current remote ag
 
 - **unchanged** → proceeds.
 - **changed** → aborts (`remote changed; use pull or --force`). elab writes `<name>.base.md` (ancestor) and
-  `<name>.remote.md`; run `elab merge` to 3-way them into your file (or merge them by hand), then push. push refuses
-  a body that still has `<<<<<<<`/`>>>>>>>` markers.
+  `<name>.remote.md`; run `elab merge` to 3-way them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then
+  push. Prefer to merge by hand instead? Reconcile the sidecars into your file, then run `elab merge --resolved`
+  before pushing — that step records the reconciled remote so `push` doesn't just re-report the same conflict. push
+  refuses a body that still has markers.
 - **no base on this machine** → aborts; `elab pull` first, or `--force` to overwrite blind.
 
 `--force` discards the Web-side change — use it deliberately. eLabFTW keeps server-side history recoverable from the
