@@ -5,11 +5,6 @@
 Write lab notes locally in Markdown — inline HTML like `<figure>` is fine — then `push`/`pull` them, along with
 every figure and data file the body references, to eLabFTW entities. **Local is the source of truth.**
 
-- **Why it works this way** → [docs/DESIGN.md](docs/DESIGN.md)
-- **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
-- **The behavioral contract** → the test suite (`tests/`) is authoritative
-- **Driving elab from an AI agent** → [skills/elab/SKILL.md](skills/elab/SKILL.md)
-
 ## Install
 
 Python 3.10+, installed as a `uv` tool (provides the `elab` command):
@@ -20,13 +15,10 @@ uv tool install git+https://github.com/youthesame/elab
 
 ## The core idea
 
-One local file maps to one eLabFTW entry: Markdown with a YAML front matter block (inline HTML is allowed). On `push`,
-elab collects every real local file the body references — in any notation — uploads them, and swaps each path for
-its real eLabFTW URL. `width`, alt text, and `<figcaption>` survive; the body goes up as **raw Markdown**, so
-`<figure>` and `$...$` render as-is.
-
-To link another entry instead of uploading, just write its eLabFTW URL. Code fences, inline code, and HTML comments
-are never parsed.
+One local file maps to one eLabFTW entry: Markdown with a YAML front matter block (inline HTML allowed). On `push`,
+elab uploads every real local file the body references — in any notation — and swaps each path for its real eLabFTW
+URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry instead of
+uploading, just write its eLabFTW URL. Code fences, inline code, and HTML comments are never parsed.
 
 ## Quick start
 
@@ -44,84 +36,71 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 
 | Command | Summary |
 |---|---|
-| `elab push [<doc>]` | Push `<doc>` to one entity. Creates the entity (writing `elab_id` back) if unset. Runs mode + conflict checks first. |
+| `elab push [<doc>]` | Push `<doc>` to one entity. Creates it (writing `elab_id` back) if unset. Runs mode + conflict checks first. |
 | `elab pull [<doc>]` | Fetch the body, reverse-transclude URLs back to local paths, download referenced files. |
 | `elab status [<doc>]` | Side-effect-free: is local changed? was the remote edited? which files upload? what mode? |
 | `elab diff [<doc>]` | Source-form diff. Default local ↔ remote; `--base` for local ↔ last push. Never sends. |
-| `elab merge [<doc>]` | After a conflict, run `git merge-file` on the `.base.md`/`.remote.md` sidecars into `<doc>`. Local-only; git optional. |
+| `elab merge [<doc>]` | After a conflict, 3-way `.base.md`/`.remote.md` into `<doc>` via `git merge-file`. Local-only; git optional. |
 | `elab comments [<doc>]` | Print the remote comment thread (terminal only; never written into the body). |
 | `elab comment [<doc>] "<text>"` | Post one comment to the entity (no edit/delete — use the Web UI). |
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Create an entity + scaffold front matter. |
 | `elab whoami [--profile <name>]` | Auth check; shows user and active team. |
 | `elab login [<profile>]` | Store base_url → `config.toml`, api_key → OS keyring. Prompts; the key is not echoed. |
-| `elab logout [<profile>]` | Remove the stored api_key for a profile (keyring + config plaintext); keeps base_url. |
+| `elab logout [<profile>]` | Remove the stored api_key for a profile; keeps base_url. |
 
-Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>` (resolution: front matter → CLI → default),
-`-f/--force` (push over a changed remote — the Web-side change is lost), `-y/--yes` (push: skip the confirmation when
-widening `read`/`write` to `account`/`public`), `--entity {experiments,items}` (front matter wins).
+Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>`, `-f/--force` (push over a changed remote — the
+Web-side change is lost), `-y/--yes` (skip the confirmation when widening `read`/`write` beyond your team),
+`--entity {experiments,items}`.
 
-> Reverse transclusion (pull) writes files back by **basename only** — a subdirectory path like `assets/fig.png` is
-> flattened to `fig.png`.
+> pull writes referenced files back by **basename only** — a subdirectory path like `assets/fig.png` is flattened to
+> `fig.png`.
 
 ## Document format (front matter)
 
-Put a YAML block at the top (generated/completed on push if absent):
+A YAML block at the top (generated/completed on push if absent):
 
 ```markdown
 ---
-elab_id: 42            # entity ID (auto-filled on creation)
-entity: experiments    # experiments | items (default experiments)
-title: "260806 experiment title"
-tags: [CRISPR, PCR]    # optional; add-only
-category: Molecular Biology   # optional (ID or existing category name)
-status: Running        # optional (ID or existing entity status name)
-profile: labA          # optional; destination profile
-read: team             # optional; owner | owner+admin | team | account | public
-write: owner           # optional; same scale
+elab_id: 42                   # entity ID (auto-filled on creation)
+entity: experiments           # experiments | items (default experiments)
+title: "experiment title"
+tags: [CRISPR, PCR]           # optional; add-only (remove tags in the Web UI)
+category: Molecular Biology   # optional; ID or existing category name (elab never creates categories)
+status: Running               # optional; ID or existing status name (elab never creates statuses)
+profile: labA                 # optional; destination profile
+read: team                    # optional; owner | owner+admin | team | account | public
+write: owner                  # optional; same scale
 ---
 
 # Body — Markdown, inline HTML allowed ...
 ```
 
-- Holds **only** `elab_id` + human metadata + optional `profile`. Base and hashes live in state, not here.
-- `title`/`category` are reflected. `category` must already exist; elab never creates categories. **`tags` are
-  add-only** (remove tags in the Web UI). Front matter is stripped before the body is sent.
-- `status` must be an existing entity status name or ID. It is reflected only when present; if omitted, the remote
-  status is untouched. elab never creates statuses.
-- `read`/`write` set the eLabFTW **base visibility**, and only when present — omit them and elab leaves permissions
-  untouched. Only the base level is sent, so individual grants you set in the Web UI are preserved. Widening to
-  `account`/`public` (i.e. beyond your team) asks for confirmation (`-y` skips it; a non-interactive run needs `-y`).
+- Holds **only** `elab_id` + human metadata + optional `profile`; base and hashes live in state. Front matter is
+  stripped before the body is sent.
+- `title` / `category` / `status` / `read` / `write` are reflected **only when present** — omit a key and elab
+  leaves that remote value untouched. `read`/`write` set the eLabFTW base visibility only, so individual Web-UI
+  grants are preserved; widening beyond your team asks for confirmation (`-y` skips; non-interactive needs `-y`).
 - If front matter and CLI disagree on profile / entity / elab_id, elab **stops** rather than guessing.
 
 ## Conflicts
 
-Since you may edit the body in the Web UI, `push` compares the current remote against the stored base first:
+Since you may also edit the body in the Web UI, `push` compares the current remote against the stored base first:
 
 - **unchanged** → proceeds.
-- **changed** → aborts (`remote changed; use pull or --force`). elab writes `<name>.base.md` (ancestor) and
-  `<name>.remote.md`; run `elab merge` to 3-way them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then
-  push. Prefer to merge by hand instead? Reconcile the sidecars into your file, then run `elab merge --resolved`
-  before pushing — that step records the reconciled remote so `push` doesn't just re-report the same conflict. push
-  refuses a body that still has markers.
+- **changed** → aborts. elab writes `<name>.base.md` (ancestor) and `<name>.remote.md`; run `elab merge` to 3-way
+  them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then push. (push refuses a body that still has
+  markers.)
 - **no base on this machine** → aborts; `elab pull` first, or `--force` to overwrite blind.
 
 `--force` discards the Web-side change — use it deliberately. eLabFTW keeps server-side history recoverable from the
-Web UI as a safety net (not on every save — see [docs/ELABFTW-API.md](docs/ELABFTW-API.md)).
-
-> elab keeps no local history of its own — its base lives under `~/.config`, not your tree. Want per-edit history?
-> `git init` your notes folder and commit as usual; the files are plain Markdown.
+Web UI as a safety net. elab keeps no local history of its own; want per-edit history? `git init` your notes folder —
+the files are plain Markdown.
 
 ## Configuration & auth
 
-**No credentials in the project.** API key → OS keyring (Keychain / Credential Manager / Secret Service), set via
-`elab login`. base_url and non-secrets → `~/.config/elab/config.toml` (mode `600`). The key is never printed.
-
-Resolution order: (1) env `ELABFTW_BASE_URL` + `ELABFTW_API_KEY` (both required together, for CI); (2) keyring +
-`config.toml` (normal default); (3) no keyring backend → prompted toward env, with an explicit warning if it falls
-back to a plaintext key in config.
-
-Profiles override in layers, like settings.json: `~/.config/elab/config.toml` (user) → `<project>/.elab.toml` →
-`<dir>/.elab.toml`. Each holds base_url etc.; keys always go to the keyring, one profile per team.
+**No credentials in the project.** `elab login` stores the API key in your OS keyring (Keychain / Credential
+Manager / Secret Service); base_url and other non-secrets live in `~/.config/elab/config.toml` (mode `600`, key
+never printed).
 
 ```toml
 # ~/.config/elab/config.toml
@@ -132,14 +111,23 @@ base_url   = "https://elab-a.example.org"
 verify_ssl = true
 ```
 
-`.elabignore` gives `.gitignore`-style exclusion for referenced files, additive across the layers above.
+Credentials resolve **env → keyring+config → plaintext**: `ELABFTW_BASE_URL`+`ELABFTW_API_KEY` for CI, the keyring
+pair as the normal default, then a warned plaintext-in-config fallback only when no keyring backend exists. Profiles
+layer like settings.json (`config.toml` → `<project>/.elab.toml` → `<dir>/.elab.toml`, one per team); `.elabignore`
+excludes referenced files `.gitignore`-style, additive across those layers.
+
+## Learn more
+
+- **Why it works this way** → [docs/DESIGN.md](docs/DESIGN.md)
+- **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
+- **The behavioral contract** → the test suite (`tests/`) is authoritative
+- **Driving elab from an AI agent** → [skills/elab/SKILL.md](skills/elab/SKILL.md)
 
 ## Development
 
 Structure: `client.py` (API wrapper) / `transclude.py` (both directions) / `config.py` / `state.py` (base) /
 `sync.py` (push/pull/status/diff) / `cli.py`. **The tests are the authoritative behavioral contract — change tests
-first.** Live API behavior can be checked against <https://demo.elabftw.net>; confirm version-dependent behavior on
-the real target instance too.
+first.** Live API behavior can be checked against <https://demo.elabftw.net>.
 
 ## Related
 

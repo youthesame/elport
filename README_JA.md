@@ -3,13 +3,7 @@
 [English](README.md) | [日本語](README_JA.md)
 
 ラボノートを手元のエディタで Markdown として書き、`<figure>` などの HTML 断片も混ぜられます。図やデータファイルごと
-eLabFTW へ `push` / `pull` します。同期の基準になるのはいつも手元のファイルです。本文から参照されている添付ファイルも
-まとめて運びます。
-
-- なぜこの設計なのか → [docs/DESIGN.md](docs/DESIGN.md)
-- eLabFTW の API が実際にどう振る舞うか → [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
-- 動作の最終的な基準は `tests/` のテストです
-- AI エージェントから elab を動かす → [skills/elab/SKILL.md](skills/elab/SKILL.md)
+eLabFTW へ `push` / `pull` します。同期の基準になるのはいつも手元のファイルです。
 
 ## インストール
 
@@ -21,15 +15,11 @@ uv tool install git+https://github.com/youthesame/elab
 
 ## 中心となる考え方
 
-手元の 1 ファイルが eLabFTW 上の 1 件の記録に対応します。記録には実験とデータベース項目の 2 種類があり、どちらにも
-push できます。ファイルは YAML フロントマターを付けた Markdown で、`<figure>` などの HTML 断片も書けます。
-
-`push` すると、elab は本文が参照している実在のローカルファイルを記法によらず集めてアップロードし、そのパスを本物の
-eLabFTW の URL に置き換えます。`width` や alt、`<figcaption>` は残り、本文は生の Markdown として送られるので
-`<figure>` や `$...$` はそのまま表示されます。
-
-別の記録は、その eLabFTW の URL をそのまま書けばアップロードせずリンクできます。コードフェンス・インラインコード・HTML
-コメントの中は解析しません。
+手元の 1 ファイルが eLabFTW 上の 1 件の記録に対応します。ファイルは YAML フロントマターを付けた Markdown で、`<figure>`
+などの HTML 断片も書けます。`push` すると、elab は本文が参照している実在のローカルファイルを記法によらずアップロードし、
+そのパスを本物の eLabFTW の URL に置き換えます。本文は生の Markdown として送られるので `<figure>` や `$...$` はそのまま
+表示されます。別の記録は、その eLabFTW の URL をそのまま書けばアップロードせずリンクできます。コードフェンス・インライン
+コード・HTML コメントの中は解析しません。
 
 ## クイックスタート
 
@@ -51,23 +41,19 @@ elab push                             # 参照ファイルをアップロード�
 | `elab pull [<doc>]` | 本文を取得し、URL をローカルパスへ戻し、参照ファイルをダウンロードします。 |
 | `elab status [<doc>]` | 副作用なし。ローカルの変更、リモートの編集、アップロードされるファイル、モードを表示します。 |
 | `elab diff [<doc>]` | ソース形式の差分。デフォルトはローカルとリモートの比較で、`--base` を付けるとローカルと最後の push の比較になります。送信しません。 |
-| `elab merge [<doc>]` | コンフリクト後、`.base.md`/`.remote.md` サイドカーを `git merge-file` で `<doc>` に3-wayマージします。ローカルのみ・git は任意。 |
+| `elab merge [<doc>]` | コンフリクト後、`.base.md`/`.remote.md` を `git merge-file` で `<doc>` に3-wayマージします。ローカルのみ・git は任意。 |
 | `elab comments [<doc>]` | リモートのコメントスレッドを表示します（端末のみ。本文には書き込みません）。 |
 | `elab comment [<doc>] "<text>"` | コメントを1件投稿します（編集・削除はしません。Web UI で行ってください）。 |
 | `elab new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | 記録を作成し、フロントマターの雛形を生成します。 |
 | `elab whoami [--profile <name>]` | 認証を確認し、ユーザーと現在のチームを表示します。 |
 | `elab login [<profile>]` | `base_url` を `config.toml` に、`api_key` を OS キーリングに保存します。入力はプロンプト式で、キーは画面に出ません。 |
-| `elab logout [<profile>]` | プロファイルの保存済み `api_key` をキーリングと config の平文から削除し、`base_url` は残します。 |
+| `elab logout [<profile>]` | プロファイルの保存済み `api_key` を削除し、`base_url` は残します。 |
 
-オプション:
+オプション: `-n`/`--dry-run`（push のリハーサル。送信しない）、`--profile <name>`、`-f`/`--force`（変更済みのリモートに
+上書き push。Web 側の変更は失われる）、`-y`/`--yes`（`read`/`write` をチーム外へ広げるときの確認を省略）、
+`--entity {experiments,items}`。
 
-- `-n` / `--dry-run` … push のリハーサル。送信しません。
-- `--profile <name>` … 使うプロファイル。解決順はフロントマター、CLI、デフォルトの順です。
-- `-f` / `--force` … 変更済みのリモートに上書きで push します。Web 側の変更は失われます。
-- `-y` / `--yes` … push で `read`/`write` を `account`/`public` へ広げるときの確認を省略します。
-- `--entity experiments|items` … フロントマターの指定が優先されます。
-
-> pull でファイルを書き戻すときはベース名だけを使います。`assets/fig.png` のようなサブディレクトリ付きのパスは
+> pull でファイルを書き戻すときは**ベース名だけ**を使います。`assets/fig.png` のようなサブディレクトリ付きのパスは
 > `fig.png` に平坦化されます。
 
 ## ドキュメント形式 — フロントマター
@@ -76,66 +62,46 @@ elab push                             # 参照ファイルをアップロード�
 
 ```markdown
 ---
-elab_id: 42            # 記録の ID。作成時に自動で埋まる
-entity: experiments    # experiments か items。デフォルトは experiments
-title: "260806 experiment title"
-tags: [CRISPR, PCR]    # 任意。追加のみ
-category: Molecular Biology   # 任意。ID または既存のカテゴリ名
-status: Running        # 任意。ID または既存のエンティティステータス名
-profile: labA          # 任意。送信先プロファイル
-read: team             # 任意。owner | owner+admin | team | account | public
-write: owner           # 任意。同じ段階
+elab_id: 42                   # 記録の ID。作成時に自動で埋まる
+entity: experiments           # experiments か items。デフォルトは experiments
+title: "experiment title"
+tags: [CRISPR, PCR]           # 任意。追加のみ（削除は Web UI で）
+category: Molecular Biology   # 任意。ID または既存のカテゴリ名（elab は作成しない）
+status: Running               # 任意。ID または既存のステータス名（elab は作成しない）
+profile: labA                 # 任意。送信先プロファイル
+read: team                    # 任意。owner | owner+admin | team | account | public
+write: owner                  # 任意。同じ段階
 ---
 
 # 本文。Markdown で書き、HTML 断片も混ぜてよい ...
 ```
 
-- 保持するのは `elab_id` と人が読むメタデータ、任意の `profile` だけです。ベースやハッシュは state に持ち、ここには
-  置きません。
-- `title` と `category` は反映されます。`category` は既存のものに限り、elab はカテゴリを作成しません。`tags` は追加のみで、
-  削除は Web UI で行います。フロントマターは本文を送る前に取り除かれます。
-- `status` は既存のエンティティステータス名または ID に限ります。書いたときだけ反映し、無ければリモートのステータスには
-  触れません。elab はステータスを作成しません。
-- `read`/`write` は eLabFTW の**ベース公開範囲**を設定します。書いたときだけ反映し、無ければ権限には一切触れません。
-  送るのはベース段階のみなので、Web UI で設定した個別共有は保持されます。`account`/`public`（チーム外）へ広げるときは
-  確認します（`-y` で省略。非対話では `-y` が必要）。
-- フロントマターと CLI が profile や entity、elab_id で食い違ったら、elab は推測せずに停止します。
+- 保持するのは `elab_id` と人が読むメタデータ、任意の `profile` だけです。ベースやハッシュは state に持ちます。フロント
+  マターは本文を送る前に取り除かれます。
+- `title` / `category` / `status` / `read` / `write` は**書いたときだけ**反映され、省略した項目はリモートの値に触れません。
+  `read`/`write` はベース公開範囲のみを設定するので Web UI の個別共有は保持され、チーム外へ広げるときは確認します
+  （`-y` で省略。非対話では `-y` が必要）。
+- フロントマターと CLI が profile や entity、elab_id で食い違ったら、elab は推測せずに**停止**します。
 
 ## コンフリクト
 
 本文は Web UI でも編集できるため、`push` はまず現在のリモートを保存済みのベースと比べます。
 
-- 変更なし … そのまま続行します。
-- 変更あり … 中止します。メッセージは `remote changed; use pull or --force` です。elab は `<name>.base.md`（祖先）と
-  `<name>.remote.md` を出力するので、`elab merge` で `<doc>` に3-wayマージし、`<<<<<<<`/`>>>>>>>` マーカーを解消してから
-  push します。手動でマージしたい場合は、サイドカーを本文に取り込んだあと push の前に `elab merge --resolved` を実行して
-  ください（このステップが取り込んだリモートを記録するので、push が同じコンフリクトを再度報告しません）。マーカーが残った
-  本文は push が拒否します。
-- このマシンにベースが無い … 中止します。先に `elab pull` するか、`--force` で上書きします。
+- **変更なし** … そのまま続行します。
+- **変更あり** … 中止します。elab は `<name>.base.md`（祖先）と `<name>.remote.md` を出力するので、`elab merge` で
+  `<doc>` に3-wayマージし、`<<<<<<<`/`>>>>>>>` マーカーを解消してから push します（マーカーが残った本文は push が拒否
+  します）。
+- **このマシンにベースが無い** … 中止します。先に `elab pull` するか、`--force` で上書きします。
 
 `--force` は Web 側の変更を捨てます。意図して使ってください。eLabFTW は Web UI から復元できるサーバー側の履歴を安全網
-として持っています。ただし毎回の保存ごとに残るわけではありません。詳しくは [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
-を見てください。
-
-> elab 自身は手元の履歴を持ちません。ベースは `~/.config` にあり、tree には入りません。編集ごとの履歴が欲しければ
-> ノートフォルダで `git init` してください。ファイルはただの Markdown です。
+として持っています。elab 自身は手元の履歴を持ちません。編集ごとの履歴が欲しければノートフォルダで `git init` して
+ください。ファイルはただの Markdown です。
 
 ## 設定と認証
 
-資格情報はプロジェクトの中に置きません。API キーは OS キーリングに保存し、`elab login` で設定します。キーリングは
-macOS の Keychain、Windows の Credential Manager、Linux の Secret Service です。base_url など機密でない値は
-`~/.config/elab/config.toml` に保存され、ファイルのモードは `600` です。キーは決して表示されません。
-
-解決順は次のとおりです。
-
-1. 環境変数 `ELABFTW_BASE_URL` と `ELABFTW_API_KEY`。両方セットしたときに有効で、主に CI 用です。
-2. キーリングと `config.toml`。通常はこれです。
-3. キーリングのバックエンドが無いときは環境変数の利用を促します。config の平文キーにフォールバックするときは、はっきり
-   警告します。
-
-プロファイルは settings.json のように層で重なって上書きされます。順に `~/.config/elab/config.toml`、プロジェクト直下の
-`.elab.toml`、各ディレクトリの `.elab.toml` です。どの層も base_url などを持てますが、キーは常にキーリングに入り、
-1 つのプロファイルは 1 つのチームに対応します。
+**資格情報はプロジェクトの中に置きません。** `elab login` で API キーを OS キーリング（Keychain / Credential Manager /
+Secret Service）に保存し、base_url など機密でない値は `~/.config/elab/config.toml`（モード `600`、キーは非表示）に置き
+ます。
 
 ```toml
 # ~/.config/elab/config.toml
@@ -146,14 +112,23 @@ base_url   = "https://elab-a.example.org"
 verify_ssl = true
 ```
 
-`.elabignore` は参照ファイルに `.gitignore` と同じ形式の除外を与えます。上の層をまたいで加算的に働きます。
+資格情報の解決順は **環境変数 → キーリング+config → 平文** です。CI 用の `ELABFTW_BASE_URL`+`ELABFTW_API_KEY`、通常は
+キーリングの組、そしてキーリングのバックエンドが無いときだけ警告つきで config 平文にフォールバックします。プロファイルは
+settings.json のように重なります（`config.toml` → `<project>/.elab.toml` → `<dir>/.elab.toml`、1 プロファイル 1 チーム）。
+`.elabignore` は参照ファイルを `.gitignore` 形式で、上の層をまたいで加算的に除外します。
+
+## さらに詳しく
+
+- **なぜこの設計なのか** → [docs/DESIGN.md](docs/DESIGN.md)
+- **eLabFTW の API が実際にどう振る舞うか** → [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
+- **動作の最終的な基準** → `tests/` のテストが権威です
+- **AI エージェントから elab を動かす** → [skills/elab/SKILL.md](skills/elab/SKILL.md)
 
 ## 開発
 
 構成は次のとおりです。`client.py` が API ラッパ、`transclude.py` が双方向の変換、`config.py`、`state.py` がベース、
 `sync.py` が push/pull/status/diff、`cli.py` です。動作の最終的な基準はテストなので、変更するときはテストから直します。
-ライブの API 挙動は <https://demo.elabftw.net> で確認できます。バージョンに依存する挙動は実際の対象インスタンスでも
-確認してください。
+ライブの API 挙動は <https://demo.elabftw.net> で確認できます。
 
 ## 関連
 
