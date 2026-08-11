@@ -94,6 +94,7 @@ def configured(monkeypatch):
         "base_target",
         lambda config, profile, meta: ("test", "https://e.example", True),
     )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
 
 
 def write_doc(path: Path, body: str, **extra):
@@ -204,7 +205,7 @@ def test_merge_requires_both_sidecars(tmp_path):
         RuntimeError,
         match=r"no conflict to merge; run push/pull first .*report\.base\.md.*report\.remote\.md",
     ):
-        sync.merge(doc)
+        sync.merge(doc, {})
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
@@ -216,7 +217,7 @@ def test_merge_cleanly_updates_document_and_deletes_sidecars(tmp_path, capsys):
     base.write_text("first\nmiddle\nlast\n", encoding="utf-8")
     remote.write_text("first\nmiddle\nremote last\n", encoding="utf-8")
 
-    sync.merge(doc)
+    sync.merge(doc, {})
 
     assert doc.read_text(encoding="utf-8") == "local first\nmiddle\nremote last\n"
     assert not base.exists()
@@ -224,6 +225,65 @@ def test_merge_cleanly_updates_document_and_deletes_sidecars(tmp_path, capsys):
     assert capsys.readouterr().out == (
         f"merged cleanly into {doc}; review and run 'elab push'\n"
     )
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_clean_merge_promotes_pending_remote_and_allows_regular_push(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    base_body = "first\nmiddle\nlast\n"
+    remote_body = "first\nmiddle\nremote last\n"
+    write_doc(doc, "local first\nmiddle\nlast\n")
+    stored_state = saved_state(local=base_body, remote=base_body)
+    saved_versions = []
+
+    def load_state(*args):
+        assert args == ("https://e.example", "experiments", "1")
+        return stored_state
+
+    def save_state(*args):
+        assert args[:3] == ("https://e.example", "experiments", "1")
+        stored_state.clear()
+        stored_state.update(args[3])
+        saved_versions.append(dict(stored_state))
+
+    monkeypatch.setattr(sync.state, "load", load_state)
+    monkeypatch.setattr(sync.state, "save", save_state)
+    client = FakeClient(
+        gets=[
+            {"body": remote_body},
+            {"body": remote_body},
+            {"body": remote_body},
+            {"body": "stored merged", "content_type": 2},
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="remote changed"):
+        sync.push(doc, client, {})
+
+    assert saved_versions[-1] == {
+        "local_base": base_body,
+        "remote_base": base_body,
+        "team": 7,
+        "pending_remote": remote_body,
+    }
+
+    sync.merge(doc, {})
+
+    merged_body = "local first\nmiddle\nremote last\n"
+    assert frontmatter.parse(doc.read_text(encoding="utf-8"))[1] == merged_body
+    assert stored_state == {
+        "local_base": base_body,
+        "remote_base": remote_body,
+        "team": 7,
+    }
+
+    sync.push(doc, client, {})
+
+    assert "patch" in client.calls
+    assert client.saved_payload is not None
+    assert client.saved_payload["body"] == merged_body
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
@@ -235,8 +295,11 @@ def test_merge_conflict_keeps_sidecars_and_writes_markers(tmp_path):
     base.write_text("base\n", encoding="utf-8")
     remote.write_text("remote\n", encoding="utf-8")
 
-    with pytest.raises(RuntimeError, match=f"1 conflict.*{doc}"):
-        sync.merge(doc)
+    with pytest.raises(
+        RuntimeError,
+        match=f"1 conflict.*{doc}.*then run 'elab push --force'",
+    ):
+        sync.merge(doc, {})
 
     merged = doc.read_text(encoding="utf-8")
     assert "<<<<<<< " in merged
@@ -258,7 +321,7 @@ def test_merge_without_git_leaves_document_untouched(tmp_path, monkeypatch, caps
     with pytest.raises(
         RuntimeError, match=r"merge .*report\.base\.md.*report\.remote\.md manually"
     ):
-        sync.merge(doc)
+        sync.merge(doc, {})
 
     assert doc.read_text(encoding="utf-8") == "local\n"
     assert base.exists()
@@ -284,7 +347,7 @@ def test_merge_reports_git_execution_errors(tmp_path, monkeypatch, returncode):
     )
 
     with pytest.raises(RuntimeError, match="git failed"):
-        sync.merge(doc)
+        sync.merge(doc, {})
 
     assert base.exists()
     assert remote.exists()
@@ -451,6 +514,37 @@ def test_push_omits_undeclared_permissions(tmp_path, monkeypatch, configured):
         }
         & client.saved_payload.keys()
     )
+
+
+@pytest.mark.parametrize("field", ["read", "write"])
+def test_locked_declared_permission_stops_before_upload_or_patch(
+    tmp_path, monkeypatch, configured, field
+):
+    doc = tmp_path / "report.md"
+    attachment = tmp_path / "data.csv"
+    attachment.write_text("new", encoding="utf-8")
+    write_doc(doc, "[data](data.csv)", **{field: "team"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            f"can{field}_base": 30,
+            f"can{field}_is_immutable": True,
+        }
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(
+        sync.state, "save", lambda *args: pytest.fail("state must not change")
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"^{field} permission is locked on this entity \(admin-set\); "
+        rf"remove '{field}:' or ask an admin$",
+    ):
+        sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get"]
+    assert client.saved_payload is None
 
 
 def test_permission_widening_interactive_yes_applies_once(
@@ -711,14 +805,17 @@ def test_push_stops_if_remote_changes_after_uploads(tmp_path, monkeypatch, confi
     (tmp_path / "data.csv").write_text("new")
     write_doc(doc, "[data](data.csv)")
     client = FakeClient(gets=[{"body": "remote"}, {"body": "web edit"}])
-    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
-    monkeypatch.setattr(sync.state, "save", lambda *args: pytest.fail("state changed"))
+    stored_state = saved_state()
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+    monkeypatch.setattr(sync.state, "save", lambda *args: stored_state.update(args[-1]))
 
     with pytest.raises(RuntimeError, match="after uploads"):
         sync.push(doc, client, {})
 
     assert "upload" in client.calls
     assert "patch" not in client.calls
+    assert stored_state["remote_base"] == "remote"
+    assert stored_state["pending_remote"] == "web edit"
 
 
 def test_push_stops_on_initial_conflict_with_merge_inputs(

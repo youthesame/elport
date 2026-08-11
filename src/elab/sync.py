@@ -287,6 +287,12 @@ def push(
         client, entity, identity.get("team"), meta.get("category")
     )
     remote_doc = remote.get() if remote is not None else {}
+    for field in ("read", "write"):
+        if field in meta and remote_doc.get(f"can{field}_is_immutable"):
+            raise RuntimeError(
+                f"{field} permission is locked on this entity (admin-set); "
+                f"remove '{field}:' or ask an admin"
+            )
     if eid and saved is None and not force:
         raise RuntimeError("base unavailable; run pull first or use --force")
     if (
@@ -425,7 +431,7 @@ def _base_sidecar_path(path: Path) -> Path:
     return path.with_name(path.stem + ".base.md")
 
 
-def merge(path: Path) -> None:
+def merge(path: Path, config: dict, profile=None) -> None:
     base = _base_sidecar_path(path)
     remote = _sidecar_path(path)
     if not base.exists() or not remote.exists():
@@ -442,6 +448,21 @@ def merge(path: Path) -> None:
         check=False,
     )
     if result.returncode == 0:
+        meta, _, entity, eid = _document(path, config)
+        if eid:
+            try:
+                _, base_url, _ = config_module.base_target(config, profile, meta)
+            except ValueError:
+                pass
+            else:
+                saved = state.load(base_url, entity, str(eid))
+                if saved is not None and "pending_remote" in saved:
+                    updated = {
+                        **saved,
+                        "remote_base": saved["pending_remote"],
+                    }
+                    del updated["pending_remote"]
+                    state.save(base_url, entity, str(eid), updated)
         base.unlink()
         remote.unlink()
         print(f"merged cleanly into {path}; review and run 'elab push'")
@@ -451,7 +472,7 @@ def merge(path: Path) -> None:
     if result.returncode > 0:
         raise RuntimeError(
             f"{result.returncode} conflict(s) remain in {path}; "
-            "resolve the markers, then run 'elab push'"
+            "resolve the markers, then run 'elab push --force'"
         )
 
 
@@ -517,6 +538,12 @@ def _raise_conflict(
         f"{shlex.quote(str(_base_sidecar_path(path)))} "
         f"{shlex.quote(str(_sidecar_path(path)))}",
         file=sys.stderr,
+    )
+    state.save(
+        remote.base_url,
+        remote.entity,
+        str(remote.eid),
+        {**saved, "pending_remote": remote_body},
     )
     raise RuntimeError(message)
 

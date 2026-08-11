@@ -462,10 +462,10 @@ def test_comments_defaults_to_report_and_dispatches_through_target(monkeypatch):
     ("argv", "expected_path"),
     [
         (["comment", "hello"], Path("report.md")),
-        (["comment", "hello", "note.md"], Path("note.md")),
+        (["comment", "note.md", "hello"], Path("note.md")),
     ],
 )
-def test_comment_parses_text_first_and_dispatches(argv, expected_path, monkeypatch):
+def test_comment_parses_doc_first_and_dispatches(argv, expected_path, monkeypatch):
     target_calls = []
     comment_calls = []
     client = object()
@@ -488,23 +488,26 @@ def test_comment_text_is_required():
         cli._parser().parse_args(["comment"])
 
 
-def test_merge_defaults_to_report_without_loading_config(tmp_path, monkeypatch):
+def test_merge_loads_config_without_creating_client(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    data = {"profiles": {"lab": {"base_url": "https://e.example"}}}
+    load_calls = []
     calls = []
-    monkeypatch.setattr(cli, "merge", lambda path: calls.append(path))
     monkeypatch.setattr(
         cli.config,
         "load",
-        lambda *args: pytest.fail("merge must not load config"),
+        lambda *args: load_calls.append(args) or data,
     )
+    monkeypatch.setattr(cli, "merge", lambda *args: calls.append(args))
     monkeypatch.setattr(
         cli,
         "_client",
         lambda *args: pytest.fail("merge must not create a client"),
     )
 
-    assert cli.main(["merge"]) == 0
-    assert calls == [Path("report.md")]
+    assert cli.main(["merge", "--profile", "lab"]) == 0
+    assert load_calls == [(tmp_path, Path("."))]
+    assert calls == [(Path("report.md"), data, "lab")]
 
 
 def test_merge_missing_sidecars_is_reported_as_cli_error(tmp_path, capsys):

@@ -102,13 +102,13 @@ def _parser() -> argparse.ArgumentParser:
     _add_target_options(comments_parser)
 
     comment_parser = commands.add_parser("comment", help="post a remote comment")
-    comment_parser.add_argument("text", help="comment text")
     comment_parser.add_argument(
         "doc",
         nargs="?",
         default="report.md",
         help="local document (default: report.md)",
     )
+    comment_parser.add_argument("text", help="comment text")
     _add_target_options(comment_parser)
 
     diff_parser = commands.add_parser("diff", help="show changes against the base")
@@ -134,6 +134,7 @@ def _parser() -> argparse.ArgumentParser:
         default="report.md",
         help="local document (default: report.md)",
     )
+    merge_parser.add_argument("--profile", help="config profile to use")
 
     new_parser = commands.add_parser(
         "new", help="create a new remote entity and local document"
@@ -272,7 +273,9 @@ def main(argv=None) -> int:
             _whoami(args.profile)
             return 0
         if args.cmd == "merge":
-            merge(Path(args.doc))
+            path = Path(args.doc)
+            data = config.load(Path.cwd(), path.parent)
+            merge(path, data, args.profile)
             return 0
 
         path = Path(args.doc)
