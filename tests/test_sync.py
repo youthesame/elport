@@ -831,6 +831,79 @@ def test_locked_declared_permission_stops_before_upload_or_patch(
     assert client.saved_payload is None
 
 
+@pytest.mark.parametrize("field", ["read", "write"])
+def test_non_owner_cannot_narrow_existing_entity_to_owner(
+    tmp_path, monkeypatch, configured, field
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_text("new", encoding="utf-8")
+    write_doc(doc, "[data](data.csv)", **{field: "owner"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "userid": 2,
+            f"can{field}_base": 30,
+        },
+        identity={"userid": 1},
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    with pytest.raises(
+        RuntimeError,
+        match=rf"^{field}: owner would revoke your own access "
+        rf"\(you are not the entity owner\); use 'team' or ask the owner$",
+    ):
+        sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get"]
+    assert "patch" not in client.calls
+    assert "upload" not in client.calls
+
+
+@pytest.mark.parametrize("field", ["read", "write"])
+def test_owner_can_narrow_existing_entity_to_owner(
+    tmp_path, monkeypatch, configured, field
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", **{field: "owner"})
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "userid": 1,
+            f"can{field}_base": 30,
+        },
+        identity={"userid": 1},
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload[f"can{field}_base"] == 10
+    assert f"can{field}" not in client.saved_payload
+    assert client.calls.count("patch") == 2
+
+
+def test_non_owner_can_narrow_existing_entity_read_to_team(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="team")
+    client = FakeClient(
+        remote_doc={"body": "remote", "userid": 2, "canread_base": 40},
+        identity={"userid": 1},
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["canread_base"] == 30
+    assert "canread" not in client.saved_payload
+
+
 def test_permission_widening_interactive_yes_applies_once(
     tmp_path, monkeypatch, configured
 ):

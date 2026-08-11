@@ -296,6 +296,17 @@ def push(
                 f"{field} permission is locked on this entity (admin-set); "
                 f"remove '{field}:' or ask an admin"
             )
+        if (
+            field in meta
+            and frontmatter.PERMISSION_LEVELS[meta[field]]
+            == frontmatter.PERMISSION_LEVELS["owner"]
+            and remote_doc.get("userid") is not None
+            and remote_doc.get("userid") != identity.get("userid")
+        ):
+            raise RuntimeError(
+                f"{field}: owner would revoke your own access "
+                "(you are not the entity owner); use 'team' or ask the owner"
+            )
     if eid and saved is None and not force:
         raise RuntimeError("base unavailable; run pull first or use --force")
     if (
