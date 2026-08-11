@@ -192,6 +192,17 @@ def test_invalid_frontmatter_yaml_is_reported_as_cli_error(tmp_path, capsys):
     assert "Traceback" not in error
 
 
+def test_push_missing_document_reports_friendly_error(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+
+    assert cli.main(["push", "no_such_doc.md"]) == 1
+
+    error = capsys.readouterr().err
+    assert "document not found: no_such_doc.md" in error
+    assert "[Errno 2]" not in error
+
+
 def test_atomic_write_preserves_existing_permissions(tmp_path):
     path = tmp_path / "report.md"
     path.write_text("before", encoding="utf-8")

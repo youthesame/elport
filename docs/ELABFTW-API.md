@@ -101,8 +101,8 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 ## Tags / categories / metadata
 
 - Add tag: `POST /api/v2/{entity}/{id}/tags` (JSON `{"tag": "<name>"}`; a non-existent one is auto-created).
-  Measured 201; GET returns `"tags":"CRISPR"` (multiple joined by commas) / `"tags_id":"50"`. **Add-only** (delete
-  via Web UI).
+  Measured 201; the current demo joins tag names with `|` in `"tags":"CRISPR|PCR|RNA"`, while `tags_id` remains
+  comma-joined. elab tolerates both `|` and `,` separators. **Add-only** (delete via Web UI).
 - Metadata: `PATCH` with `{"metadata": "<JSON string>"}`.
 - Category: `PATCH` with `category` (ID). Resolve name→ID via
   `GET /api/v2/teams/{team_id}/experiments_categories` (items use the corresponding types endpoint), reading the

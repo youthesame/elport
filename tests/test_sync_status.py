@@ -148,6 +148,23 @@ def test_remote_diff_ignores_line_endings_and_trailing_newlines(
 
     captured = capsys.readouterr()
     assert captured.out == ""
+    assert "server normalization noise" not in captured.err
+
+
+def test_remote_diff_prints_normalization_note_for_real_difference(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local\n")
+    client = FakeClient(gets=[{"body": "remote\n"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.diff(doc, client, {})
+
+    captured = capsys.readouterr()
+    assert "@@" in captured.out
+    assert "-remote" in captured.out
+    assert "+local" in captured.out
     assert "server normalization noise" in captured.err
 
 

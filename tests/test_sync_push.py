@@ -59,6 +59,42 @@ def test_force_push_bypasses_unresolved_merge_marker_guard(
     assert capsys.readouterr().out == "Upload plan:\n"
 
 
+def test_push_rejects_empty_body_unless_forced(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "   \n")
+    client = FakeClient()
+
+    with pytest.raises(
+        RuntimeError,
+        match="refusing to push an empty body; use --force to overwrite",
+    ):
+        sync.push(doc, client, {})
+
+    assert client.calls == []
+
+    dry_run_client = FakeClient()
+    with pytest.raises(
+        RuntimeError,
+        match="refusing to push an empty body; use --force to overwrite",
+    ):
+        sync.push(doc, dry_run_client, {}, dry_run=True)
+
+    assert dry_run_client.calls == []
+
+    forced_client = FakeClient(
+        gets=[
+            {"body": "remote"},
+            {"body": "", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, forced_client, {}, force=True)
+
+    assert forced_client.calls.count("patch") == 1
+
+
 def test_push_order_includes_post_upload_recheck(
     tmp_path, monkeypatch, configured, capsys
 ):
@@ -325,6 +361,30 @@ def test_dry_run_has_no_mutating_calls(tmp_path, monkeypatch, configured):
     assert client.calls == ["me", "get", "uploads"]
 
 
+def test_dry_run_previews_title_category_and_only_new_tags(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(
+        doc,
+        "local",
+        title="Dry run",
+        category="Synthesis",
+        tags=["PCR", "new"],
+    )
+    client = FakeClient(gets=[{"body": "remote", "tags": "PCR|existing"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    output = capsys.readouterr().out
+    assert "title: Dry run\n" in output
+    assert "category: 9\n" in output
+    assert "tags +: new\n" in output
+    assert "tags +: PCR" not in output
+    assert not {"create", "upload", "patch", "tag:PCR", "tag:new"} & set(client.calls)
+
+
 def test_dry_run_large_upload_skips_confirmation_and_prints_preview(
     tmp_path, monkeypatch, configured, capsys
 ):
@@ -455,6 +515,57 @@ def test_existing_tags_are_not_posted_again(tmp_path, monkeypatch, configured):
 
     assert "tag:PCR" not in client.calls
     assert client.calls.count("tag:new") == 1
+
+
+def test_pipe_separated_existing_tags_are_not_posted_again(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", tags=["PCR", "new"])
+    client = FakeClient(
+        gets=[
+            {"body": "remote", "tags": "PCR|existing"},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert "tag:PCR" not in client.calls
+    assert client.calls.count("tag:new") == 1
+
+
+@pytest.mark.parametrize(
+    ("remote_body", "dry_run", "expect_warning"),
+    [("web edit", False, True), ("remote", False, False), ("web edit", True, False)],
+)
+def test_force_push_warns_only_when_discarding_remote_change(
+    tmp_path,
+    monkeypatch,
+    configured,
+    capsys,
+    remote_body,
+    dry_run,
+    expect_warning,
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(
+        gets=[
+            {"body": remote_body},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {}, force=True, dry_run=dry_run)
+
+    warning = "warning: --force is discarding a remote change"
+    assert (warning in capsys.readouterr().err) is expect_warning
 
 
 def test_verified_state_is_saved_before_tag_failure(tmp_path, monkeypatch, configured):

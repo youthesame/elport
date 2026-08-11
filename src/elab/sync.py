@@ -5,6 +5,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -149,7 +150,7 @@ def _resolve_category(client, entity: str, team_id, category):
 def _remote_tags(remote: dict) -> set[str]:
     value = remote.get("tags") or ""
     if isinstance(value, str):
-        return {tag.strip() for tag in value.split(",") if tag.strip()}
+        return {tag.strip() for tag in re.split(r"[|,]", value) if tag.strip()}
     return {str(tag).strip() for tag in value if str(tag).strip()}
 
 
@@ -269,6 +270,11 @@ def push(
             raise RuntimeError(
                 f"unresolved merge markers in {path}; resolve them or use --force"
             )
+    if not force and not body.strip():
+        raise RuntimeError(
+            "refusing to push an empty body; "
+            "use --force to overwrite with an empty body"
+        )
     for key in ("entity", "category"):
         if key in meta and meta[key] is not None:
             meta[key] = str(meta[key])
@@ -344,6 +350,18 @@ def push(
             remote,
             message,
         )
+    if (
+        force
+        and remote is not None
+        and saved
+        and remote_doc.get("body", "") != saved.get("remote_base", "")
+        and not dry_run
+    ):
+        print(
+            "warning: --force is discarding a remote change "
+            "(the Web-side edit will be lost)",
+            file=sys.stderr,
+        )
 
     if not dry_run:
         _confirm_permission_widening(permission_changes, assume_yes)
@@ -360,6 +378,14 @@ def push(
                 f"{field}→{keyword}" for field, keyword, _, _ in permission_changes
             )
             print(f"permissions: {planned}")
+        if meta.get("title"):
+            print(f"title: {meta['title']}")
+        if category is not None:
+            print(f"category: {category}")
+        existing = _remote_tags(remote_doc)
+        new_tags = [tag for tag in (meta.get("tags") or []) if tag not in existing]
+        if new_tags:
+            print("tags +: " + ", ".join(new_tags))
         for ref in refs:
             if ref.file is None:
                 continue
@@ -884,19 +910,18 @@ def diff(path: Path, client, config: dict, profile=None, base_only=False) -> Non
         other = _normalize_remote_diff(other)
         local = _normalize_remote_diff(body)
         fromfile = "remote"
+
+    diff_text = "".join(
+        difflib.unified_diff(
+            other.splitlines(True),
+            local.splitlines(True),
+            fromfile=fromfile,
+            tofile="local",
+        )
+    )
+    if not base_only and diff_text:
         print(
             "note: server normalization noise may remain in this diff",
             file=sys.stderr,
         )
-
-    print(
-        "".join(
-            difflib.unified_diff(
-                other.splitlines(True),
-                local.splitlines(True),
-                fromfile=fromfile,
-                tofile="local",
-            )
-        ),
-        end="",
-    )
+    print(diff_text, end="")
