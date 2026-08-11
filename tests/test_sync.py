@@ -697,8 +697,77 @@ def test_push_folds_declared_permission_bases_into_payload(
     assert client.saved_payload["canwrite_base"] == 10
     assert "canread" not in client.saved_payload
     assert "canwrite" not in client.saved_payload
-    assert client.calls.count("patch") == 1
+    assert client.calls.count("patch") == 2
     assert "  permissions: read=team write=owner\n" in capsys.readouterr().out
+
+
+def test_push_applies_narrowing_before_uploads_even_if_later_conflict_aborts(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_text("new", encoding="utf-8")
+    write_doc(doc, "[data](data.csv)", read="owner", write="owner+admin")
+    client = FakeClient(
+        gets=[
+            {
+                "body": "remote",
+                "canread_base": 30,
+                "canwrite_base": 30,
+            },
+            {"body": "web edit"},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    with pytest.raises(RuntimeError, match="after uploads"):
+        sync.push(doc, client, {})
+
+    assert client.saved_payload == {"canread_base": 10, "canwrite_base": 20}
+    assert "canread" not in client.saved_payload
+    assert "canwrite" not in client.saved_payload
+    assert client.calls.index("patch") < client.calls.index("upload")
+    assert client.calls.count("patch") == 1
+
+
+def test_push_keeps_widening_in_final_patch_after_uploads(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_text("new", encoding="utf-8")
+    write_doc(doc, "[data](data.csv)", read="public")
+    client = FakeClient(remote_doc={"body": "remote", "canread_base": 30, "tags": ""})
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {}, assume_yes=True)
+
+    assert client.calls.count("patch") == 1
+    assert client.calls.index("upload") < client.calls.index("patch")
+    assert client.saved_payload is not None
+    assert client.saved_payload["canread_base"] == 50
+    assert "canread" not in client.saved_payload
+
+
+def test_new_entity_applies_narrowing_after_create_before_uploads(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_text("new", encoding="utf-8")
+    doc.write_text(
+        frontmatter.render({"title": "Test", "read": "owner"}, "[data](data.csv)"),
+        encoding="utf-8",
+    )
+    client = FakeClient(identity={"default_read_base": 30})
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.calls.index("create") < client.calls.index("patch")
+    assert client.calls.index("patch") < client.calls.index("upload")
+    assert client.calls.count("patch") == 2
+    assert client.saved_payload is not None
+    assert client.saved_payload["canread_base"] == 10
+    assert "canread" not in client.saved_payload
 
 
 def test_push_omits_undeclared_permissions(tmp_path, monkeypatch, configured):
@@ -2457,6 +2526,56 @@ def test_status_suggests_actions_for_local_and_remote_changes(
     lines = capsys.readouterr().out.splitlines()
     assert 'local: dirty (use "elab push")' in lines
     assert 'remote: changed (use "elab pull")' in lines
+
+
+def test_status_prints_pending_declared_permission_change(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="team")
+    client = FakeClient(
+        gets=[{"body": "remote", "content_type": 2, "canread_base": 10}]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "permissions: read owner→team\n" in capsys.readouterr().out
+
+
+def test_status_prints_unchanged_for_matching_declared_permissions(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="team", write="owner")
+    client = FakeClient(
+        gets=[
+            {
+                "body": "remote",
+                "content_type": 2,
+                "canread_base": 30,
+                "canwrite_base": 10,
+            }
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "permissions: read unchanged, write unchanged\n" in capsys.readouterr().out
+
+
+def test_status_omits_permissions_when_none_are_declared(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(gets=[{"body": "remote", "content_type": 2}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "permissions:" not in capsys.readouterr().out
 
 
 def test_remote_diff_ignores_line_endings_and_trailing_newlines(

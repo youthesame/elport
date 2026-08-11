@@ -358,6 +358,14 @@ def push(
         frontmatter.atomic_write(path, frontmatter.render(meta, body))
     remote = Remote(client, entity, eid, base_url)
 
+    narrowing = {
+        f"can{field}_base": target
+        for field, _, target, current in permission_changes
+        if target < current
+    }
+    if narrowing:
+        remote.patch(narrowing)
+
     urls: dict[Path, str] = {}
     for file_path in files:
         upload = reused[file_path]
@@ -800,6 +808,18 @@ def status(path: Path, client, config: dict, profile=None) -> None:
         if remote_doc.get("content_type") == 2
         else remote_doc.get("content_type", "unknown"),
     )
+    permission_changes = _permission_changes(meta, remote_doc, {}, True)
+    if permission_changes:
+        permission_keywords = {
+            level: keyword for keyword, level in frontmatter.PERMISSION_LEVELS.items()
+        }
+        permissions = ", ".join(
+            f"{field} unchanged"
+            if target == current
+            else f"{field} {permission_keywords[current]}→{keyword}"
+            for field, keyword, target, current in permission_changes
+        )
+        print(f"permissions: {permissions}")
     if saved is None:
         print("remote: base unavailable (comparison unavailable)")
     elif remote_doc.get("body", "") == saved.get("remote_base", ""):
