@@ -9,7 +9,6 @@
   when the target instance's version changes.**
 - **What it is not**: not elab's own design rationale (that is [DESIGN.md](DESIGN.md)); not the behavioral contract
   (that is the **tests**). It holds only "how eLabFTW actually behaves."
-- **Origin**: §8, §10.2, Appendix B, and Appendix C of the former `docs/SPEC.md`.
 - **Observation environment**: unless noted, "measured" means confirmed on **demo.elabftw.net 5.6.12
   (2026-08-07..08)**. Base URL is `{base_url}/api/v2`. **Re-confirm version-dependent behavior on the target
   instance's own version** (see § Version-specific).

@@ -5,7 +5,7 @@ files) to/from eLabFTW entities. **Local is the source of truth.**
 
 ## Documentation map (what is authoritative for what)
 
-The monolithic `SPEC.md` was split by role and retired. **Authority differs by role:**
+**Authority differs by role:**
 
 - **Behavioral contract (authoritative) = the tests** (`tests/`). The core engine (reference scan/replace, path
   safety, reverse transclusion) and the sync semantics (push/pull/status/diff, conflict detection, the two-form

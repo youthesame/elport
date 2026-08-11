@@ -4,8 +4,7 @@
 - **What it is not**: not a behavioral spec (the **tests** are authoritative for behavior); not a usage guide
   (that is the [README](../README.md)); not a record of measured eLabFTW API facts (that is
   [ELABFTW-API.md](ELABFTW-API.md)).
-- **Origin**: inherits §1, §2, §10.1, and Appendix A of the former `docs/SPEC.md` (design sessions of
-  2026-08-06..08 plus external review).
+- **Origin**: design sessions of 2026-08-06..08 plus external review.
 
 ---
 
@@ -150,7 +149,7 @@ it is a documented runtime requirement for merge only — never a `pyproject.tom
 lines, push aborts (bypass with `--force`). This closes the one hole this stance would otherwise leave: a
 half-resolved merge silently pushed to the server.
 
-**Permissions sync (planned).** Front matter gains independent `read:` / `write:`, mapping keywords to eLabFTW base
+**Permissions sync.** Front matter gains independent `read:` / `write:`, mapping keywords to eLabFTW base
 levels: `owner`=10, `owner+admin`=20, `team`=30, `account`=40, `public`=50 (`canread_base` / `canwrite_base`).
 Applied **only when declared** (absent ⇒ untouched, so a routine push never reverts an intentional Web-UI change —
 the add-only-tags safety stance). **Base-level only**: elab never sends the individual allow-list JSON, so
@@ -160,7 +159,7 @@ Because base and the individual list are OR'd, two warnings guard the surprises 
 that effective access is still wider than the keyword implies. `--yes` skips; a non-interactive run without it aborts
 rather than act blindly.
 
-**Comments (planned).** Read via `elab comments <note>` to the terminal only — comments are out-of-sync data and
+**Comments.** Read via `elab comments <note>` to the terminal only — comments are out-of-sync data and
 must not enter the body or a written sidecar. Post via `elab comment <note> "..."`. No edit/delete (rare from a CLI;
 the Web UI handles it).
 
