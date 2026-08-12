@@ -223,11 +223,31 @@ def test_file_in_hidden_directory_is_not_uploaded_and_warns(tmp_path: Path, caps
     assert "local reference not uploaded" in capsys.readouterr().err
 
 
+def test_file_through_hidden_symlink_is_not_uploaded_and_warns(tmp_path: Path, capsys):
+    (tmp_path / "shared" / "aws").mkdir(parents=True)
+    (tmp_path / "shared" / "aws" / "credentials").write_text("secret", encoding="utf-8")
+    (tmp_path / ".aws").symlink_to("shared/aws", target_is_directory=True)
+
+    reference = plan("[x](.aws/credentials)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "local reference not uploaded" in capsys.readouterr().err
+
+
 def test_regular_file_reference_is_still_uploaded(tmp_path: Path):
     attachment = tmp_path / "figure.png"
     attachment.write_bytes(b"image")
 
     reference = plan("[real](figure.png)", tmp_path)[0]
+
+    assert reference.file is not None
+
+
+def test_explicit_relative_file_reference_is_still_uploaded(tmp_path: Path):
+    attachment = tmp_path / "figure.png"
+    attachment.write_bytes(b"image")
+
+    reference = plan("[real](./figure.png)", tmp_path)[0]
 
     assert reference.file is not None
 

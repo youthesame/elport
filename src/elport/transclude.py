@@ -242,6 +242,11 @@ def _candidate(
             return None, True, ""
     if not p.is_file():
         return None, True, ""
+    if any(
+        part.startswith(".") and part not in (".", "..")
+        for part in re.split(r"[\\/]+", raw)
+    ):
+        return None, True, ""
     if any(part.startswith(".") for part in relative.parts):
         return None, True, ""
     if _ignored(relative.as_posix(), ignore):
