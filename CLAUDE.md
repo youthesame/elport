@@ -32,8 +32,10 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
   the "Body normalization" section of ELABFTW-API.
 - **Do not embed out-of-sync data (comments, steps, revision bodies) in the body.** Use a sidecar or terminal
   output (do not pollute the source).
-- Upload targets are **only files under the document directory.** Exclude schemed URLs, absolute paths, and `..`
-  escapes; **never parse inside code fences, inline code, or HTML comments.**
+- Upload targets are **only files under the document directory.** Exclude schemed URLs, absolute paths, `..`
+  escapes, and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`)** — a pulled
+  remote body must not make the next push exfiltrate local secrets; **never parse inside code fences, inline code,
+  or HTML comments.**
 - Attachment identity uses the **server-returned hash first, else basename + size** (same-name entries can coexist,
   so check against all of them). **Never auto-delete attachments during push.**
 - **Keep secrets (API keys) out of the project tree.** OS keyring + home-dir config only. **Never log the key.**

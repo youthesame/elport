@@ -204,6 +204,34 @@ def test_query_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
     assert "manual.pdf?download=1" in capsys.readouterr().err
 
 
+def test_dotfile_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
+    (tmp_path / ".env").write_text("SECRET=value", encoding="utf-8")
+
+    reference = plan("[x](.env)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "local reference not uploaded" in capsys.readouterr().err
+
+
+def test_file_in_hidden_directory_is_not_uploaded_and_warns(tmp_path: Path, capsys):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("secret", encoding="utf-8")
+
+    reference = plan("[x](.git/config)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "local reference not uploaded" in capsys.readouterr().err
+
+
+def test_regular_file_reference_is_still_uploaded(tmp_path: Path):
+    attachment = tmp_path / "figure.png"
+    attachment.write_bytes(b"image")
+
+    reference = plan("[real](figure.png)", tmp_path)[0]
+
+    assert reference.file is not None
+
+
 def test_existing_reference_definition_warns_that_it_is_not_uploaded(
     tmp_path: Path, capsys
 ):
