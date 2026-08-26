@@ -1,4 +1,4 @@
-# elport — Design Record (why it is built this way)
+# elport: Design Record (why it is built this way)
 
 - **Nature**: a frozen document. It captures the **rationale and settled decisions** behind elport. Rarely updated.
 - **What it is not**: not a behavioral spec (the **tests** are authoritative for behavior); not a usage guide
@@ -99,7 +99,7 @@ similar, **consult it and pull in only what is needed** when a missing feature b
 2. **Core**: upload referenced real local paths regardless of notation/type + replace with real URLs. Attachment =
    local path; link to another note = eLabFTW URL.
 3. **Body format**: send raw Markdown (`content_type:2`). No conversion, no math protection. Abort if
-   `content_type` is not 2 after push (an old buggy version) — see [ELABFTW-API.md](ELABFTW-API.md) § content_type.
+   `content_type` is not 2 after push (an old buggy version). See [ELABFTW-API.md](ELABFTW-API.md) § content_type.
 4. **Figures / math**: `<figure>` stays raw HTML; `$...$`/`$$...$$` stay as-is. eLabFTW renders them.
 5. **pull**: with reverse transclusion. If clean, update `report.md` in place.
 6. **Conflict / merge**: store base in `~/.config/elport/state/` (key = namespaced `base_url + entity kind +
@@ -125,25 +125,25 @@ similar, **consult it and pull in only what is needed** when a missing feature b
 
 ---
 
-## 4. Settled decisions — 2026-08-11 (git relationship, merge, permissions, comments)
+## 4. Settled decisions, 2026-08-11 (git relationship, merge, permissions, comments)
 
 A grilling session sharpened the git story and set the next feature batch. These **append** to §3; they refine §3.6
 rather than revising the earlier decisions.
 
 **Not git-backed; git is used for one thing only.** elport is git-*like* in UX (push/pull/status/diff) but is **not**
 git-*backed*: no repository is required, the base lives in `~/.config/elport/state/` (never in the user's tree), and
-elport never commits or touches the user's git history. "Local is the source of truth" does not entail git — forcing a
+elport never commits or touches the user's git history. "Local is the source of truth" does not entail git: forcing a
 git workflow would constrain how researchers organize notes. The **only** place elport reaches for git is conflict
 merge. (Want per-edit local history? That is the user's own `git init`, which elport neither requires nor manages.)
 
 **`elport merge` wraps `git merge-file`.** The stored two-form base is a genuine common ancestor, so conflict
 resolution is a real 3-way merge: `git merge-file <local> <base> <remote>`, with the reverse-transcluded remote/base
 written as `<name>.remote.md` / `<name>.base.md`. Refinement of §3.6: rather than only *printing* that command,
-`elport merge <note>` *runs* it (writing the result — with markers on overlap — into the local file). push/pull stay
+`elport merge <note>` *runs* it (writing the result into the local file, with markers on overlap). push/pull stay
 **non-mutating on conflict**: they emit the sidecars and stop; `elport merge` is the explicit, opt-in step that
 rewrites local, and it **never auto-pushes**. git stays **optional** (fallback: if `git` is absent, `elport merge`
-points at the sidecars for a manual merge — the sidecars are always written regardless). git is a system binary, so
-it is a documented runtime requirement for merge only — never a `pyproject.toml` / PyPI dependency.
+points at the sidecars for a manual merge, and the sidecars are always written regardless). git is a system binary, so
+it is a documented runtime requirement for merge only, never a `pyproject.toml` / PyPI dependency.
 
 **push refuses unresolved conflict markers.** If the outgoing body carries `<<<<<<<` / `=======` / `>>>>>>>` marker
 lines, push aborts (bypass with `--force`). This closes the one hole this stance would otherwise leave: a
@@ -151,15 +151,15 @@ half-resolved merge silently pushed to the server.
 
 **Permissions sync.** Front matter gains independent `read:` / `write:`, mapping keywords to eLabFTW base
 levels: `owner`=10, `owner+admin`=20, `team`=30, `account`=40, `public`=50 (`canread_base` / `canwrite_base`).
-Applied **only when declared** (absent ⇒ untouched, so a routine push never reverts an intentional Web-UI change —
-the add-only-tags safety stance). **Base-level only**: elport never sends the individual allow-list JSON, so
+Applied **only when declared** (absent ⇒ untouched, so a routine push never reverts an intentional Web-UI change,
+matching the add-only-tags safety stance). **Base-level only**: elport never sends the individual allow-list JSON, so
 Web-UI-set individual grants survive (measured: PATCHing only `*_base` preserves the `canread`/`canwrite` JSON).
-Because base and the individual list are OR'd, two warnings guard the surprises — widening to `account`/`public`
+Because base and the individual list are OR'd, two warnings guard the surprises. Widening to `account`/`public`
 (leaves the team) prompts confirmation; narrowing to `owner`/`owner+admin` while individual grants persist warns
 that effective access is still wider than the keyword implies. `--yes` skips; a non-interactive run without it aborts
 rather than act blindly.
 
-**Comments.** Read via `elport comments <note>` to the terminal only — comments are out-of-sync data and
+**Comments.** Read via `elport comments <note>` to the terminal only. Comments are out-of-sync data and
 must not enter the body or a written sidecar. Post via `elport comment <note> "..."`. No edit/delete (rare from a CLI;
 the Web UI handles it).
 

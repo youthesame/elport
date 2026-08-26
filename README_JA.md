@@ -1,4 +1,4 @@
-# elport — eLabFTW のラボノートを手元で書いて同期する git ライクな CLI
+# elport: eLabFTW のラボノートを手元で書いて同期する git ライクな CLI
 
 [English](README.md) | [日本語](README_JA.md)
 
@@ -57,7 +57,7 @@ elport push                             # 参照ファイルをアップロー�
 > pull でファイルを書き戻すときは**ベース名だけ**を使います。`assets/fig.png` のようなサブディレクトリ付きのパスは
 > `fig.png` に平坦化されます。
 
-## ドキュメント形式 — フロントマター
+## ドキュメント形式（フロントマター）
 
 先頭に YAML ブロックを置きます。無ければ push 時に生成・補完されます。
 
