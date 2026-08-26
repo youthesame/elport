@@ -1,4 +1,4 @@
-# eLabFTW API v2 — Measured Reference (observation log)
+# eLabFTW API v2: Measured Reference (observation log)
 
 > **This is not a full API reference.** For the complete endpoint list, see the official docs
 > ([doc.elabftw.net/api.html](https://doc.elabftw.net/api.html)). This file records only the
@@ -145,7 +145,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 ## Permissions (canread / canwrite; measured 5.6.12, 2026-08-11)
 
 - Each entity has `canread` / `canwrite`, each split into **a base level (integer) + an explicit JSON allow-list**.
-- **Base level** — set via `PATCH` `{"canread_base": N}` / `{"canwrite_base": N}` (→ 200, reflected immediately).
+- **Base level**: set via `PATCH` `{"canread_base": N}` / `{"canwrite_base": N}` (→ 200, reflected immediately).
   The GET also returns a `*_base_human` label (measured exactly):
 
   | N | `canread_base_human` |
@@ -157,12 +157,12 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   | 50 | Everyone including anonymous users |
 
   `canwrite_base` uses the same integers (measured 10 → "Only owner").
-- **Explicit allow-list** — `canread` / `canwrite` accept a **JSON *string*** like
+- **Explicit allow-list**: `canread` / `canwrite` accept a **JSON *string*** like
   `"{\"teams\":[3],\"users\":[],\"teamgroups\":[]}"` (reflected on GET).
-- User defaults (from `GET /users/me`): `default_read_base` / `default_write_base` (measured 30 / 20) — the base
+- User defaults (from `GET /users/me`): `default_read_base` / `default_write_base` (measured 30 / 20), the base
   applied to newly created entities.
 - GET also exposes `canread_is_immutable` / `canwrite_is_immutable` and `canread_base_is_immutable`-style flags
-  (an admin may lock permissions; a PATCH would then be refused — not observed as locked on demo).
+  (an admin may lock permissions; a PATCH would then be refused, though not observed as locked on demo).
 - **Security-critical → apply only when declared.** If elport syncs permissions, act **only when the front matter
   carries `read:`/`write:`**; never touch permissions otherwise (a routine push must not silently revert an
   intentional Web-UI change).

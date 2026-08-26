@@ -1,4 +1,4 @@
-# elport — project guide for AI agents
+# elport: project guide for AI agents
 
 `elport` is a **git-like sync CLI for eLabFTW**. It push/pulls locally-written lab notes (Markdown/HTML + referenced
 files) to/from eLabFTW entities. **Local is the source of truth.**
@@ -21,26 +21,26 @@ files) to/from eLabFTW entities. **Local is the source of truth.**
 Design principles (DESIGN §2.1): single engine / markdown-native / explicit-and-simple / secret isolation. Keep
 added features **thin** (YAGNI); prefer read-only, single-endpoint features.
 
-## Invariants you must not break (quick reference — detailed authority is the tests, rationale is DESIGN)
+## Invariants you must not break (detailed authority is the tests, rationale is DESIGN)
 
 - **Local is authoritative.** push is a full-body overwrite with conflict detection. Do not silently add two-way
   auto-sync.
 - push transclusion runs on the **outgoing copy** and **never rewrites the local original**.
 - **base is two-form**: remote-base (the body re-`GET`'d after a successful push, not the sent bytes) and local-base
   (the local original at push/pull time). **Always compare same-form** (remote↔remote-base, local↔local-base). With
-  only one form, server normalization (non-convergent) yields a false conflict / permanent-dirty every time — see
+  only one form, server normalization (non-convergent) yields a false conflict / permanent-dirty every time. See
   the "Body normalization" section of ELABFTW-API.
 - **Do not embed out-of-sync data (comments, steps, revision bodies) in the body.** Use a sidecar or terminal
   output (do not pollute the source).
 - Upload targets are **only files under the document directory.** Exclude schemed URLs, absolute paths, `..`
-  escapes, and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`)** — a pulled
+  escapes, and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`)**. A pulled
   remote body must not make the next push exfiltrate local secrets; **never parse inside code fences, inline code,
   or HTML comments.**
 - Attachment identity uses the **server-returned hash first, else basename + size** (same-name entries can coexist,
   so check against all of them). **Never auto-delete attachments during push.**
 - **Keep secrets (API keys) out of the project tree.** OS keyring + home-dir config only. **Never log the key.**
 
-## Non-obvious eLabFTW API traps (highlights — details in ELABFTW-API.md)
+## Non-obvious eLabFTW API traps (highlights; details in ELABFTW-API.md)
 
 - **`content_type:2` (markdown) is settable via PATCH and respected by recent eLabFTW** (the create-time body bug
   #6416 is fixed; very old instances may ignore it). **Verify `content_type == 2` after push** and abort otherwise.
