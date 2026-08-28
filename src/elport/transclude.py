@@ -11,13 +11,13 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 _ANGLE_DESTINATION = re.compile(
-    r"!?(?<!\\)(?:\[[^\]]*\])\(\s*(<([^>\n]*)>)\s*"
+    r"(?<!\\)\]\(\s*(<([^>\n]*)>)\s*"
     r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))?\)"""
 )
 _HTML_TAG = re.compile(
     r"""</?[A-Za-z][A-Za-z0-9:-]*(?=[\s/>])(?:"[^"]*"|'[^']*'|[^'">])*>"""
 )
-_HTML_TAG_NAME = re.compile(r"</?[A-Za-z][A-Za-z0-9:-]*")
+_HTML_TAG_NAME = re.compile(r"</?([A-Za-z][A-Za-z0-9:-]*)")
 _REFERENCE_DEFINITION = re.compile(
     r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))"
 )
@@ -30,6 +30,14 @@ class Reference:
     end: int
     file: Path | None = None
     fragment: str = ""
+
+
+@dataclass
+class _MarkdownLink:
+    reference: Reference
+    label_start: int
+    destination_start: int
+    full_end: int
 
 
 def _masked(text: str) -> str:
@@ -53,18 +61,39 @@ def _masked(text: str) -> str:
         blank(*m.span())
     for m in re.finditer(r"<!--[\s\S]*?(?:-->|\Z)", "".join(mask)):
         blank(*m.span())
-    angle_spans = {
-        match.span(1) for match in _ANGLE_DESTINATION.finditer("".join(mask))
-    }
-    for m in re.finditer(
-        r"<(pre|code)\b[^>]*>[\s\S]*?(?:</\1\s*>|\Z)",
-        "".join(mask),
-        re.IGNORECASE,
-    ):
-        opener_end = m.start() + m.group().index(">") + 1
-        if (m.start(), opener_end) in angle_spans:
+    current = "".join(mask)
+    angle_spans = {match.span(1) for match in _ANGLE_DESTINATION.finditer(current)}
+    tags = list(_HTML_TAG.finditer(current))
+    covered_until = 0
+    for index, tag in enumerate(tags):
+        if tag.start() < covered_until or tag.span() in angle_spans:
             continue
-        blank(*m.span())
+        name_match = _HTML_TAG_NAME.match(tag.group())
+        if name_match is None or tag.group().startswith("</"):
+            continue
+        name = name_match.group(1).lower()
+        if name not in {"pre", "code", "script", "style", "textarea", "title"}:
+            continue
+        if tag.group().rstrip().endswith("/>"):
+            continue
+        closer = next(
+            (
+                candidate
+                for candidate in tags[index + 1 :]
+                if candidate.group().startswith("</")
+                and (match := _HTML_TAG_NAME.match(candidate.group())) is not None
+                and match.group(1).lower() == name
+            ),
+            None,
+        )
+        if name in {"pre", "code"}:
+            start = tag.start()
+            end = closer.end() if closer else len(text)
+        else:
+            start = tag.end()
+            end = closer.start() if closer else len(text)
+        blank(start, end)
+        covered_until = closer.end() if closer else len(text)
     return "".join(mask)
 
 
@@ -134,44 +163,107 @@ def _unescape_markdown_destination(value: str) -> str:
     return "".join(out)
 
 
-def _markdown_destinations(text: str, masked: str) -> list[Reference]:
-    opener_pattern = re.compile(r"!?(?<!\\)(?:\[[^\]\n]*\])\(\s*")
-    references = []
-    for opener in opener_pattern.finditer(masked):
-        start = opener.end()
-        if start == len(masked) or masked[start] == "<":
+def _is_escaped(text: str, pos: int) -> bool:
+    backslashes = 0
+    pos -= 1
+    while pos >= 0 and text[pos] == "\\":
+        backslashes += 1
+        pos -= 1
+    return backslashes % 2 == 1
+
+
+_TITLE_AND_CLOSE = re.compile(
+    r"""[ \t\r\n]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|"""
+    r"\((?:\\.|[^)\\])*\))?[ \t\r\n]*\)"
+)
+
+
+def _parse_markdown_destination(
+    text: str, masked: str, label_start: int, close_bracket: int
+) -> _MarkdownLink | None:
+    pos = close_bracket + 2
+    while pos < len(masked) and masked[pos] in " \t\r\n":
+        pos += 1
+    if pos >= len(masked):
+        return None
+    destination_start = pos
+    if masked[pos] == "<":
+        close_angle = pos + 1
+        while close_angle < len(masked) and masked[close_angle] not in ">\n":
+            close_angle += 1
+        if close_angle == len(masked) or masked[close_angle] != ">":
+            return None
+        suffix = close_angle + 1
+        if suffix < len(masked) and masked[suffix] == ")":
+            full_end = suffix + 1
+        else:
+            title = _TITLE_AND_CLOSE.match(masked, suffix)
+            if title is None:
+                return None
+            full_end = title.end()
+        path = text[pos + 1 : close_angle].strip()
+        reference = Reference(path, pos, close_angle + 1)
+        return _MarkdownLink(reference, label_start, destination_start, full_end)
+
+    start = pos
+    depth = 0
+    while pos < len(masked):
+        char = masked[pos]
+        if char == "\\" and pos + 1 < len(masked):
+            pos += 2
             continue
-        depth = 0
-        pos = start
-        while pos < len(masked):
-            char = masked[pos]
-            if char == "\\" and pos + 1 < len(masked):
-                pos += 2
-                continue
-            if char == "(":
-                depth += 1
-            elif char == ")":
-                if depth == 0:
-                    raw = text[start:pos]
-                    references.append(
-                        Reference(_unescape_markdown_destination(raw), start, pos)
-                    )
-                    break
-                depth -= 1
-            elif char in "<>\n" or (char.isspace() and depth == 0):
-                title = re.match(
-                    r"""\s+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|"""
-                    r"\((?:\\.|[^)\\])*\))\s*\)",
-                    masked[pos:],
-                )
-                if title:
-                    raw = text[start:pos]
-                    references.append(
-                        Reference(_unescape_markdown_destination(raw), start, pos)
-                    )
-                break
-            pos += 1
-    return references
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            if depth == 0:
+                raw = text[start:pos]
+                reference = Reference(_unescape_markdown_destination(raw), start, pos)
+                return _MarkdownLink(reference, label_start, destination_start, pos + 1)
+            depth -= 1
+        elif char in "<>\n":
+            return None
+        elif char.isspace() and depth == 0:
+            title = _TITLE_AND_CLOSE.match(masked, pos)
+            if title is None:
+                return None
+            raw = text[start:pos]
+            reference = Reference(_unescape_markdown_destination(raw), start, pos)
+            return _MarkdownLink(reference, label_start, destination_start, title.end())
+        pos += 1
+    return None
+
+
+def _markdown_destinations(text: str, masked: str) -> list[Reference]:
+    brackets = []
+    links = []
+    for pos, char in enumerate(masked):
+        if char in "\r\n":
+            brackets.clear()
+            continue
+        if char not in "[]" or _is_escaped(masked, pos):
+            continue
+        if char == "[":
+            brackets.append(pos)
+            continue
+        if not brackets:
+            continue
+        label_start = brackets.pop()
+        if pos + 1 >= len(masked) or masked[pos + 1] != "(":
+            continue
+        link = _parse_markdown_destination(text, masked, label_start, pos)
+        if link is not None:
+            links.append(link)
+
+    links = [
+        link
+        for link in links
+        if not any(
+            outer is not link
+            and outer.destination_start <= link.label_start < outer.full_end
+            for outer in links
+        )
+    ]
+    return sorted((link.reference for link in links), key=lambda ref: ref.start)
 
 
 def _html_attributes(tag: str) -> list[tuple[str, int, int]]:
@@ -223,17 +315,13 @@ def _html_attributes(tag: str) -> list[tuple[str, int, int]]:
 
 def extract(text: str) -> list[Reference]:
     masked = _masked(text)
-    angle_matches = list(_ANGLE_DESTINATION.finditer(masked))
+    preliminary = _markdown_destinations(text, masked)
+    angle_spans = {
+        (reference.start, reference.end)
+        for reference in preliminary
+        if text[reference.start : reference.start + 1] == "<"
+    }
     all_tags = list(_HTML_TAG.finditer(masked))
-    angle_matches = [
-        match
-        for match in angle_matches
-        if not any(
-            tag.start() <= match.start() and match.end() <= tag.end()
-            for tag in all_tags
-        )
-    ]
-    angle_spans = {match.span(1) for match in angle_matches}
     tags = [tag for tag in all_tags if tag.span() not in angle_spans]
     markdown_mask = list(masked)
     for tag in tags:
@@ -241,9 +329,6 @@ def extract(text: str) -> list[Reference]:
     markdown_masked = "".join(markdown_mask)
 
     out = _markdown_destinations(text, markdown_masked)
-    for match in angle_matches:
-        start, end = match.span(1)
-        out.append(Reference(match.group(2).strip(), start, end))
 
     for tag in tags:
         for name, value_start, value_end in _html_attributes(tag.group()):
@@ -375,7 +460,11 @@ def parse_download_url(value: str) -> tuple[str, str, str] | None:
 
 def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[dict]]:
     masked = _masked(text)
-    markdown_destinations = _markdown_destinations(text, masked)
+    markdown_destinations = [
+        reference
+        for reference in _markdown_destinations(text, masked)
+        if text[reference.start : reference.start + 1] != "<"
+    ]
     by_key = {
         (
             str(upload.get("long_name", "")),
