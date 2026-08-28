@@ -703,14 +703,27 @@ def _write_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
         os.close(directory_fd)
 
 
-def _replace_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
+def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
+    """Install a conflict copy (``<name>.remote`` / ``<name>.base``) without
+    clobbering an unrelated file: write a fully formed temp file, then link it
+    into place with no-clobber, atomic semantics (so a failed write never
+    strands a partial artifact). If the destination already holds exactly these
+    bytes an idempotent re-pull is fine; otherwise refuse. Document names are
+    unrestricted, so the destination is not necessarily ours."""
     _validate_attachment_target(target, doc_dir)
     fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=f".{target.name}.")
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
-        _validate_attachment_target(target, doc_dir)
-        os.replace(temporary, target)
+        try:
+            os.link(temporary, target)
+        except FileExistsError:
+            _validate_attachment_target(target, doc_dir)
+            if target.read_bytes() != data:
+                raise RuntimeError(
+                    "refusing to overwrite existing file at attachment conflict "
+                    f"path: {target.name}"
+                ) from None
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -772,7 +785,7 @@ def _place_attachments(
             _validate_attachment_target(target, path.parent)
         if target.read_bytes() != data:
             remote_target = target.with_name(target.name + conflict_suffix)
-            _replace_attachment(remote_target, data, path.parent)
+            _place_conflict_attachment(remote_target, data, path.parent)
             conflicts.append(remote_target.name)
     return conflicts
 

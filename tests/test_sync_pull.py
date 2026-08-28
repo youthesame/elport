@@ -803,14 +803,39 @@ def test_pull_rejects_base_conflict_name_collision_before_download(
     assert {item.name: item.read_bytes() for item in tmp_path.iterdir()} == before
 
 
-def test_pull_refreshes_existing_regular_attachment_remote(
+def test_pull_refuses_to_overwrite_differing_attachment_conflict(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
     (tmp_path / "attachment.bin").write_bytes(b"local")
     remote_target = tmp_path / "attachment.bin.remote"
-    remote_target.write_bytes(b"stale")
+    remote_target.write_bytes(b"a real user document")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "attachment.bin",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(gets=[{"body": f"[file]({url})"}], uploads=[upload])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    with pytest.raises(
+        RuntimeError, match="refusing to overwrite.*attachment.bin.remote"
+    ):
+        sync.pull(doc, client, {})
+
+    assert remote_target.read_bytes() == b"a real user document"
+    assert (tmp_path / "attachment.bin").read_bytes() == b"local"
+
+
+def test_pull_allows_idempotent_attachment_conflict(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    (tmp_path / "attachment.bin").write_bytes(b"local")
+    remote_target = tmp_path / "attachment.bin.remote"
+    remote_target.write_bytes(b"data")
     upload = {
         "id": 3,
         "long_name": "aa/existing",
@@ -825,3 +850,29 @@ def test_pull_refreshes_existing_regular_attachment_remote(
         sync.pull(doc, client, {})
 
     assert remote_target.read_bytes() == b"data"
+
+
+def test_pull_dirty_refuses_to_overwrite_differing_base_attachment_conflict(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    (tmp_path / "figure.png").write_bytes(b"local")
+    (tmp_path / "figure.png.base").write_bytes(b"a real user document")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "figure.png",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(gets=[{"body": "remote"}], uploads=[upload])
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: saved_state(remote=f"base [figure]({url})")
+    )
+
+    with pytest.raises(RuntimeError, match="refusing to overwrite.*figure.png.base"):
+        sync.pull(doc, client, {})
+
+    assert (tmp_path / "figure.png.base").read_bytes() == b"a real user document"
+    assert (tmp_path / "figure.png").read_bytes() == b"local"
