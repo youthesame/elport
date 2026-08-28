@@ -179,7 +179,10 @@ def test_pull_dirty_writes_three_way_sidecars(
     monkeypatch.setattr(
         sync.state,
         "load",
-        lambda *args: saved_state(remote=f"base [figure]({url})"),
+        lambda *args: saved_state(
+            local="base [figure](figure.png)",
+            remote=f"base [figure]({url})",
+        ),
     )
 
     with pytest.raises(RuntimeError, match="local changes conflict"):
@@ -208,6 +211,62 @@ def test_pull_dirty_writes_three_way_sidecars(
         )
         in capsys.readouterr().err
     )
+
+
+def test_pull_dirty_uses_saved_local_base_verbatim(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    local_base = "base  with  local spacing\n"
+    client = FakeClient(gets=[{"body": "remote"}])
+    monkeypatch.setattr(
+        sync.state,
+        "load",
+        lambda *args: saved_state(
+            local=local_base,
+            remote="<p>base with server normalization</p>",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, client, {})
+
+    _, base_body = frontmatter.parse((tmp_path / "report.base.md").read_text())
+    assert base_body == local_base
+    assert "download" not in client.calls
+
+
+def test_pull_dirty_keeps_local_base_when_old_attachment_was_deleted(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    old_upload = {
+        "id": 3,
+        "long_name": "aa/deleted",
+        "real_name": "old.csv",
+        "storage": 1,
+    }
+    old_url = sync.download_url("https://e.example", old_upload)
+    local_base = "base [old](old.csv)"
+    client = FakeClient(gets=[{"body": "remote"}], uploads=[])
+    monkeypatch.setattr(
+        sync.state,
+        "load",
+        lambda *args: saved_state(
+            local=local_base,
+            remote=f"base [old]({old_url})",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, client, {})
+
+    _, base_body = frontmatter.parse((tmp_path / "report.base.md").read_text())
+    assert base_body == local_base
+    assert old_url not in base_body
+    assert "download" not in client.calls
 
 
 @pytest.mark.parametrize(
@@ -280,7 +339,10 @@ def test_pull_dirty_control_file_urls_remain_in_three_way_sidecars(
     monkeypatch.setattr(
         sync.state,
         "load",
-        lambda *args: saved_state(remote=f"base [file]({url})"),
+        lambda *args: saved_state(
+            local=f"base [file]({url})",
+            remote=f"base [file]({url})",
+        ),
     )
 
     with pytest.raises(RuntimeError, match="local changes conflict"):
@@ -444,7 +506,7 @@ def test_pull_dirty_re_pull_allows_matching_sidecars(tmp_path, monkeypatch, conf
     write_doc(doc, "edited")
     meta = frontmatter.parse(doc.read_text())[0]
     (tmp_path / "report.remote.md").write_text(frontmatter.render(meta, "remote"))
-    (tmp_path / "report.base.md").write_text(frontmatter.render(meta, "base"))
+    (tmp_path / "report.base.md").write_text(frontmatter.render(meta, "local"))
     client = FakeClient(gets=[{"body": "remote"}])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state(remote="base"))
 
@@ -452,7 +514,7 @@ def test_pull_dirty_re_pull_allows_matching_sidecars(tmp_path, monkeypatch, conf
         sync.pull(doc, client, {})
 
     assert frontmatter.parse((tmp_path / "report.remote.md").read_text())[1] == "remote"
-    assert frontmatter.parse((tmp_path / "report.base.md").read_text())[1] == "base"
+    assert frontmatter.parse((tmp_path / "report.base.md").read_text())[1] == "local"
 
 
 def test_pull_dirty_refuses_symlink_at_sidecar_path(tmp_path, monkeypatch, configured):

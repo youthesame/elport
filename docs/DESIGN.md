@@ -137,13 +137,27 @@ git workflow would constrain how researchers organize notes. The **only** place 
 merge. (Want per-edit local history? That is the user's own `git init`, which elport neither requires nor manages.)
 
 **`elport merge` wraps `git merge-file`.** The stored two-form base is a genuine common ancestor, so conflict
-resolution is a real 3-way merge: `git merge-file <local> <base> <remote>`, with the reverse-transcluded remote/base
-written as `<name>.remote.md` / `<name>.base.md`. Refinement of §3.6: rather than only *printing* that command,
+resolution is a real 3-way merge: `git merge-file <local> <base> <remote>`, with the remote sidecar
+reverse-transcluded and the base sidecar taken from the local base, written as `<name>.remote.md` /
+`<name>.base.md`. Refinement of §3.6: rather than only *printing* that command,
 `elport merge <note>` *runs* it (writing the result into the local file, with markers on overlap). push/pull stay
 **non-mutating on conflict**: they emit the sidecars and stop; `elport merge` is the explicit, opt-in step that
 rewrites local, and it **never auto-pushes**. git stays **optional** (fallback: if `git` is absent, `elport merge`
 points at the sidecars for a manual merge, and the sidecars are always written regardless). git is a system binary, so
 it is a documented runtime requirement for merge only, never a `pyproject.toml` / PyPI dependency.
+
+**The merge ancestor is the local base verbatim, never the reverse-transcluded remote base.** `git merge-file`
+takes one ancestor, but the stored base is two-form (§3.6). `local-base` is in local form (filenames); `remote-base`
+is in server form (`download.php` URLs). The other two merge inputs are already local form: the working file, and the
+remote body reverse-transcluded to filenames. So the ancestor is `local-base`, which makes `local` vs `base` a
+same-form diff that carries only the user's edits. Reversing `remote-base` for the ancestor would bring back the two
+false conflicts the two-form base exists to prevent. First, server body normalization, which does not converge (see
+the normalization section of ELABFTW-API). Second, an attachment deleted in the Web UI, whose `download.php` URL no
+longer resolves to a filename and so diffs against the ancestor's filename. `remote-base` is still reverse-transcluded,
+but only to find which base attachments still exist and can be placed as `<name>.base`. One ancestor cannot be
+same-form with both sides at once, so the merge keeps the local diff clean and lets the remote diff carry the noise.
+Local is authoritative, so the user's edits stay intact. This never invents a conflict from normalization alone,
+because `_raise_conflict` runs only when the remote actually moved (`remote_body != remote_base`).
 
 **push refuses unresolved conflict markers.** If the outgoing body carries `<<<<<<<` / `=======` / `>>>>>>>` marker
 lines, push aborts (bypass with `--force`). This closes the one hole this stance would otherwise leave: a
