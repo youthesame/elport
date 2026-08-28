@@ -493,6 +493,31 @@ def test_new_push_persists_resolved_target(tmp_path, monkeypatch):
     assert meta["profile"] == "lab"
 
 
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [(None, "report"), ("", "report"), ("Named report", "Named report")],
+)
+def test_new_push_falls_back_to_filename_for_empty_title(
+    title, expected, tmp_path, configured
+):
+    class RecordingClient(FakeClient):
+        def __init__(self):
+            super().__init__(gets=[{"body": "local", "content_type": 2}])
+            self.created = []
+
+        def create(self, entity, title):
+            self.created.append((entity, title))
+            return super().create(entity, title)
+
+    doc = tmp_path / "report.md"
+    doc.write_text(frontmatter.render({"title": title}, "local"), encoding="utf-8")
+    client = RecordingClient()
+
+    sync.push(doc, client, {})
+
+    assert client.created == [("experiments", expected)]
+
+
 @pytest.mark.parametrize("title", [datetime.date(2026, 8, 8), 20260808])
 def test_push_normalizes_yaml_scalar_metadata_to_strings(
     tmp_path, monkeypatch, configured, title

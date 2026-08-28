@@ -419,7 +419,7 @@ def push(
     _confirm_large_uploads(new_uploads)
 
     if not eid:
-        created = client.create(entity, meta.get("title", path.stem))
+        created = client.create(entity, meta.get("title") or path.stem)
         eid = frontmatter.parse_server_id(created.get("id"))
         meta["id"] = eid
         meta["entity"] = entity
