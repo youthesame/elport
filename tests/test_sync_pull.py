@@ -213,9 +213,7 @@ def test_pull_dirty_writes_three_way_sidecars(
     )
 
 
-def test_pull_dirty_uses_saved_local_base_verbatim(
-    tmp_path, monkeypatch, configured
-):
+def test_pull_dirty_uses_saved_local_base_verbatim(tmp_path, monkeypatch, configured):
     doc = tmp_path / "report.md"
     write_doc(doc, "edited")
     local_base = "base  with  local spacing\n"
@@ -938,3 +936,22 @@ def test_pull_dirty_refuses_to_overwrite_differing_base_attachment_conflict(
 
     assert (tmp_path / "figure.png.base").read_bytes() == b"a real user document"
     assert (tmp_path / "figure.png").read_bytes() == b"local"
+
+
+FOREIGN_URL = (
+    "https://e.example/app/download.php?f=bb%2Ftheirs&name=theirs.png&storage=1"
+)
+
+
+def test_pull_stays_silent_on_unmatched_attachment_reference(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(gets=[{"body": f"see [x]({FOREIGN_URL})"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.pull(doc, client, {})
+
+    assert "kept as a URL" not in capsys.readouterr().err

@@ -874,3 +874,21 @@ def test_successful_push_preserves_unrelated_sidecar_named_documents(
     assert client.saved_payload is not None
     assert base_sidecar.read_text(encoding="utf-8") == "unrelated base document\n"
     assert remote_sidecar.read_text(encoding="utf-8") == "unrelated remote document\n"
+
+
+FOREIGN_URL = (
+    "https://e.example/app/download.php?f=bb%2Ftheirs&name=theirs.png&storage=1"
+)
+
+
+def test_push_stays_silent_on_unmatched_attachment_reference(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, f"see [x]({FOREIGN_URL})")
+    client = FakeClient(remote_doc={"body": "remote", "content_type": 2})
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    assert "kept as a URL" not in capsys.readouterr().err

@@ -193,3 +193,41 @@ def test_remote_diff_prints_normalization_note_for_real_difference(
 
 def test_remote_tags_handles_null():
     assert sync._remote_tags({"tags": None}) == set()
+
+
+FOREIGN_URL = (
+    "https://e.example/app/download.php?f=bb%2Ftheirs&name=theirs.png&storage=1"
+)
+
+
+def test_status_warns_on_unmatched_attachment_reference(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, f"see [x]({FOREIGN_URL})")
+    client = FakeClient(gets=[{"body": "remote", "content_type": 2}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "theirs.png" in capsys.readouterr().err
+
+
+def test_status_does_not_warn_when_reference_matches_this_entity(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    upload = {
+        "id": 3,
+        "long_name": "aa/mine",
+        "real_name": "mine.png",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    write_doc(doc, f"see [x]({url})")
+    client = FakeClient(gets=[{"body": "remote", "content_type": 2}], uploads=[upload])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "kept as a URL" not in capsys.readouterr().err
