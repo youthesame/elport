@@ -82,6 +82,72 @@ def test_html_tag_scanner_allows_greater_than_inside_quoted_attribute(
     )
 
 
+def test_src_inside_another_attribute_value_is_not_extracted(tmp_path: Path):
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(b"image")
+    secret = tmp_path / "report.md"
+    secret.write_text("secret", encoding="utf-8")
+    text = '<img alt=\'literal src="report.md"\' src="figure.png">'
+
+    references = plan(text, tmp_path)
+
+    assert [reference.path for reference in references] == ["figure.png"]
+    assert replace_spans(text, references, {figure: "URL"}) == (
+        '<img alt=\'literal src="report.md"\' src="URL">'
+    )
+
+
+def test_href_src_inside_title_data_and_handler_attributes_ignored(tmp_path: Path):
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(b"image")
+    text = (
+        '<a title=\'see src="a.md" and href="b.md"\' '
+        "data-note=\"href='c.md'\" onclick=\"load('src=d.md')\" "
+        'href="note.pdf">note</a>'
+    )
+
+    references = plan(text, tmp_path)
+
+    assert [reference.path for reference in references] == ["note.pdf"]
+
+
+def test_mixed_quote_styles_do_not_confuse_attribute_boundaries(tmp_path: Path):
+    first = tmp_path / "first.png"
+    first.write_bytes(b"1")
+    second = tmp_path / "second.pdf"
+    second.write_bytes(b"2")
+    text = (
+        "<img src='first.png' alt=\"quote ' and src='decoy.md'\"> "
+        '<a href="second.pdf" title=\'decoy href="decoy2.md"\'>x</a>'
+    )
+
+    references = plan(text, tmp_path)
+
+    assert [reference.path for reference in references] == [
+        "first.png",
+        "second.pdf",
+    ]
+
+
+def test_unquoted_html_attribute_values_are_extracted(tmp_path: Path):
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(b"image")
+    note = tmp_path / "notes.pdf"
+    note.write_bytes(b"pdf")
+    text = "<img src=figure.png> <a href=notes.pdf>notes</a>"
+
+    references = plan(text, tmp_path)
+
+    assert [reference.path for reference in references] == [
+        "figure.png",
+        "notes.pdf",
+    ]
+    assert (
+        replace_spans(text, references, {figure: "URL1", note: "URL2"})
+        == "<img src=URL1> <a href=URL2>notes</a>"
+    )
+
+
 def test_markdown_destination_inside_html_tag_is_not_extracted(tmp_path: Path):
     secret = tmp_path / "secret.txt"
     secret.write_text("secret", encoding="utf-8")

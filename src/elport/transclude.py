@@ -17,6 +17,7 @@ _ANGLE_DESTINATION = re.compile(
 _HTML_TAG = re.compile(
     r"""</?[A-Za-z][A-Za-z0-9:-]*(?=[\s/>])(?:"[^"]*"|'[^']*'|[^'">])*>"""
 )
+_HTML_TAG_NAME = re.compile(r"</?[A-Za-z][A-Za-z0-9:-]*")
 _REFERENCE_DEFINITION = re.compile(
     r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<([^>\n]*)>|(\S+))"
 )
@@ -173,6 +174,53 @@ def _markdown_destinations(text: str, masked: str) -> list[Reference]:
     return references
 
 
+def _html_attributes(tag: str) -> list[tuple[str, int, int]]:
+    """Walk a well-formed HTML tag and yield ``(name, value_start, value_end)``
+    for each attribute that carries a value. ``value_start``/``value_end`` bound
+    the raw value inside the tag (quote characters excluded). Boolean attributes
+    and the tag name are skipped, so a ``src=``/``href=`` sequence that merely
+    appears inside another attribute's quoted or unquoted value is never
+    mistaken for a real attribute.
+    """
+    name_match = _HTML_TAG_NAME.match(tag)
+    if name_match is None:
+        return []
+    pos = name_match.end()
+    n = len(tag)
+    attributes: list[tuple[str, int, int]] = []
+    while pos < n:
+        while pos < n and (tag[pos].isspace() or tag[pos] == "/"):
+            pos += 1
+        if pos >= n or tag[pos] == ">":
+            break
+        name_start = pos
+        while pos < n and not tag[pos].isspace() and tag[pos] not in "=/>":
+            pos += 1
+        name = tag[name_start:pos]
+        while pos < n and tag[pos].isspace():
+            pos += 1
+        if pos >= n or tag[pos] != "=":
+            continue  # boundary or boolean attribute; re-enter loop at pos
+        pos += 1
+        while pos < n and tag[pos].isspace():
+            pos += 1
+        if pos < n and tag[pos] in "\"'":
+            quote = tag[pos]
+            pos += 1
+            value_start = pos
+            while pos < n and tag[pos] != quote:
+                pos += 1
+            attributes.append((name, value_start, pos))
+            if pos < n:
+                pos += 1  # closing quote
+        else:
+            value_start = pos
+            while pos < n and not tag[pos].isspace() and tag[pos] != ">":
+                pos += 1
+            attributes.append((name, value_start, pos))
+    return attributes
+
+
 def extract(text: str) -> list[Reference]:
     masked = _masked(text)
     angle_matches = list(_ANGLE_DESTINATION.finditer(masked))
@@ -197,15 +245,15 @@ def extract(text: str) -> list[Reference]:
         start, end = match.span(1)
         out.append(Reference(match.group(2).strip(), start, end))
 
-    attribute = re.compile(
-        r"(?<![-\w])(?:src|href)\s*=\s*([\"'])(.*?)\1",
-        re.IGNORECASE,
-    )
     for tag in tags:
-        for match in attribute.finditer(tag.group()):
-            raw = match.group(2)
+        for name, value_start, value_end in _html_attributes(tag.group()):
+            if name.lower() not in ("src", "href"):
+                continue
+            raw = tag.group()[value_start:value_end]
             value = raw.strip()
-            start = tag.start() + match.start(2) + len(raw) - len(raw.lstrip())
+            if not value:
+                continue
+            start = tag.start() + value_start + len(raw) - len(raw.lstrip())
             end = start + len(value)
             out.append(Reference(html.unescape(value), start, end))
     return sorted(out, key=lambda x: x.start)
