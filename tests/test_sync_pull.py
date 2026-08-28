@@ -397,6 +397,124 @@ def test_pull_without_base_rejects_sidecar_attachment_before_download(
     assert not (tmp_path / "report.remote.md").exists()
 
 
+def test_pull_dirty_refuses_to_clobber_unrelated_remote_sidecar(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    (tmp_path / "report.remote.md").write_text("a real user document")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "figure.png",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(gets=[{"body": f"remote [figure]({url})"}], uploads=[upload])
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: saved_state(remote=f"base [figure]({url})")
+    )
+
+    with pytest.raises(RuntimeError, match="refusing to overwrite"):
+        sync.pull(doc, client, {})
+
+    assert (tmp_path / "report.remote.md").read_text() == "a real user document"
+    assert "download" not in client.calls
+    assert not (tmp_path / "figure.png").exists()
+
+
+def test_pull_dirty_refuses_to_clobber_unrelated_base_sidecar(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    (tmp_path / "report.base.md").write_text("a real user document")
+    client = FakeClient(gets=[{"body": "remote"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state(remote="base"))
+
+    with pytest.raises(RuntimeError, match="refusing to overwrite"):
+        sync.pull(doc, client, {})
+
+    assert (tmp_path / "report.base.md").read_text() == "a real user document"
+    assert not (tmp_path / "report.remote.md").exists()
+
+
+def test_pull_dirty_re_pull_allows_matching_sidecars(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    meta = frontmatter.parse(doc.read_text())[0]
+    (tmp_path / "report.remote.md").write_text(frontmatter.render(meta, "remote"))
+    (tmp_path / "report.base.md").write_text(frontmatter.render(meta, "base"))
+    client = FakeClient(gets=[{"body": "remote"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state(remote="base"))
+
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, client, {})
+
+    assert frontmatter.parse((tmp_path / "report.remote.md").read_text())[1] == "remote"
+    assert frontmatter.parse((tmp_path / "report.base.md").read_text())[1] == "base"
+
+
+def test_pull_dirty_refuses_symlink_at_sidecar_path(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    (tmp_path / "secret.md").write_text("victim")
+    (tmp_path / "report.remote.md").symlink_to("secret.md")
+    client = FakeClient(gets=[{"body": "remote"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state(remote="base"))
+
+    with pytest.raises(RuntimeError, match="symlink at sidecar path"):
+        sync.pull(doc, client, {})
+
+    assert (tmp_path / "report.remote.md").is_symlink()
+    assert (tmp_path / "secret.md").read_text() == "victim"
+
+
+def test_pull_without_base_refuses_to_clobber_unrelated_sidecar(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    (tmp_path / "report.remote.md").write_text("a real user document")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "figure.png",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(gets=[{"body": f"remote [figure]({url})"}], uploads=[upload])
+    monkeypatch.setattr(sync.state, "load", lambda *args: None)
+
+    with pytest.raises(RuntimeError, match="refusing to overwrite"):
+        sync.pull(doc, client, {})
+
+    assert (tmp_path / "report.remote.md").read_text() == "a real user document"
+    assert "download" not in client.calls
+
+
+def test_pull_without_base_allows_idempotent_re_pull(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    (tmp_path / "figure.png").write_bytes(b"data")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "figure.png",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    source = "remote [figure](figure.png)"
+    (tmp_path / "report.remote.md").write_text(source)
+    client = FakeClient(gets=[{"body": f"remote [figure]({url})"}], uploads=[upload])
+    monkeypatch.setattr(sync.state, "load", lambda *args: None)
+
+    with pytest.raises(RuntimeError, match="base unavailable"):
+        sync.pull(doc, client, {})
+
+    assert (tmp_path / "report.remote.md").read_text() == source
+
+
 def test_pull_without_base_reports_attachment_conflicts(
     tmp_path, monkeypatch, configured
 ):
@@ -685,14 +803,39 @@ def test_pull_rejects_base_conflict_name_collision_before_download(
     assert {item.name: item.read_bytes() for item in tmp_path.iterdir()} == before
 
 
-def test_pull_refreshes_existing_regular_attachment_remote(
+def test_pull_refuses_to_overwrite_differing_attachment_conflict(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
     (tmp_path / "attachment.bin").write_bytes(b"local")
     remote_target = tmp_path / "attachment.bin.remote"
-    remote_target.write_bytes(b"stale")
+    remote_target.write_bytes(b"a real user document")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "attachment.bin",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(gets=[{"body": f"[file]({url})"}], uploads=[upload])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    with pytest.raises(
+        RuntimeError, match="refusing to overwrite.*attachment.bin.remote"
+    ):
+        sync.pull(doc, client, {})
+
+    assert remote_target.read_bytes() == b"a real user document"
+    assert (tmp_path / "attachment.bin").read_bytes() == b"local"
+
+
+def test_pull_allows_idempotent_attachment_conflict(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    (tmp_path / "attachment.bin").write_bytes(b"local")
+    remote_target = tmp_path / "attachment.bin.remote"
+    remote_target.write_bytes(b"data")
     upload = {
         "id": 3,
         "long_name": "aa/existing",
@@ -707,3 +850,29 @@ def test_pull_refreshes_existing_regular_attachment_remote(
         sync.pull(doc, client, {})
 
     assert remote_target.read_bytes() == b"data"
+
+
+def test_pull_dirty_refuses_to_overwrite_differing_base_attachment_conflict(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    (tmp_path / "figure.png").write_bytes(b"local")
+    (tmp_path / "figure.png.base").write_bytes(b"a real user document")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "figure.png",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(gets=[{"body": "remote"}], uploads=[upload])
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: saved_state(remote=f"base [figure]({url})")
+    )
+
+    with pytest.raises(RuntimeError, match="refusing to overwrite.*figure.png.base"):
+        sync.pull(doc, client, {})
+
+    assert (tmp_path / "figure.png.base").read_bytes() == b"a real user document"
+    assert (tmp_path / "figure.png").read_bytes() == b"local"

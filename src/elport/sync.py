@@ -577,6 +577,23 @@ def _reject_sidecar_attachment_collisions(
             raise RuntimeError(f"sidecar conflicts with attachment: {name}")
 
 
+def _reject_existing_sidecars(writes: list[tuple[Path, str]]) -> None:
+    """Refuse to clobber a pre-existing file at a sidecar path unless it already
+    holds exactly the bytes we would write (an idempotent re-pull of the same
+    conflict). Document names are otherwise unrestricted, so without this an
+    unrelated document sharing a sidecar name would be silently replaced; a
+    generated sidecar is never a symlink, so any symlink there is rejected."""
+    for path, content in writes:
+        if path.is_symlink():
+            raise RuntimeError(
+                f"refusing to overwrite symlink at sidecar path: {path.name}"
+            )
+        if path.exists() and path.read_bytes() != content.encode("utf-8"):
+            raise RuntimeError(
+                f"refusing to overwrite existing file at sidecar path: {path.name}"
+            )
+
+
 def _reject_attachment_conflict_name_collisions(
     planned: list[dict], suffixed: list[tuple[dict, str]]
 ) -> None:
@@ -614,15 +631,19 @@ def _raise_conflict(
         [(upload, ".remote") for upload in remote_used]
         + [(upload, ".base") for upload in base_only],
     )
+    meta = frontmatter.parse(path.read_text(encoding="utf-8"))[0]
+    remote_sidecar = frontmatter.render(meta, remote_source)
+    base_sidecar = frontmatter.render(meta, base_source)
+    _reject_existing_sidecars(
+        [
+            (_sidecar_path(path), remote_sidecar),
+            (_base_sidecar_path(path), base_sidecar),
+        ]
+    )
     _place_attachments(path, remote, remote_used)
     _place_attachments(path, remote, base_only, conflict_suffix=".base")
-    meta = frontmatter.parse(path.read_text(encoding="utf-8"))[0]
-    frontmatter.atomic_write(
-        _sidecar_path(path), frontmatter.render(meta, remote_source)
-    )
-    frontmatter.atomic_write(
-        _base_sidecar_path(path), frontmatter.render(meta, base_source)
-    )
+    frontmatter.atomic_write(_sidecar_path(path), remote_sidecar)
+    frontmatter.atomic_write(_base_sidecar_path(path), base_sidecar)
     print(
         "git merge-file -- "
         f"{shlex.quote(str(path))} "
@@ -682,14 +703,27 @@ def _write_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
         os.close(directory_fd)
 
 
-def _replace_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
+def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
+    """Install a conflict copy (``<name>.remote`` / ``<name>.base``) without
+    clobbering an unrelated file: write a fully formed temp file, then link it
+    into place with no-clobber, atomic semantics (so a failed write never
+    strands a partial artifact). If the destination already holds exactly these
+    bytes an idempotent re-pull is fine; otherwise refuse. Document names are
+    unrestricted, so the destination is not necessarily ours."""
     _validate_attachment_target(target, doc_dir)
     fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=f".{target.name}.")
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
-        _validate_attachment_target(target, doc_dir)
-        os.replace(temporary, target)
+        try:
+            os.link(temporary, target)
+        except FileExistsError:
+            _validate_attachment_target(target, doc_dir)
+            if target.read_bytes() != data:
+                raise RuntimeError(
+                    "refusing to overwrite existing file at attachment conflict "
+                    f"path: {target.name}"
+                ) from None
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -751,7 +785,7 @@ def _place_attachments(
             _validate_attachment_target(target, path.parent)
         if target.read_bytes() != data:
             remote_target = target.with_name(target.name + conflict_suffix)
-            _replace_attachment(remote_target, data, path.parent)
+            _place_conflict_attachment(remote_target, data, path.parent)
             conflicts.append(remote_target.name)
     return conflicts
 
@@ -801,6 +835,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         _reject_attachment_conflict_name_collisions(
             used, [(upload, ".remote") for upload in used]
         )
+        _reject_existing_sidecars([(sidecar, source)])
         attachment_conflicts = _place_attachments(path, remote, used)
         frontmatter.atomic_write(sidecar, source)
         message = f"base unavailable; remote written to {sidecar.name}"
