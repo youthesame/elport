@@ -431,6 +431,25 @@ def test_dry_run_prints_each_original_reference_path(
     assert f"./assets/figure.png -> {url}" in output
 
 
+def test_push_does_not_upload_file_named_only_inside_attribute_value(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(b"image")
+    secret = tmp_path / "secret.md"
+    secret.write_text("local secret", encoding="utf-8")
+    write_doc(doc, '<img alt=\'literal src="secret.md"\' src="figure.png">')
+    client = FakeClient(gets=[{"body": "remote"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    output = capsys.readouterr().out
+    assert "figure.png -> UPLOAD_PENDING:figure.png" in output
+    assert "secret.md" not in output
+
+
 def test_dry_run_remote_conflict_writes_no_merge_inputs(
     tmp_path, monkeypatch, configured
 ):
