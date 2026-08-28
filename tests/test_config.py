@@ -307,6 +307,15 @@ def test_set_default_writes_config_key(tmp_path, monkeypatch):
     assert config._read(user)["default_profile"] == "lab"
 
 
+def test_set_default_creates_missing_config_directory(tmp_path, monkeypatch):
+    user = tmp_path / "home" / ".config" / "elport" / "config.toml"
+    monkeypatch.setattr(config, "config_path", lambda: user)
+
+    config.set_default("lab")
+
+    assert config._read(user)["default_profile"] == "lab"
+
+
 @pytest.mark.parametrize(
     ("data", "expected"),
     [
