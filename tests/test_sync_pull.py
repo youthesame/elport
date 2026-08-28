@@ -943,33 +943,12 @@ FOREIGN_URL = (
 )
 
 
-def test_pull_warns_on_foreign_attachment_reference(
+def test_pull_stays_silent_on_unmatched_attachment_reference(
     tmp_path, monkeypatch, configured, capsys
 ):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
     client = FakeClient(gets=[{"body": f"see [x]({FOREIGN_URL})"}])
-    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
-    monkeypatch.setattr(sync.state, "save", lambda *args: None)
-
-    sync.pull(doc, client, {})
-
-    assert "theirs.png" in capsys.readouterr().err
-
-
-def test_pull_does_not_warn_when_reference_matches_this_entity(
-    tmp_path, monkeypatch, configured, capsys
-):
-    doc = tmp_path / "report.md"
-    write_doc(doc, "local")
-    upload = {
-        "id": 3,
-        "long_name": "aa/mine",
-        "real_name": "mine.png",
-        "storage": 1,
-    }
-    url = sync.download_url("https://e.example", upload)
-    client = FakeClient(gets=[{"body": f"see [x]({url})"}], uploads=[upload])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
     monkeypatch.setattr(sync.state, "save", lambda *args: None)
 

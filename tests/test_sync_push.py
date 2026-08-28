@@ -858,7 +858,7 @@ FOREIGN_URL = (
 )
 
 
-def test_push_warns_on_foreign_attachment_reference(
+def test_push_stays_silent_on_unmatched_attachment_reference(
     tmp_path, monkeypatch, configured, capsys
 ):
     doc = tmp_path / "report.md"
@@ -868,4 +868,4 @@ def test_push_warns_on_foreign_attachment_reference(
 
     sync.push(doc, client, {}, dry_run=True)
 
-    assert "theirs.png" in capsys.readouterr().err
+    assert "kept as a URL" not in capsys.readouterr().err

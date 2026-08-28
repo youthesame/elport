@@ -400,7 +400,6 @@ def push(
             _warn_permission_narrowing(path, permission_changes, remote_doc)
 
     uploads = remote.uploads() if remote is not None else []
-    _warn_unmatched_attachments(body, uploads, base_url)
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
     if dry_run:
@@ -834,7 +833,6 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         _reversible_uploads(uploads),
         remote.base_url,
     )
-    _warn_unmatched_attachments(remote_doc.get("body", ""), uploads, remote.base_url)
 
     no_base_conflict = saved is None and bool(body.strip()) and body != source
     if local_dirty:
