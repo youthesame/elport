@@ -455,6 +455,29 @@ def test_push_does_not_upload_file_named_only_inside_attribute_value(
     assert "secret.md" not in output
 
 
+def test_push_does_not_upload_file_named_only_in_non_reference_text(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    secret = tmp_path / "secret.txt"
+    secret.write_text("local secret", encoding="utf-8")
+    real = tmp_path / "real.txt"
+    real.write_text("attachment", encoding="utf-8")
+    write_doc(
+        doc,
+        '[public](https://example.test "caption [hidden](secret.txt)") '
+        "<textarea>[hidden](secret.txt)</textarea> [real](real.txt)",
+    )
+    client = FakeClient(gets=[{"body": "remote"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    output = capsys.readouterr().out
+    assert "real.txt -> UPLOAD_PENDING:real.txt" in output
+    assert "secret.txt" not in output
+
+
 def test_dry_run_remote_conflict_writes_no_merge_inputs(
     tmp_path, monkeypatch, configured
 ):

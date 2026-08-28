@@ -524,6 +524,108 @@ def test_html_opener_in_excluded_region_does_not_mask_later_reference(
     assert [reference.file for reference in references] == [file_path.resolve()]
 
 
+@pytest.mark.parametrize("element", ["script", "style", "textarea", "title"])
+def test_html_raw_text_element_body_is_not_parsed(tmp_path: Path, element: str):
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    (tmp_path / "real.txt").write_text("real", encoding="utf-8")
+
+    references = plan(
+        f'<{element} class="x">[hidden](secret.txt)</{element}> [real](real.txt)',
+        tmp_path,
+    )
+
+    assert [reference.path for reference in references] == ["real.txt"]
+
+
+@pytest.mark.parametrize(
+    "opener",
+    ["<script>", "<STYLE media='screen'>", "<textarea rows=4>", "<Title>"],
+)
+def test_unterminated_raw_text_body_is_masked_through_eof(tmp_path: Path, opener: str):
+    (tmp_path / "real.txt").write_text("real", encoding="utf-8")
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+
+    references = plan(f"[real](real.txt)\n{opener}\n[hidden](secret.txt)\n", tmp_path)
+
+    assert [reference.path for reference in references] == ["real.txt"]
+
+
+@pytest.mark.parametrize("opener", ["<script>", "<style>", "<textarea>", "<title>"])
+@pytest.mark.parametrize(
+    "excluded",
+    ["```\n{opener}\n```", "`{opener}`", "<!-- {opener} -->"],
+)
+def test_raw_text_opener_in_excluded_region_does_not_mask_later_reference(
+    tmp_path: Path, opener: str, excluded: str
+):
+    (tmp_path / "real.txt").write_text("real", encoding="utf-8")
+
+    references = plan(excluded.format(opener=opener) + "\n[real](real.txt)\n", tmp_path)
+
+    assert [reference.path for reference in references] == ["real.txt"]
+
+
+@pytest.mark.parametrize("destination", ["https://x.test", "<https://x.test>"])
+@pytest.mark.parametrize(
+    "title",
+    [
+        '"caption [hidden](secret.txt)"',
+        "'caption [hidden](secret.txt)'",
+        r"(caption [hidden]\(secret.txt\))",
+    ],
+)
+def test_link_title_does_not_create_a_second_reference(
+    tmp_path: Path, destination: str, title: str
+):
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    (tmp_path / "real.txt").write_text("real", encoding="utf-8")
+
+    references = plan(f"[outer]({destination} {title}) [real](real.txt)", tmp_path)
+
+    assert [reference.path for reference in references] == [
+        destination.strip("<>"),
+        "real.txt",
+    ]
+
+
+def test_link_label_containing_a_link_does_not_upload_outer_destination(
+    tmp_path: Path,
+):
+    # CommonMark forbids nested links, so the outer link is not rendered and its
+    # destination must not become an upload target.
+    (tmp_path / "public.png").write_bytes(b"x")
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+
+    references = plan("[pre [inner](public.png) post](secret.txt)", tmp_path)
+
+    assert [reference.path for reference in references] == ["public.png"]
+
+
+def test_angle_destination_with_inner_angle_is_not_a_link(tmp_path: Path):
+    # An unescaped '<' is illegal inside an angle destination, so the outer link
+    # does not render; the inner link is the genuine one and must be kept.
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+
+    references = plan('[outer](<bad<dest> "[inner](secret.txt)")', tmp_path)
+
+    assert [reference.path for reference in references] == ["secret.txt"]
+
+
+@pytest.mark.parametrize(
+    "element", ["script-loader", "code-block", "style-guide", "title-bar"]
+)
+def test_hyphenated_custom_element_is_not_masked_as_raw_text(
+    tmp_path: Path, element: str
+):
+    # A hyphenated custom element shares a raw-text prefix but is an ordinary
+    # HTML element, so a link inside it still renders.
+    (tmp_path / "real.txt").write_text("real", encoding="utf-8")
+
+    references = plan(f"<{element}>[real](real.txt)</{element}>", tmp_path)
+
+    assert [reference.path for reference in references] == ["real.txt"]
+
+
 @pytest.mark.parametrize("pattern", ["scratch/", "scratch/**"])
 def test_directory_ignore_patterns_exclude_nested_files(tmp_path: Path, pattern: str):
     nested = tmp_path / "scratch" / "a" / "data.csv"
