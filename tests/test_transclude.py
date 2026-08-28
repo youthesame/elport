@@ -196,6 +196,7 @@ def test_angle_bracket_destination_preserves_parenthesized_title(tmp_path: Path)
     [
         ("[plot](<figure 1.png>)", "figure 1.png"),
         ("[x](<pre file.txt>)", "pre file.txt"),
+        ("[x](<script file.txt>)", "script file.txt"),
     ],
 )
 def test_angle_bracket_destination_starting_with_html_tag_name(
@@ -245,6 +246,49 @@ def test_balanced_bare_destination_preserves_link_title(tmp_path: Path):
     assert replace_spans(text, references, {attachment: "URL"}) == (
         '[plot](URL "Figure 1")'
     )
+
+
+@pytest.mark.parametrize(
+    "destination", ["https://example.test", "<https://example.test>"]
+)
+@pytest.mark.parametrize(
+    "title",
+    [
+        '"caption [hidden](secret.txt)"',
+        "'caption [hidden](secret.txt)'",
+        r"(caption [hidden]\(secret.txt\))",
+    ],
+)
+def test_markdown_title_does_not_create_a_second_reference(
+    tmp_path: Path, destination: str, title: str
+):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("secret", encoding="utf-8")
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+    text = f"[outer]({destination} {title}) [real](real.txt)"
+
+    references = plan(text, tmp_path)
+
+    assert [reference.path for reference in references] == [
+        "https://example.test",
+        "real.txt",
+    ]
+    assert references[-1].file == real.resolve()
+
+
+def test_nested_image_link_keeps_both_real_references(tmp_path: Path):
+    image = tmp_path / "image.png"
+    image.write_bytes(b"image")
+    page = tmp_path / "page.html"
+    page.write_text("page", encoding="utf-8")
+
+    references = plan("[![alt](image.png)](page.html)", tmp_path)
+
+    assert [reference.file for reference in references] == [
+        image.resolve(),
+        page.resolve(),
+    ]
 
 
 def test_fragment_is_preserved_when_local_path_is_replaced(tmp_path: Path):
@@ -420,6 +464,71 @@ def test_code_comments_pre_and_code_are_not_parsed(tmp_path: Path):
 """
     references = plan(text, tmp_path)
     assert [reference.path for reference in references] == ["figure.png"]
+
+
+@pytest.mark.parametrize(
+    ("opener", "closer", "expected"),
+    [
+        (
+            '<ScRiPt type="module" src="loader.js">',
+            "</SCRIPT>",
+            ["loader.js", "real.txt"],
+        ),
+        ("<STYLE media='screen'>", "</style>", ["real.txt"]),
+        ("<textarea rows=4>", "</TEXTAREA>", ["real.txt"]),
+        ("<Title class='sample'>", "</title>", ["real.txt"]),
+    ],
+)
+def test_html_raw_text_body_is_not_parsed(
+    tmp_path: Path, opener: str, closer: str, expected: list[str]
+):
+    for name in ("loader.js", "secret.txt", "real.txt"):
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    text = f"{opener}[hidden](secret.txt){closer} [real](real.txt)"
+
+    references = plan(text, tmp_path)
+
+    assert [reference.path for reference in references] == expected
+
+
+@pytest.mark.parametrize(
+    "opener",
+    ["<script>", "<style>", "<textarea>", "<title>"],
+)
+def test_unterminated_html_raw_text_body_is_masked_through_eof(
+    tmp_path: Path, opener: str
+):
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+    secret = tmp_path / "secret.txt"
+    secret.write_text("secret", encoding="utf-8")
+
+    references = plan(
+        f"[real](real.txt) {opener}[hidden](secret.txt)",
+        tmp_path,
+    )
+
+    assert [reference.file for reference in references] == [real.resolve()]
+
+
+@pytest.mark.parametrize(
+    "excluded",
+    [
+        "```html\n<script>\n```",
+        "`<script>`",
+        "<!-- <script> -->",
+        '<div title="<script>">literal</div>',
+    ],
+)
+def test_fake_raw_text_opener_does_not_mask_a_later_reference(
+    tmp_path: Path, excluded: str
+):
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+
+    references = plan(f"{excluded}\n[real](real.txt)", tmp_path)
+
+    assert [reference.file for reference in references] == [real.resolve()]
 
 
 def test_crlf_fenced_block_round_trip_preserves_code_and_later_attachment(
