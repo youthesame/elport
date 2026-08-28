@@ -837,6 +837,23 @@ def test_profile_use_sets_default(monkeypatch, capsys):
     assert capsys.readouterr().out == "default profile is now labA\n"
 
 
+def test_profile_use_creates_user_config_for_project_profile(
+    tmp_path, monkeypatch, capsys
+):
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".elport.toml").write_text(
+        '[profiles.lab]\nbase_url = "https://e.example"\n', encoding="utf-8"
+    )
+    user = tmp_path / "home" / ".config" / "elport" / "config.toml"
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(cli.config, "config_path", lambda: user)
+
+    assert cli.main(["profile", "use", "lab"]) == 0
+    assert config._read(user)["default_profile"] == "lab"
+    assert capsys.readouterr().out == "default profile is now lab\n"
+
+
 @pytest.mark.parametrize(
     ("argv", "message"),
     [
