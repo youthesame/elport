@@ -417,6 +417,37 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
     return result, placed
 
 
+def unmatched_download_urls(text: str, uploads: list[dict], base_url: str) -> list[str]:
+    """Names of ``download.php`` URLs in the body that match none of ``uploads``.
+
+    These reference an attachment on another entity (or one deleted in the Web
+    UI): ``reverse()`` leaves them untouched because the query carries no entity
+    or upload id and ``download.php`` needs cookie auth, so they cannot be
+    localized. Pure analysis mirroring ``reverse()``'s scan (fences, inline code
+    and HTML comments excluded); nothing is rewritten. Returns each attachment's
+    ``real_name`` once, in first-seen order.
+    """
+    masked = _masked(text)
+    by_key = {
+        (
+            str(upload.get("long_name", "")),
+            str(upload.get("real_name", "")),
+            str(upload.get("storage", 1)),
+        )
+        for upload in uploads
+    }
+    prefix = re.escape(base_url.rstrip("/") + "/app/download.php?")
+    url_pattern = re.compile(prefix + r"[^\s\"'<>)]*")
+    names: list[str] = []
+    for match in url_pattern.finditer(masked):
+        parsed = parse_download_url(text[match.start() : match.end()])
+        if parsed is None or parsed in by_key:
+            continue
+        if parsed[1] not in names:
+            names.append(parsed[1])
+    return names
+
+
 def safe_name(name: str) -> str:
     cleaned = Path(name.replace("\\", "/")).name.lstrip("~")
     return cleaned if cleaned not in ("", ".", "..") else "attachment"

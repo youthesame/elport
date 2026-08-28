@@ -89,6 +89,11 @@ similar, **consult it and pull in only what is needed** when a missing feature b
 - Automatic bidirectional sync / automatic conflict resolution.
 - Folder conventions like `attachments_dir` (unnecessary under the reference-based approach).
 - GUI / TUI.
+- **Cross-entity attachment resolution.** A `download.php` URL that points at another entity's upload stays an
+  opaque URL, and the tool never localizes it. Its query carries no entity or upload id, and `download.php` needs cookie
+  auth, so the tool can neither fetch it nor turn it back into a local filename. Localizing it would re-upload the
+  file as this entity's own attachment and duplicate it. The tool names such references rather than letting them
+  pass silently.
 
 ---
 

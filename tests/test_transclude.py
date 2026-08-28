@@ -10,7 +10,64 @@ from elport.transclude import (
     replace_spans,
     reverse,
     safe_name,
+    unmatched_download_urls,
 )
+
+BASE_URL = "https://e.example"
+
+
+def _upload(long_name: str, real_name: str, storage: int = 1) -> dict:
+    return {
+        "id": 1,
+        "long_name": long_name,
+        "real_name": real_name,
+        "storage": storage,
+    }
+
+
+def test_unmatched_download_url_names_a_foreign_attachment():
+    ours = _upload("aa/mine", "mine.png")
+    theirs = _upload("bb/theirs", "theirs.png")
+    body = (
+        f"[mine]({download_url(BASE_URL, ours)})\n"
+        f"[theirs]({download_url(BASE_URL, theirs)})\n"
+    )
+
+    assert unmatched_download_urls(body, [ours], BASE_URL) == ["theirs.png"]
+
+
+def test_unmatched_download_urls_ignores_matched_and_non_download_links():
+    ours = _upload("aa/mine", "mine.png")
+    body = (
+        f"[mine]({download_url(BASE_URL, ours)})\n"
+        "[web](https://elsewhere.example/app/download.php?f=x&name=y&storage=1)\n"
+        "[page](https://e.example/experiments.php?mode=view&id=3)\n"
+    )
+
+    assert unmatched_download_urls(body, [ours], BASE_URL) == []
+
+
+def test_unmatched_download_url_inside_code_fence_is_ignored():
+    theirs = _upload("bb/theirs", "theirs.png")
+    body = f"```\n{download_url(BASE_URL, theirs)}\n```\n"
+
+    assert unmatched_download_urls(body, [], BASE_URL) == []
+
+
+def test_unmatched_download_url_parses_html_escaped_query():
+    theirs = _upload("bb/theirs", "theirs.png")
+    escaped = download_url(BASE_URL, theirs).replace("&", "&amp;")
+    body = f'<img src="{escaped}">'
+
+    assert unmatched_download_urls(body, [], BASE_URL) == ["theirs.png"]
+
+
+def test_unmatched_download_urls_deduplicate_by_name():
+    theirs = _upload("bb/theirs", "theirs.png")
+    url = download_url(BASE_URL, theirs)
+    body = f"[a]({url})\n[b]({url})\n"
+
+    assert unmatched_download_urls(body, [], BASE_URL) == ["theirs.png"]
 
 
 def test_extracts_each_markdown_and_html_notation():

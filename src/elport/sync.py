@@ -17,7 +17,14 @@ from typing import Any
 
 from . import config as config_module
 from . import frontmatter, state
-from .transclude import download_url, plan, replace_spans, reverse, safe_name
+from .transclude import (
+    download_url,
+    plan,
+    replace_spans,
+    reverse,
+    safe_name,
+    unmatched_download_urls,
+)
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
 CONTROL_FILENAMES = {".elport.toml", ".elportignore"}
@@ -63,6 +70,15 @@ def _is_control_upload(upload: dict) -> bool:
 
 def _reversible_uploads(uploads: list[dict]) -> list[dict]:
     return [upload for upload in uploads if not _is_control_upload(upload)]
+
+
+def _warn_unmatched_attachments(body: str, uploads: list[dict], base_url: str) -> None:
+    for name in unmatched_download_urls(body, uploads, base_url):
+        print(
+            "warning: attachment not found among this entity's uploads, "
+            f"kept as a URL (not downloaded, not localized): {name}",
+            file=sys.stderr,
+        )
 
 
 def ignore_patterns(doc_dir: Path, config: dict) -> list[str]:
@@ -384,6 +400,7 @@ def push(
             _warn_permission_narrowing(path, permission_changes, remote_doc)
 
     uploads = remote.uploads() if remote is not None else []
+    _warn_unmatched_attachments(body, uploads, base_url)
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
     if dry_run:
@@ -616,9 +633,7 @@ def _raise_conflict(
     uploads = _reversible_uploads(uploads)
     remote_source, remote_used = reverse(remote_body, uploads, remote.base_url)
     base_source = saved.get("local_base", "")
-    _, base_used = reverse(
-        saved.get("remote_base", ""), uploads, remote.base_url
-    )
+    _, base_used = reverse(saved.get("remote_base", ""), uploads, remote.base_url)
     used = []
     for upload in remote_used + base_used:
         if upload not in used:
@@ -819,6 +834,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         _reversible_uploads(uploads),
         remote.base_url,
     )
+    _warn_unmatched_attachments(remote_doc.get("body", ""), uploads, remote.base_url)
 
     no_base_conflict = saved is None and bool(body.strip()) and body != source
     if local_dirty:
@@ -940,6 +956,7 @@ def status(path: Path, client, config: dict, profile=None) -> None:
         print("mode: unavailable (offline?)")
         return
 
+    _warn_unmatched_attachments(body, uploads, remote.base_url)
     reused = [path.name for path in files if _matching_upload(path, uploads)]
     new = [path.name for path in files if path.name not in reused]
     print("uploads new:", ", ".join(new) or "none")
