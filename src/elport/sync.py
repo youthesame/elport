@@ -898,7 +898,7 @@ def status(path: Path, client, config: dict, profile=None) -> None:
     try:
         uploads = remote.uploads()
         remote_doc = remote.get()
-    except (OSError, ValueError):
+    except OSError:
         print("uploads reuse: unavailable (offline?)")
         print("remote: unavailable (offline?)")
         print("mode: unavailable (offline?)")
