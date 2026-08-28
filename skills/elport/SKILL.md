@@ -20,6 +20,7 @@ elport push                      # upload refs + PATCH body as markdown (content
 elport push -n                   # --dry-run: full rehearsal, upload + path→URL plan, no writes
 elport push report.md            # doc defaults to report.md; any name works
 elport pull                      # fetch body, reverse-transclude URLs → local paths, download files
+elport fetch                     # download every attachment, incl. non-embedded ones (read-only, no base/manifest)
 elport merge                     # after a conflict: git merge-file .base.md/.remote.md → doc (local)
 elport comments                  # print the remote comment thread (read-only, terminal only)
 elport comment "text"            # post one comment (no edit/delete)

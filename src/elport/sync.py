@@ -838,6 +838,40 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         print(f"  → {url}")
 
 
+def fetch(path: Path, client, config: dict, profile=None) -> None:
+    """Download every attachment on the entity, including files the body does not
+    reference. Read-only: it never parses the body, touches base state, or feeds the
+    push manifest. A local file that differs is preserved; the remote copy lands
+    beside it as name.remote."""
+    meta, _, entity, eid = _document(path, config)
+    if not eid:
+        raise RuntimeError("id is required")
+    _, base_url, _, _ = config_module.resolve(config, profile, meta)
+    remote = Remote(client, entity, eid, base_url)
+    uploads = remote.uploads()
+    for upload in uploads:
+        if _is_control_upload(upload):
+            print(
+                "warning: refusing to place control file attachment: "
+                f"{_upload_name(upload)}",
+                file=sys.stderr,
+            )
+    attachments = _reversible_uploads(uploads)
+    _reject_sidecar_attachment_collisions(
+        attachments, (_sidecar_path(path), _base_sidecar_path(path))
+    )
+    _reject_attachment_conflict_name_collisions(
+        attachments, [(upload, ".remote") for upload in attachments]
+    )
+    conflicts = _place_attachments(path, remote, attachments)
+    names = sorted({_upload_name(upload) for upload in attachments})
+    print(f"fetched {entity}/{eid}: {len(names)} attachment(s)")
+    if names:
+        print("  " + ", ".join(names))
+    if conflicts:
+        print("  conflicts written to: " + ", ".join(conflicts))
+
+
 def status(path: Path, client, config: dict, profile=None) -> None:
     meta, body, entity, eid = _document(path, config)
     saved = None
