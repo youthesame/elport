@@ -212,7 +212,10 @@ def test_push_stops_on_initial_conflict_with_merge_inputs(
     monkeypatch.setattr(
         sync.state,
         "load",
-        lambda *args: saved_state(remote=f"base [figure]({url})"),
+        lambda *args: saved_state(
+            local="base [figure](figure.png)",
+            remote=f"base [figure]({url})",
+        ),
     )
 
     with pytest.raises(RuntimeError, match="remote changed"):
@@ -267,7 +270,9 @@ def test_post_upload_conflict_refreshes_merge_inputs(
     client = SameDownloadClient(
         gets=[{"body": "remote"}, {"body": f"web edit [data]({url})"}]
     )
-    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: saved_state(local="remote", remote="remote")
+    )
 
     with pytest.raises(RuntimeError, match="after uploads"):
         sync.push(doc, client, {})
