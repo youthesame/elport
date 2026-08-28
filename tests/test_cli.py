@@ -513,7 +513,7 @@ def test_base_diff_does_not_resolve_credentials(tmp_path, monkeypatch, capsys):
     assert "-original" in capsys.readouterr().out
 
 
-def test_status_prints_local_result_when_credentials_are_unavailable(
+def test_status_reports_credentials_unavailable_as_cli_error(
     tmp_path, monkeypatch, capsys
 ):
     document = tmp_path / "report.md"
@@ -534,10 +534,11 @@ def test_status_prints_local_result_when_credentials_are_unavailable(
         lambda *args: (_ for _ in ()).throw(ValueError("credentials unavailable")),
     )
 
-    assert cli.main(["status", str(document)]) == 0
-    output = capsys.readouterr().out
-    assert "local: clean" in output
-    assert "remote: unavailable (offline?)" in output
+    assert cli.main(["status", str(document)]) == 1
+    captured = capsys.readouterr()
+    assert "local: clean" in captured.out
+    assert "remote: unavailable (offline?)" not in captured.out
+    assert captured.err == "credentials unavailable\n"
 
 
 def test_selected_profile_verify_ssl_is_forwarded(monkeypatch):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from _sync_harness import FakeClient, saved_state, write_doc
 
 from elport import sync
@@ -68,6 +69,28 @@ def test_status_prints_local_plan_before_remote_get_failure(
         "uploads reuse: unavailable (offline?)",
         "remote: unavailable (offline?)",
         "mode: unavailable (offline?)",
+    ]
+
+
+def test_status_does_not_treat_value_errors_as_offline(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+
+    class InvalidClient(FakeClient):
+        def uploads(self, entity, eid):
+            raise ValueError("credentials unavailable")
+
+    client = InvalidClient()
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    with pytest.raises(ValueError, match="credentials unavailable"):
+        sync.status(doc, client, {})
+
+    assert capsys.readouterr().out.splitlines() == [
+        "local: clean",
+        "uploads local: none",
     ]
 
 
