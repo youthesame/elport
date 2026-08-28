@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 _ANGLE_DESTINATION = re.compile(
-    r"!?(?<!\\)(?:\[[^\]]*\])\(\s*(<([^>\n]*)>)\s*"
+    r"!?(?<!\\)(?:\[[^\]]*\])\(\s*(<([^<>\n]*)>)\s*"
     r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))?\)"""
 )
 _HTML_TAG = re.compile(
@@ -57,7 +57,7 @@ def _masked(text: str) -> str:
         match.span(1) for match in _ANGLE_DESTINATION.finditer("".join(mask))
     }
     for m in re.finditer(
-        r"<(pre|code)\b[^>]*>[\s\S]*?(?:</\1\s*>|\Z)",
+        r"<(pre|code|script|style|textarea|title)(?=[\s/>])[^>]*>[\s\S]*?(?:</\1\s*>|\Z)",
         "".join(mask),
         re.IGNORECASE,
     ):
@@ -137,7 +137,10 @@ def _unescape_markdown_destination(value: str) -> str:
 def _markdown_destinations(text: str, masked: str) -> list[Reference]:
     opener_pattern = re.compile(r"!?(?<!\\)(?:\[[^\]\n]*\])\(\s*")
     references = []
+    consumed_until = 0
     for opener in opener_pattern.finditer(masked):
+        if opener.start() < consumed_until:
+            continue  # opener lies inside an already-consumed link title
         start = opener.end()
         if start == len(masked) or masked[start] == "<":
             continue
@@ -169,6 +172,7 @@ def _markdown_destinations(text: str, masked: str) -> list[Reference]:
                     references.append(
                         Reference(_unescape_markdown_destination(raw), start, pos)
                     )
+                    consumed_until = pos + title.end()
                 break
             pos += 1
     return references
@@ -238,6 +242,12 @@ def extract(text: str) -> list[Reference]:
     markdown_mask = list(masked)
     for tag in tags:
         markdown_mask[tag.start() : tag.end()] = [" "] * (tag.end() - tag.start())
+    for match in angle_matches:
+        # Blank the whole angle link (label, destination, and title) so a fake
+        # link embedded in its title is not rescanned as a bare reference.
+        markdown_mask[match.start() : match.end()] = [" "] * (
+            match.end() - match.start()
+        )
     markdown_masked = "".join(markdown_mask)
 
     out = _markdown_destinations(text, markdown_masked)
