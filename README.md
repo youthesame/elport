@@ -38,6 +38,7 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 |---|---|
 | `elport push [<doc>]` | Push `<doc>` to one entity. Creates it (writing `id` back) if unset. Runs mode + conflict checks first. |
 | `elport pull [<doc>]` | Fetch the body, reverse-transclude URLs back to local paths, download referenced files. |
+| `elport fetch [<doc>]` | Download every attachment on the entity, including files the body never references. Read-only. |
 | `elport status [<doc>]` | Side-effect-free: is local changed? was the remote edited? which files upload? what mode? |
 | `elport diff [<doc>]` | Source-form diff. Default local ↔ remote; `--base` for local ↔ last push. Never sends. |
 | `elport merge [<doc>]` | After a conflict, 3-way `.base.md`/`.remote.md` into `<doc>` via `git merge-file`. Local-only; git optional. |
@@ -55,6 +56,12 @@ losing the Web-side change), `-y/--yes` (skip the confirmation when widening `re
 
 > pull writes referenced files back by **basename only**. A subdirectory path like `assets/fig.png` is flattened to
 > `fig.png`.
+
+> pull only downloads files the body links to. Attachments that sit on the entity without being embedded, like raw
+> data or spectra, stay on the server. Run `elport fetch` to pull those down too. fetch is read-only. It never parses
+> the body, touches the base, or feeds the push manifest, so a fetched file is not uploaded again unless you link it
+> in the body yourself. If a local file differs, fetch leaves it in place and writes the remote copy beside it as
+> `<name>.remote`.
 
 ## Document format (front matter)
 

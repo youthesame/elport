@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import config, frontmatter, state
 from .client import Client
-from .sync import comment, comments, diff, merge, pull, push, status
+from .sync import comment, comments, diff, fetch, merge, pull, push, status
 
 ENTITIES = ("experiments", "items")
 
@@ -82,6 +82,17 @@ def _parser() -> argparse.ArgumentParser:
         help="local document (default: report.md)",
     )
     _add_target_options(pull_parser)
+
+    fetch_parser = commands.add_parser(
+        "fetch", help="download all remote attachments (read-only)"
+    )
+    fetch_parser.add_argument(
+        "doc",
+        nargs="?",
+        default="report.md",
+        help="local document (default: report.md)",
+    )
+    _add_target_options(fetch_parser)
 
     status_parser = commands.add_parser("status", help="show local/remote sync state")
     status_parser.add_argument(
@@ -405,6 +416,8 @@ def main(argv=None) -> int:
             )
         elif args.cmd == "pull":
             pull(path, client, data, args.profile)
+        elif args.cmd == "fetch":
+            fetch(path, client, data, args.profile)
         elif args.cmd == "status":
             status(path, client, data, args.profile)
         elif args.cmd == "comments":
