@@ -615,7 +615,8 @@ def _raise_conflict(
     """Write git merge-file inputs (remote + base sidecars, attachments) and raise."""
     uploads = _reversible_uploads(uploads)
     remote_source, remote_used = reverse(remote_body, uploads, remote.base_url)
-    base_source, base_used = reverse(
+    base_source = saved.get("local_base", "")
+    _, base_used = reverse(
         saved.get("remote_base", ""), uploads, remote.base_url
     )
     used = []
