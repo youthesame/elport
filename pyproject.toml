@@ -1,6 +1,7 @@
 [project]
 name = "elport"
-version = "0.1.0"
+# Version comes from the latest git tag (hatch-vcs). Don't set it here; release by tagging.
+dynamic = ["version"]
 description = "Git-like sync CLI for eLabFTW (local-first push/pull of Markdown/HTML lab notes)"
 requires-python = ">=3.10"
 license = "MIT"
@@ -17,8 +18,11 @@ dependencies = [
 elport = "elport.cli:main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"
 
 [project.optional-dependencies]
 dev = [
