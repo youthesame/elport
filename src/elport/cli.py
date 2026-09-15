@@ -69,7 +69,7 @@ def _parser() -> argparse.ArgumentParser:
         "-y",
         "--yes",
         action="store_true",
-        help="skip confirmation when widening access to account or public",
+        help="skip confirmations (access widening, large uploads)",
     )
 
     pull_parser = commands.add_parser(

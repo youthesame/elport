@@ -431,7 +431,7 @@ def test_permission_widening_interactive_no_stops_before_uploads(
     monkeypatch.setattr(
         sync,
         "_confirm_large_uploads",
-        lambda paths: pytest.fail("large-upload confirmation must run later"),
+        lambda *args: pytest.fail("large-upload confirmation must run later"),
     )
 
     with pytest.raises(RuntimeError, match="permission widening cancelled"):

@@ -51,7 +51,8 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 | `elport profile [use <name>]` | List profiles (default marked), or set the default profile. |
 
 Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>`, `-f/--force` (push over a changed remote,
-losing the Web-side change), `-y/--yes` (skip the confirmation when widening `read`/`write` beyond your team),
+losing the Web-side change), `-y/--yes` (skip the confirmations for widening `read`/`write` beyond your team and for new uploads over
+25 MiB; non-interactive runs need `-y` for either),
 `--entity {experiments,items}`.
 
 > pull writes referenced files back by **basename only**. A subdirectory path like `assets/fig.png` is flattened to

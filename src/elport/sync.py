@@ -139,13 +139,15 @@ def _complete_upload(remote: Remote, uploaded: dict) -> dict:
     return match
 
 
-def _confirm_large_uploads(paths: list[Path]) -> None:
+def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
     large = [path for path in paths if path.stat().st_size > LARGE_UPLOAD_BYTES]
-    if not large:
+    if not large or assume_yes:
         return
     names = ", ".join(f"{path.name} ({path.stat().st_size} bytes)" for path in large)
     if not sys.stdin.isatty():
-        raise RuntimeError(f"large upload requires interactive confirmation: {names}")
+        raise RuntimeError(
+            f"large upload requires confirmation ({names}); re-run with --yes"
+        )
     answer = input(f"Upload large file(s) {names}? [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
         raise RuntimeError("large upload cancelled")
@@ -432,7 +434,7 @@ def push(
             print(f"{ref.path} -> {target}")
         return
 
-    _confirm_large_uploads(new_uploads)
+    _confirm_large_uploads(new_uploads, assume_yes)
 
     if not eid:
         created = client.create(entity, meta.get("title") or path.stem)

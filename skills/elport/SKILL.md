@@ -1,6 +1,6 @@
 ---
 name: elport
-description: Use the `elport` CLI to sync a local Markdown/HTML lab note to eLabFTW (push/pull/status/diff), never by hand-writing eLabFTW REST calls. Trigger whenever you are about to upload, push, pull, or fetch an experiment note or its attachments to/from eLabFTW, or reach for the eLabFTW API to do so. Local files are the source of truth; elport is git-for-eLabFTW.
+description: Use the elport CLI when syncing, fetching, or comparing local Markdown/HTML lab notes and attachments with eLabFTW.
 ---
 
 # elport, git-for-eLabFTW: push/pull a local note, never hand-drive the API
@@ -37,8 +37,8 @@ The loop is **`status` → (`diff`) → `push`**, mirroring git. Do not push bli
 - `status`, `diff`, and `push -n` **never send**, so they are free. Run the cheapest one that
   answers the question: `status` for the summary, `diff` for *what* changed in source form,
   `push -n` for *what the push would do* (upload list + path→URL plan + abort conditions).
-- Read `status` before every push: `local: clean` means nothing to send; `remote: changed`
-  means the Web UI was edited. Stop and resolve (see Safety) before pushing.
+- Read `status` before every push: `local: clean` means the body is unchanged, not necessarily
+  attachments or metadata. `remote: changed` means the Web UI was edited; resolve before pushing (see Safety).
 - Don't narrate the preflight. Run the checks, then act; report the result, not the method.
 
 ## Reference
@@ -51,12 +51,12 @@ The loop is **`status` → (`diff`) → `push`**, mirroring git. Do not push bli
   paths, `..` escapes, and code-fence/inline-code content.
 - **Permissions**: frontmatter `read:`/`write:` (`owner|owner+admin|team|account|public`) set
   the eLabFTW base visibility, only when present, and only the base level (Web-UI individual
-  grants are preserved). Widening to `account`/`public` needs confirmation or `-y`.
+  grants are preserved).
 
-## Safety: writes are shared and hard to undo
+## Safety
 
-eLabFTW entities are shared; a push overwrites the server body, and `--force` discards whatever
-is on the remote. Treat these like any irreversible outward action.
+For a user-requested push, complete preflight and the normal push without asking again.
+A push overwrites the shared server body; discarding remote changes with `--force` requires explicit consent.
 
 - **Never `--force` past a conflict without the user's explicit consent.** `remote changed; use
   pull or --force` (or `base unavailable; run pull first or use --force`) means the server body
@@ -65,6 +65,9 @@ is on the remote. Treat these like any irreversible outward action.
   `elport merge` 3-ways them into the note, resolve any `<<<<<<<` markers, and `push` (push
   refuses a body that still carries markers). If you can't tell whether the remote change
   matters, show `elport diff` and ask. Don't guess, and don't `--force` to clear the error.
+- **`-y` skips every push confirmation**: widening `read`/`write` to `account`/`public` and new
+  uploads over 25 MiB. Run `push -n` first; pass `-y` only when the user has approved everything
+  it would skip. If push stops with `re-run with --yes`, ask rather than add `-y` on your own.
 - **Keep secrets out of the note and repo.** API keys live in the OS keyring via `elport login`;
   base_url in `~/.config/elport/`. Never print, echo, or write a key into a file, note, or log.
 - **`id` is server-assigned** by `new` and the first `push`. Never invent or hand-edit it,

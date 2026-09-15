@@ -817,10 +817,32 @@ def test_large_upload_non_tty_stops_before_mutation(tmp_path, monkeypatch, confi
     client = FakeClient(gets=[{"body": "remote"}])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
 
-    with pytest.raises(RuntimeError, match="interactive confirmation"):
+    with pytest.raises(RuntimeError, match="re-run with --yes"):
         sync.push(doc, client, {})
 
     assert client.calls == ["me", "get", "uploads"]
+
+
+def test_large_upload_non_tty_proceeds_with_yes(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    attachment = tmp_path / "large.bin"
+    with attachment.open("wb") as stream:
+        stream.truncate(sync.LARGE_UPLOAD_BYTES + 1)
+    write_doc(doc, "[large](large.bin)")
+    client = FakeClient(
+        gets=[
+            {"body": "remote", "tags": ""},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: False)
+
+    sync.push(doc, client, {}, assume_yes=True)
+
+    assert "upload" in client.calls
 
 
 def test_push_rejects_invalid_server_id_before_entity_requests(
