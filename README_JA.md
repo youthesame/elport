@@ -1,4 +1,4 @@
-# elport: eLabFTW のための Git ライクな同期 CLI
+# elport: eLabFTW のラボノートを手元で書いて同期する git ライクな CLI
 
 [English](README.md) | [日本語](README_JA.md)
 
