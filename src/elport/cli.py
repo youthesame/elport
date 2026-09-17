@@ -10,7 +10,17 @@ from pathlib import Path
 
 from . import config, frontmatter, state
 from .client import Client
-from .sync import comment, comments, diff, fetch, merge, pull, push, status
+from .sync import (
+    comment,
+    comments,
+    diff,
+    fetch,
+    mark_created,
+    merge,
+    pull,
+    push,
+    status,
+)
 
 ENTITIES = ("experiments", "items")
 
@@ -269,10 +279,12 @@ def _new(args) -> None:
     resolved_profile, client = _resolved_client(data, args.profile, meta)
     meta["profile"] = resolved_profile
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
+    team = client.me().get("team")
     created = client.create(args.entity, args.title)
     eid = frontmatter.parse_server_id(created.get("id"))
     meta["id"] = eid
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
+    mark_created(client.root, args.entity, eid, team)
     remote = client.get(args.entity, eid)
     state.save(
         client.root,
@@ -281,7 +293,7 @@ def _new(args) -> None:
         {
             "remote_base": remote.get("body", ""),
             "local_base": "",
-            "team": client.me().get("team"),
+            "team": team,
         },
     )
     print(f"created {args.entity}/{eid}: {path}")
