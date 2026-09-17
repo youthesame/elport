@@ -184,6 +184,63 @@ def _remote_tags(remote: dict) -> set[str]:
     return {str(tag).strip() for tag in value if str(tag).strip()}
 
 
+SYNCED_META = ("title", "category", "status", "read", "write")
+
+
+def _synced_meta(meta: dict) -> dict:
+    return {key: meta[key] for key in SYNCED_META if key in meta}
+
+
+def _remote_meta(remote_doc: dict) -> dict:
+    """Frontmatter values the server holds; None means the key is unset remotely.
+    Fields absent from the response are left out so they never erase local keys."""
+    levels = {
+        level: keyword for keyword, level in frontmatter.PERMISSION_LEVELS.items()
+    }
+
+    def catalog(field):
+        # A title of digits would read back as an id, so keep the id itself.
+        title = remote_doc[f"{field}_title"]
+        return remote_doc.get(field) if str(title).isdigit() else title
+
+    fields = {
+        "title": ("title", lambda value: value),
+        "category": ("category_title", lambda _: catalog("category")),
+        "status": ("status_title", lambda _: catalog("status")),
+        "read": ("canread_base", levels.get),
+        "write": ("canwrite_base", levels.get),
+    }
+    return {
+        key: convert(remote_doc[source]) or None
+        for key, (source, convert) in fields.items()
+        if source in remote_doc
+    }
+
+
+def _set_meta(target: dict, key: str, value) -> None:
+    if value is None:
+        target.pop(key, None)
+    else:
+        target[key] = value
+
+
+def _merge_meta(meta: dict, base: dict, remote_doc: dict) -> tuple[dict, dict]:
+    """Take remote metadata, except keys edited locally since the last sync.
+    Returns the merged front matter and the new base. The base always holds the
+    remote value, so a kept local edit stays an edit on the next pull."""
+    merged = dict(meta)
+    new_base = dict(base)
+    for key, value in _remote_meta(remote_doc).items():
+        _set_meta(new_base, key, value)
+        if meta.get(key) == base.get(key):
+            _set_meta(merged, key, value)
+    if "tags" in remote_doc:
+        # Tags are add-only on both sides, so the union needs no base.
+        local_tags = {str(tag) for tag in meta.get("tags") or []}
+        _set_meta(merged, "tags", sorted(_remote_tags(remote_doc) | local_tags) or None)
+    return merged, new_base
+
+
 def _document(path: Path, config: dict) -> tuple[dict, str, str, object]:
     meta, body = frontmatter.parse(path.read_text(encoding="utf-8"))
     entity = meta.get("entity", config.get("entity", "experiments"))
@@ -310,6 +367,8 @@ def push(
             meta[key] = str(meta[key])
     if "tags" in meta:
         meta["tags"] = [str(tag) for tag in meta["tags"]]
+    # After the string conversion above, so the base matches what a create writes.
+    meta_base = _synced_meta(meta)
     resolved_profile, base_url, _, _ = config_module.resolve(config, profile, meta)
 
     refs = plan(body, path.parent, ignore_patterns(path.parent, config))
@@ -497,6 +556,7 @@ def push(
         {
             "remote_base": stored.get("body", ""),
             "local_base": body,
+            "meta_base": meta_base,
             "team": identity.get("team"),
         },
     )
@@ -817,9 +877,17 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
     identity = client.me()
     _check_team_match(saved, identity)
     remote_doc = remote.get()
+    base_meta = (saved or {}).get("meta_base", {})
     local_dirty = saved is not None and body != saved.get("local_base", "")
     if local_dirty and remote_doc.get("body", "") == saved.get("remote_base", ""):
+        merged, new_base = _merge_meta(meta, base_meta, remote_doc)
         print("remote: unchanged (local differs from the last sync; nothing to pull)")
+        if merged == meta and new_base == base_meta:
+            return
+        if merged != meta:
+            frontmatter.atomic_write(path, frontmatter.render(merged, body))
+            print(f"  metadata updated in {path.name}")
+        state.save(base_url, entity, str(eid), {**saved, "meta_base": new_base})
         return
 
     uploads = remote.uploads()
@@ -871,6 +939,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
             "attachment conflicts written to: " + ", ".join(attachment_conflicts)
         )
 
+    meta, new_base = _merge_meta(meta, base_meta, remote_doc)
     frontmatter.atomic_write(path, frontmatter.render(meta, source))
     state.save(
         base_url,
@@ -879,6 +948,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         {
             "remote_base": remote_doc.get("body", ""),
             "local_base": source,
+            "meta_base": new_base,
             "team": identity.get("team"),
         },
     )

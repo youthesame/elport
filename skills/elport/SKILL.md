@@ -19,7 +19,7 @@ elport diff --base               # local ↔ last push (what YOU changed; zero n
 elport push                      # upload refs + PATCH body as markdown (content_type:2)
 elport push -n                   # --dry-run: full rehearsal, upload + path→URL plan, no writes
 elport push report.md            # doc defaults to report.md; any name works
-elport pull                      # fetch body, reverse-transclude URLs → local paths, download files
+elport pull                      # fetch body + metadata, reverse-transclude URLs → local paths, download files
 elport fetch                     # download every attachment, incl. non-embedded ones (read-only, no base/manifest)
 elport merge                     # after a conflict: git merge-file .base.md/.remote.md → doc (local)
 elport comments                  # print the remote comment thread (read-only, terminal only)
@@ -49,6 +49,9 @@ The loop is **`status` → (`diff`) → `push`**, mirroring git. Do not push bli
 - **Attachments**: reference a **local path** to attach-and-upload; reference a full **eLabFTW
   http URL** to only link another entity (not uploaded). elport skips schemed URLs, absolute
   paths, `..` escapes, and code-fence/inline-code content.
+- **Metadata**: pull writes `title`/`category`/`status`/`read`/`write` back from the server, keeping any key you
+  edited locally since the last sync; `tags` become the union (add-only on both sides). push still sends only the
+  keys present, so a push right after a pull changes nothing.
 - **Permissions**: frontmatter `read:`/`write:` (`owner|owner+admin|team|account|public`) set
   the eLabFTW base visibility, only when present, and only the base level (Web-UI individual
   grants are preserved).

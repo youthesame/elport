@@ -955,3 +955,116 @@ def test_pull_stays_silent_on_unmatched_attachment_reference(
     sync.pull(doc, client, {})
 
     assert "kept as a URL" not in capsys.readouterr().err
+
+
+REMOTE_META = {
+    "title": "Web title",
+    "category": 16,
+    "category_title": "Chat",
+    "status_title": None,
+    "tags": "b|a",
+    "canread_base": 10,
+    "canwrite_base": 20,
+}
+
+
+def test_pull_writes_remote_metadata_into_stub(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    doc.write_text(frontmatter.render({"id": 1, "entity": "experiments"}, ""))
+    client = FakeClient(gets=[{"body": "remote", **REMOTE_META}])
+    saves = []
+    monkeypatch.setattr(sync.state, "load", lambda *args: None)
+    monkeypatch.setattr(sync.state, "save", lambda *args: saves.append(args[-1]))
+
+    sync.pull(doc, client, {})
+
+    synced = {
+        "title": "Web title",
+        "category": "Chat",
+        "read": "owner",
+        "write": "owner+admin",
+    }
+    assert frontmatter.parse(doc.read_text())[0] == {
+        "id": 1,
+        "entity": "experiments",
+        **synced,
+        "tags": ["a", "b"],
+    }
+    assert saves[-1]["meta_base"] == synced
+
+
+def test_pull_keeps_locally_edited_metadata(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", category="Old", status="Running", read="team")
+    client = FakeClient(gets=[{"body": "remote", **REMOTE_META}])
+    base = {"title": "Test", "category": "Old", "status": "Running", "read": "owner"}
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: {**saved_state(), "meta_base": base}
+    )
+
+    sync.pull(doc, client, {})
+
+    meta = frontmatter.parse(doc.read_text())[0]
+    assert meta["title"] == "Web title"
+    assert meta["category"] == "Chat"
+    assert "status" not in meta
+    assert meta["read"] == "team"
+
+
+def test_pull_twice_keeps_locally_edited_metadata(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", title="Local edit")
+    client = FakeClient(remote_doc={"body": "remote", **REMOTE_META})
+    stored = {**saved_state(), "meta_base": {"title": "Web title"}}
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored)
+    monkeypatch.setattr(sync.state, "save", lambda *args: stored.update(args[-1]))
+
+    sync.pull(doc, client, {})
+    stored["local_base"] = frontmatter.parse(doc.read_text())[1]
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[0]["title"] == "Local edit"
+
+
+def test_pull_syncs_metadata_when_only_the_local_body_differs(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local edit")
+    client = FakeClient(gets=[{"body": "remote", **REMOTE_META}])
+    stored = saved_state()
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored)
+    monkeypatch.setattr(sync.state, "save", lambda *args: stored.update(args[-1]))
+
+    sync.pull(doc, client, {})
+
+    meta, body = frontmatter.parse(doc.read_text())
+    assert body == "local edit"
+    assert meta["category"] == "Chat"
+    assert stored["meta_base"]["category"] == "Chat"
+    assert "metadata updated" in capsys.readouterr().out
+
+
+def test_pull_keeps_pending_local_tags(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", tags=["pending"])
+    client = FakeClient(gets=[{"body": "remote", **REMOTE_META}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[0]["tags"] == ["a", "b", "pending"]
+
+
+def test_pull_keeps_category_id_when_its_title_is_numeric(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    remote = {**REMOTE_META, "category": 16, "category_title": "123"}
+    client = FakeClient(gets=[{"body": "remote", **remote}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[0]["category"] == 16
