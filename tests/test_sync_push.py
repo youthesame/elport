@@ -668,7 +668,12 @@ def test_verified_state_is_saved_before_tag_failure(tmp_path, monkeypatch, confi
             "https://e.example",
             "experiments",
             "1",
-            {"remote_base": "stored", "local_base": "local", "team": 7},
+            {
+                "remote_base": "stored",
+                "local_base": "local",
+                "meta_base": {"title": "Test"},
+                "team": 7,
+            },
         )
     ]
 
@@ -914,3 +919,16 @@ def test_push_stays_silent_on_unmatched_attachment_reference(
     sync.push(doc, client, {}, dry_run=True)
 
     assert "kept as a URL" not in capsys.readouterr().err
+
+
+def test_push_saves_metadata_base(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", category=9, tags=["x"])
+    client = FakeClient(gets=[{"body": "remote"}, {"body": "remote"}])
+    stored_state = saved_state()
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+    monkeypatch.setattr(sync.state, "save", lambda *args: stored_state.update(args[-1]))
+
+    sync.push(doc, client, {})
+
+    assert stored_state["meta_base"] == {"title": "Test", "category": "9"}

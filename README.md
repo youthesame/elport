@@ -37,7 +37,7 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 | Command | Summary |
 |---|---|
 | `elport push [<doc>]` | Push `<doc>` to one entity. Creates it (writing `id` back) if unset. Runs mode + conflict checks first. |
-| `elport pull [<doc>]` | Fetch the body, reverse-transclude URLs back to local paths, download referenced files. |
+| `elport pull [<doc>]` | Fetch the body and metadata, reverse-transclude URLs back to local paths, download referenced files. |
 | `elport fetch [<doc>]` | Download every attachment on the entity, including files the body never references. Read-only. |
 | `elport status [<doc>]` | Side-effect-free: is local changed? was the remote edited? which files upload? what mode? |
 | `elport diff [<doc>]` | Source-form diff. Default local ↔ remote; `--base` for local ↔ last push. Never sends. |
@@ -87,7 +87,9 @@ write: owner                  # optional; same scale
 - Holds **only** `id` + human metadata + optional `profile`; base and hashes live in state. Front matter is
   stripped before the body is sent.
 - `title` / `category` / `status` / `read` / `write` are reflected **only when present**. Omit a key and elport
-  leaves that remote value untouched. `read`/`write` set the eLabFTW base visibility only, so individual Web-UI
+  leaves that remote value untouched. pull writes them back from the server, so a key you never wrote may appear
+  after a pull; a key you edited locally but have not pushed is kept. `tags` are add-only on both sides, so pull
+  keeps the union. `read`/`write` set the eLabFTW base visibility only, so individual Web-UI
   grants are preserved; widening beyond your team asks for confirmation (`-y` skips; non-interactive needs `-y`).
 - If front matter and CLI disagree on profile / entity / id, elport **stops** rather than guessing.
 
