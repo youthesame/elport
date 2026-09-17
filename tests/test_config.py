@@ -4,6 +4,7 @@ import keyring.errors
 import pytest
 
 from elport import config
+from elport.transclude import IgnoreLayer, plan
 
 
 def test_load_merges_ignore_across_all_layers(tmp_path, monkeypatch):
@@ -23,7 +24,11 @@ def test_load_merges_ignore_across_all_layers(tmp_path, monkeypatch):
 
     loaded = config.load(project, document)
 
-    assert loaded["ignore"] == ["*.key", "*.zip", "scratch/**"]
+    assert loaded["ignore"] == [
+        IgnoreLayer(["*.key"]),
+        IgnoreLayer(["*.zip"], "notes"),
+        IgnoreLayer(["scratch/**"]),
+    ]
     assert loaded["entity"] == "experiments"
 
 
@@ -35,7 +40,93 @@ def test_load_does_not_apply_same_project_and_document_layer_twice(
     (tmp_path / ".elport.toml").write_text('ignore = ["local"]\n', encoding="utf-8")
     monkeypatch.setattr(config, "config_path", lambda: user)
 
-    assert config.load(tmp_path, tmp_path)["ignore"] == ["user", "local"]
+    assert config.load(tmp_path, tmp_path)["ignore"] == [
+        IgnoreLayer(["user"]),
+        IgnoreLayer(["local"]),
+    ]
+
+
+def test_project_elportignore_excludes_a_file_beside_a_nested_document(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    document = project / "notes"
+    document.mkdir(parents=True)
+    (project / ".elportignore").write_text("secret.csv\n", encoding="utf-8")
+    (document / "secret.csv").write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "user.toml")
+
+    ignore = config.load(project, document)["ignore"]
+
+    assert plan("[data](secret.csv)", document, ignore)[0].file is None
+
+
+def test_elportignore_applies_only_inside_its_own_subtree(tmp_path, monkeypatch):
+    project = tmp_path / "project"
+    other = project / "other"
+    document = project / "notes"
+    other.mkdir(parents=True)
+    document.mkdir()
+    (other / ".elportignore").write_text("secret.csv\n", encoding="utf-8")
+    (document / "secret.csv").write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "user.toml")
+
+    ignore = config.load(project, document)["ignore"]
+
+    assert plan("[data](secret.csv)", document, ignore)[0].file is not None
+
+
+def test_anchored_project_pattern_stays_relative_to_the_project_root(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    document = project / "notes"
+    (document / "data").mkdir(parents=True)
+    (project / ".elportignore").write_text(
+        "/notes/data/secret.csv\n/data/keep.csv\n", encoding="utf-8"
+    )
+    (document / "data" / "secret.csv").write_text("secret", encoding="utf-8")
+    (document / "data" / "keep.csv").write_text("keep", encoding="utf-8")
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "user.toml")
+
+    ignore = config.load(project, document)["ignore"]
+    references = plan(
+        "[secret](data/secret.csv) [keep](data/keep.csv)", document, ignore
+    )
+
+    assert references[0].file is None
+    assert references[1].file is not None
+
+
+def test_elportignore_layers_from_every_directory_down_to_the_document(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    document = project / "a" / "b"
+    document.mkdir(parents=True)
+    (project / "a" / ".elportignore").write_text("*.key\n", encoding="utf-8")
+    (document / "secret.key").write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "user.toml")
+
+    ignore = config.load(project, document)["ignore"]
+
+    assert plan("[key](secret.key)", document, ignore)[0].file is None
+
+
+def test_project_ignore_is_dropped_for_a_document_outside_the_project(
+    tmp_path, monkeypatch
+):
+    project = tmp_path / "project"
+    document = tmp_path / "elsewhere"
+    project.mkdir()
+    document.mkdir()
+    (project / ".elportignore").write_text("secret.csv\n", encoding="utf-8")
+    (document / "secret.csv").write_text("secret", encoding="utf-8")
+    monkeypatch.setattr(config, "config_path", lambda: tmp_path / "user.toml")
+
+    ignore = config.load(project, document)["ignore"]
+
+    assert plan("[data](secret.csv)", document, ignore)[0].file is not None
 
 
 def test_load_ignores_protected_user_profile_overrides(tmp_path, monkeypatch, capsys):

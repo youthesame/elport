@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from elport.transclude import (
+    IgnoreLayer,
     download_url,
     extract,
     parse_download_url,
@@ -689,7 +690,9 @@ def test_directory_ignore_patterns_exclude_nested_files(tmp_path: Path, pattern:
     nested.parent.mkdir(parents=True)
     nested.write_text("secret", encoding="utf-8")
 
-    reference = plan("[data](scratch/a/data.csv)", tmp_path, [pattern])[0]
+    reference = plan("[data](scratch/a/data.csv)", tmp_path, [IgnoreLayer([pattern])])[
+        0
+    ]
 
     assert reference.file is None
 
@@ -699,7 +702,9 @@ def test_trailing_slash_ignore_matches_nested_directory_segment(tmp_path: Path):
     nested.parent.mkdir(parents=True)
     nested.write_text("secret", encoding="utf-8")
 
-    reference = plan("[data](work/scratch/data.csv)", tmp_path, ["scratch/"])[0]
+    reference = plan(
+        "[data](work/scratch/data.csv)", tmp_path, [IgnoreLayer(["scratch/"])]
+    )[0]
 
     assert reference.file is None
 
@@ -710,7 +715,7 @@ def test_bare_directory_ignore_matches_path_segments(tmp_path: Path, relative: s
     nested.parent.mkdir(parents=True)
     nested.write_text("secret", encoding="utf-8")
 
-    reference = plan(f"[data]({relative})", tmp_path, ["scratch"])[0]
+    reference = plan(f"[data]({relative})", tmp_path, [IgnoreLayer(["scratch"])])[0]
 
     assert reference.file is None
 
@@ -725,7 +730,7 @@ def test_bare_ignore_respects_segment_boundaries_and_nested_filenames(tmp_path: 
     references = plan(
         "[included](scratchpad/data.csv) [ignored](work/secret.tmp)",
         tmp_path,
-        ["scratch", "*.tmp"],
+        [IgnoreLayer(["scratch", "*.tmp"])],
     )
 
     assert references[0].file == included.resolve()
@@ -744,7 +749,7 @@ def test_globstar_matches_zero_or_multiple_directories(tmp_path: Path):
     references = plan(
         "[zero](results/private/zero.csv) [many](results/a/b/private/many.csv)",
         tmp_path,
-        ["results/**/private/*.csv"],
+        [IgnoreLayer(["results/**/private/*.csv"])],
     )
 
     assert all(reference.file is None for reference in references)
@@ -760,7 +765,7 @@ def test_single_star_does_not_match_across_directories(tmp_path: Path):
     references = plan(
         "[direct](results/direct.csv) [nested](results/run1/data.csv)",
         tmp_path,
-        ["results/*.csv"],
+        [IgnoreLayer(["results/*.csv"])],
     )
 
     assert references[0].file is None
@@ -772,7 +777,9 @@ def test_directory_ignore_requires_path_segment_boundary(tmp_path: Path):
     path.parent.mkdir()
     path.write_text("keep", encoding="utf-8")
 
-    reference = plan("[data](scratchpad/data.csv)", tmp_path, ["scratch/"])[0]
+    reference = plan(
+        "[data](scratchpad/data.csv)", tmp_path, [IgnoreLayer(["scratch/"])]
+    )[0]
 
     assert reference.file == path.resolve()
 
@@ -791,7 +798,7 @@ def test_globstar_directory_patterns_exclude_descendants(
     path.parent.mkdir(parents=True)
     path.write_text("secret", encoding="utf-8")
 
-    reference = plan(f"[data]({relative})", tmp_path, [pattern])[0]
+    reference = plan(f"[data]({relative})", tmp_path, [IgnoreLayer([pattern])])[0]
 
     assert reference.file is None
 
@@ -805,7 +812,7 @@ def test_root_anchored_ignore_patterns(tmp_path: Path, pattern: str, relative: s
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("secret", encoding="utf-8")
 
-    reference = plan(f"[data]({relative})", tmp_path, [pattern])[0]
+    reference = plan(f"[data]({relative})", tmp_path, [IgnoreLayer([pattern])])[0]
 
     assert reference.file is None
 
@@ -862,7 +869,7 @@ def test_invalid_local_references_warn_but_intentional_exclusions_do_not(
         "[anchor](#part) [ignored](ignored.bin)"
     )
 
-    plan(text, document_dir, ["ignored.bin"])
+    plan(text, document_dir, [IgnoreLayer(["ignored.bin"])])
 
     warning = capsys.readouterr().err
     for path in ("missing.txt", "/tmp/absolute.txt", "../outside.txt", "link.txt"):
@@ -1113,3 +1120,32 @@ def test_real_name_sanitization(unsafe: str, safe: str):
 @pytest.mark.parametrize("unsafe", ["", ".", "..", "~.."])
 def test_dot_only_real_name_uses_attachment_fallback(unsafe: str):
     assert safe_name(unsafe) == "attachment"
+
+
+@pytest.mark.parametrize("pattern", ["/work/private", "work/private", "work/*"])
+def test_directory_pattern_without_trailing_slash_excludes_descendants(
+    tmp_path: Path, pattern: str
+):
+    nested = tmp_path / "work" / "private" / "key.txt"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("secret", encoding="utf-8")
+
+    reference = plan("[key](work/private/key.txt)", tmp_path, [IgnoreLayer([pattern])])[
+        0
+    ]
+
+    assert reference.file is None
+
+
+def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
+    # The layer sits one directory above the document, as a project-level
+    # .elportignore does for a document in a subdirectory.
+    nested = tmp_path / "private" / "key.txt"
+    nested.parent.mkdir()
+    nested.write_text("secret", encoding="utf-8")
+
+    reference = plan(
+        "[key](private/key.txt)", tmp_path, [IgnoreLayer(["/notes/private"], "notes")]
+    )[0]
+
+    assert reference.file is None
