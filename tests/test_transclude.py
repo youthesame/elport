@@ -1004,6 +1004,88 @@ def test_reverse_does_not_replace_urls_in_excluded_ranges():
     assert used == [upload]
 
 
+def test_reverse_leaves_prose_url_untouched():
+    upload = {"id": 4, "long_name": "x/y", "real_name": "data.csv", "storage": 1}
+    url = download_url("https://e.example", upload)
+    text = f"Audit URL: {url}\n"
+
+    body, used = reverse(text, [upload], "https://e.example")
+
+    assert body == text
+    assert used == []
+
+
+def test_reverse_leaves_unrelated_html_attribute_untouched():
+    upload = {"id": 4, "long_name": "x/y", "real_name": "figure.png", "storage": 1}
+    url = download_url("https://e.example", upload)
+    text = f'<img title="{url}" alt="{url}">'
+
+    body, used = reverse(text, [upload], "https://e.example")
+
+    assert body == text
+    assert used == []
+
+
+def test_reverse_localizes_src_but_not_sibling_title_attribute():
+    upload = {"id": 4, "long_name": "x/y", "real_name": "figure.png", "storage": 1}
+    url = download_url("https://e.example", upload)
+    text = f'<img title="{url}" src="{url}">'
+
+    body, used = reverse(text, [upload], "https://e.example")
+
+    assert body == f'<img title="{url}" src="figure.png">'
+    assert used == [upload]
+
+
+def test_reverse_leaves_reference_definition_url_untouched():
+    upload = {"id": 4, "long_name": "x/y", "real_name": "figure.png", "storage": 1}
+    url = download_url("https://e.example", upload)
+    text = f"[ref]: {url}\n\nsee [ref][ref]\n"
+
+    body, used = reverse(text, [upload], "https://e.example")
+
+    assert body == text
+    assert used == []
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "[file]({url})",
+        "[file](<{url}>)",
+        "![file]({url})",
+        '<img src="{url}">',
+        '<a href="{url}">file</a>',
+    ],
+)
+def test_reverse_localizes_supported_references(template: str):
+    upload = {"id": 4, "long_name": "x/y", "real_name": "figure.png", "storage": 1}
+    url = download_url("https://e.example", upload)
+
+    body, used = reverse(template.format(url=url), [upload], "https://e.example")
+
+    assert body == template.format(url="figure.png")
+    assert used == [upload]
+
+
+@pytest.mark.parametrize(
+    "template",
+    [
+        "[redirect](https://other.example/?next={url})",
+        '<a href="https://other.example/?next={url}">redirect</a>',
+    ],
+)
+def test_reverse_leaves_url_embedded_in_larger_destination(template: str):
+    upload = {"id": 4, "long_name": "x/y", "real_name": "figure.png", "storage": 1}
+    url = download_url("https://e.example", upload)
+    text = template.format(url=url)
+
+    body, used = reverse(text, [upload], "https://e.example")
+
+    assert body == text
+    assert used == []
+
+
 def test_reverse_does_not_replace_url_in_long_inline_code_span():
     upload = {"id": 4, "long_name": "x/y", "real_name": "figure.png", "storage": 1}
     url = download_url("https://e.example", upload)

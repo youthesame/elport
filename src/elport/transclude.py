@@ -30,6 +30,7 @@ class Reference:
     end: int
     file: Path | None = None
     fragment: str = ""
+    kind: str = "markdown"  # "markdown" (bare), "angle", or "html"
 
 
 def _masked(text: str) -> str:
@@ -253,7 +254,7 @@ def extract(text: str) -> list[Reference]:
     out = _markdown_destinations(text, markdown_masked)
     for match in angle_matches:
         start, end = match.span(1)
-        out.append(Reference(match.group(2).strip(), start, end))
+        out.append(Reference(match.group(2).strip(), start, end, kind="angle"))
 
     for tag in tags:
         for name, value_start, value_end in _html_attributes(tag.group()):
@@ -265,7 +266,7 @@ def extract(text: str) -> list[Reference]:
                 continue
             start = tag.start() + value_start + len(raw) - len(raw.lstrip())
             end = start + len(value)
-            out.append(Reference(html.unescape(value), start, end))
+            out.append(Reference(html.unescape(value), start, end, kind="html"))
     return sorted(out, key=lambda x: x.start)
 
 
@@ -383,9 +384,21 @@ def parse_download_url(value: str) -> tuple[str, str, str] | None:
     return q["f"][0], q["name"][0], q["storage"][0]
 
 
+def _destination_span(text: str, reference: Reference) -> tuple[int, int]:
+    """Bounds of ``reference``'s destination value, angle delimiters excluded."""
+    start, end = reference.start, reference.end
+    if reference.kind == "angle":
+        start, end = start + 1, end - 1
+    while start < end and text[start].isspace():
+        start += 1
+    while end > start and text[end - 1].isspace():
+        end -= 1
+    return start, end
+
+
 def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[dict]]:
     masked = _masked(text)
-    markdown_destinations = _markdown_destinations(text, masked)
+    destinations = extract(text)
     by_key = {
         (
             str(upload.get("long_name", "")),
@@ -408,13 +421,22 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
             continue
         value = text[match.start() : match.end()]
         fragment = "#" + value.split("#", 1)[1] if "#" in value else ""
+        destination = next(
+            (
+                reference
+                for reference in destinations
+                if _destination_span(text, reference) == match.span()
+            ),
+            None,
+        )
+        if destination is None:
+            # Prose, an unrelated attribute, a reference form push does not
+            # rewrite, or a URL merely embedded in a larger destination:
+            # localizing it here would not survive the round trip.
+            continue
         safe = safe_name(parsed[1])
         name = canonical_names.setdefault(safe.casefold(), safe)
-        in_bare_markdown = any(
-            reference.start <= match.start() and match.end() <= reference.end
-            for reference in markdown_destinations
-        )
-        if in_bare_markdown and re.search(r"[\s()#]", name):
+        if destination.kind == "markdown" and re.search(r"[\s()#]", name):
             name = f"<{name}{fragment}>"
         else:
             name += fragment
@@ -433,8 +455,9 @@ def unmatched_download_urls(text: str, uploads: list[dict], base_url: str) -> li
     These reference an attachment on another entity (or one deleted in the Web
     UI): ``reverse()`` leaves them untouched because the query carries no entity
     or upload id and ``download.php`` needs cookie auth, so they cannot be
-    localized. Pure analysis mirroring ``reverse()``'s scan (fences, inline code
-    and HTML comments excluded); nothing is rewritten. Returns each attachment's
+    localized. Scans every URL outside fences, inline code and HTML comments --
+    deliberately broader than ``reverse()``, which only rewrites reference
+    destinations. Pure analysis; nothing is rewritten. Returns each attachment's
     ``real_name`` once, in first-seen order.
     """
     masked = _masked(text)
