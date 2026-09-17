@@ -871,3 +871,140 @@ def test_profile_use_reports_invalid_name(argv, message, monkeypatch, capsys):
 
     assert cli.main(argv) == 1
     assert capsys.readouterr().err == f"{message}\n"
+
+
+class CloneClient:
+    def __init__(self, body="remote body\n"):
+        self.root = "https://e.example"
+        self.body = body
+
+    def get(self, entity, eid):
+        return {
+            "body": self.body,
+            "title": "Remote title",
+            "category_title": "Chat",
+            "tags": "alpha|beta",
+            "canread_base": 30,
+            "canwrite_base": 10,
+            "sharelink": f"https://e.example/{entity}/{eid}",
+        }
+
+    def uploads(self, entity, eid):
+        return []
+
+    def me(self):
+        return {"team": 7}
+
+
+def _clone_env(monkeypatch, tmp_path, client):
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+    monkeypatch.setattr(
+        sync.config_module,
+        "resolve",
+        lambda *args: ("test", "https://e.example", "secret", True),
+    )
+    monkeypatch.setattr(cli.state, "_dir", lambda create=False: tmp_path / "state")
+    (tmp_path / "state").mkdir()
+
+
+def test_clone_scaffolds_frontmatter_and_pulls(tmp_path, monkeypatch):
+    output = tmp_path / "report.md"
+    client = CloneClient()
+    _clone_env(monkeypatch, tmp_path, client)
+
+    assert cli.main(["clone", "357", "-o", str(output)]) == 0
+
+    meta, body = frontmatter.parse(output.read_text())
+    assert meta["id"] == 357
+    assert meta["entity"] == "experiments"
+    assert meta["profile"] == "test"
+    assert meta["title"] == "Remote title"
+    assert meta["category"] == "Chat"
+    assert meta["tags"] == ["alpha", "beta"]
+    assert meta["read"] == "team"
+    assert meta["write"] == "owner"
+    assert body == "remote body\n"
+    assert sync.state.load("https://e.example", "experiments", "357") == {
+        "remote_base": "remote body\n",
+        "local_base": "remote body\n",
+        "meta_base": {
+            "title": "Remote title",
+            "category": "Chat",
+            "read": "team",
+            "write": "owner",
+        },
+        "team": 7,
+    }
+
+
+def test_clone_refuses_when_the_entity_already_has_a_working_copy(
+    tmp_path, monkeypatch, capsys
+):
+    output = tmp_path / "second.md"
+    _clone_env(monkeypatch, tmp_path, CloneClient())
+    saved = {"remote_base": "remote body\n", "local_base": "old local\n", "team": 7}
+    sync.state.save("https://e.example", "experiments", "357", saved)
+
+    assert cli.main(["clone", "357", "-o", str(output)]) == 1
+
+    assert not output.exists()
+    assert "already has a working copy" in capsys.readouterr().err
+    assert sync.state.load("https://e.example", "experiments", "357") == saved
+
+
+def test_clone_refuses_to_overwrite_an_existing_output(tmp_path, monkeypatch):
+    output = tmp_path / "report.md"
+    output.write_bytes(b"keep me")
+    client = CloneClient()
+    _clone_env(monkeypatch, tmp_path, client)
+
+    assert cli.main(["clone", "357", "-o", str(output)]) == 1
+    assert output.read_bytes() == b"keep me"
+
+
+def test_clone_rejects_missing_parent(tmp_path, monkeypatch):
+    output = tmp_path / "missing" / "report.md"
+    _clone_env(monkeypatch, tmp_path, CloneClient())
+
+    assert cli.main(["clone", "357", "-o", str(output)]) == 1
+    assert not output.exists()
+
+
+def test_clone_rejects_a_non_positive_id(tmp_path, monkeypatch):
+    output = tmp_path / "report.md"
+    _clone_env(monkeypatch, tmp_path, CloneClient())
+
+    assert cli.main(["clone", "0", "-o", str(output)]) == 1
+    assert not output.exists()
+
+
+def test_clone_removes_the_stub_when_the_pull_fails(tmp_path, monkeypatch):
+    output = tmp_path / "report.md"
+    _clone_env(monkeypatch, tmp_path, CloneClient())
+    monkeypatch.setattr(
+        cli,
+        "pull",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("pull failed")),
+    )
+
+    assert cli.main(["clone", "357", "-o", str(output)]) == 1
+    assert not output.exists()
+
+
+def test_clone_keeps_the_document_when_the_pull_fails_after_saving_a_base(
+    tmp_path, monkeypatch
+):
+    output = tmp_path / "report.md"
+    _clone_env(monkeypatch, tmp_path, CloneClient())
+    real_pull = cli.pull
+
+    def pull_then_fail(*args):
+        real_pull(*args)
+        raise BrokenPipeError("stdout closed")
+
+    monkeypatch.setattr(cli, "pull", pull_then_fail)
+
+    assert cli.main(["clone", "357", "-o", str(output)]) == 1
+
+    assert frontmatter.parse(output.read_text())[1] == "remote body\n"

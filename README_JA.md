@@ -30,6 +30,7 @@ uv tool install git+https://github.com/youthesame/elport
 ```sh
 elport login labA                       # base_url（config）と api_key（OS キーリング）を対話形式で保存
 elport new "CRISPR titration"           # ノートを作成し、id 入りの report.md 雛形を生成
+# ...Web UI で作成済みのノートから始めるなら: elport clone 357
 # ...report.md を編集し、同じ階層に fig1.png や data.csv を配置...
 elport status                           # 同期予定の内容を確認（読み取り専用・サーバー送信なし）
 elport push                             # 参照ファイルをアップロードし、本文を push
@@ -51,6 +52,7 @@ elport push                             # 参照ファイルをアップロー�
 | `elport comments [<doc>]` | リモートのコメントスレッドを表示します（ターミナル出力のみ。本文ファイルには書き込みません）。 |
 | `elport comment [<doc>] "<text>"` | ノートにコメントを 1 件投稿します（編集・削除は Web UI で行ってください）。 |
 | `elport new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | ノートを新規作成し、フロントマターを含むドキュメント雛形を生成します。 |
+| `elport clone <id> [--entity experiments\|items] [--profile <name>] [-o <doc>]` | 既存ノートから開始します。フロントマターを生成してから pull します。 |
 | `elport whoami [--profile <name>]` | 認証状態の確認: ユーザー情報、チームと権限ロール、API キーの read/write 権限、サーバーバージョン、スコープを表示します。 |
 | `elport login [<profile>]` | `base_url` を `config.toml` に、`api_key` を OS キーリングに対話形式で保存します（キーは画面にエコーバックされません）。 |
 | `elport logout [<profile>]` | 指定プロファイルの保存済み `api_key` をキーリングから削除します（`base_url` は保持されます）。 |

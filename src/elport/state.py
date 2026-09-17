@@ -19,9 +19,13 @@ def key(base: str, entity: str, eid: str) -> str:
     return hashlib.sha256(f"{base.rstrip('/')}|{entity}|{eid}".encode()).hexdigest()
 
 
+def path(base: str, entity: str, eid: str) -> Path:
+    return _dir() / key(base, entity, eid)
+
+
 def load(base: str, entity: str, eid: str) -> dict | None:
     try:
-        return json.loads((_dir() / key(base, entity, eid)).read_text(encoding="utf-8"))
+        return json.loads(path(base, entity, eid).read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError):
         return None
 
