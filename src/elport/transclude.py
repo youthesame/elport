@@ -124,7 +124,12 @@ def _matches(relative: str, patterns: list[str]) -> bool:
                 return True
             continue
 
-        if _path_matches(relative, pattern):
+        # A pattern that names a directory excludes everything below it too.
+        parts = relative.split("/")
+        if any(
+            _path_matches("/".join(parts[:count]), pattern)
+            for count in range(1, len(parts) + 1)
+        ):
             return True
     return False
 

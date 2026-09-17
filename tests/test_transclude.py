@@ -1120,3 +1120,32 @@ def test_real_name_sanitization(unsafe: str, safe: str):
 @pytest.mark.parametrize("unsafe", ["", ".", "..", "~.."])
 def test_dot_only_real_name_uses_attachment_fallback(unsafe: str):
     assert safe_name(unsafe) == "attachment"
+
+
+@pytest.mark.parametrize("pattern", ["/work/private", "work/private", "work/*"])
+def test_directory_pattern_without_trailing_slash_excludes_descendants(
+    tmp_path: Path, pattern: str
+):
+    nested = tmp_path / "work" / "private" / "key.txt"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("secret", encoding="utf-8")
+
+    reference = plan("[key](work/private/key.txt)", tmp_path, [IgnoreLayer([pattern])])[
+        0
+    ]
+
+    assert reference.file is None
+
+
+def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
+    # The layer sits one directory above the document, as a project-level
+    # .elportignore does for a document in a subdirectory.
+    nested = tmp_path / "private" / "key.txt"
+    nested.parent.mkdir()
+    nested.write_text("secret", encoding="utf-8")
+
+    reference = plan(
+        "[key](private/key.txt)", tmp_path, [IgnoreLayer(["/notes/private"], "notes")]
+    )[0]
+
+    assert reference.file is None
