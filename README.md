@@ -128,7 +128,8 @@ Credentials resolve **env → keyring+config → plaintext**: `ELABFTW_BASE_URL`
 pair as the normal default, then a warned plaintext-in-config fallback only when no keyring backend exists. Profiles
 layer like settings.json (`config.toml` → `<project>/.elport.toml` → `<dir>/.elport.toml`, one per team); your first
 `elport login` becomes the default, `elport profile use <name>` switches it, or set `profile:` per note. `.elportignore`
-excludes referenced files `.gitignore`-style, additive across those layers.
+excludes referenced files `.gitignore`-style, additive across those layers plus every `.elportignore` from the
+project root down to the document directory (each pattern anchored at its own directory).
 
 ## Learn more
 

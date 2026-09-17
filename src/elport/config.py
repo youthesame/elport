@@ -14,6 +14,8 @@ import keyring
 import tomli_w
 from keyring.errors import KeyringError
 
+from .transclude import IgnoreLayer
+
 PLAINTEXT_WARNING = "warning: using plaintext api_key (chmod 600 recommended)"
 
 
@@ -39,12 +41,58 @@ def _atomic_write(path: Path, text: str) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def _clean(patterns: list[str]) -> list[str]:
+    return [
+        pattern.strip()
+        for pattern in patterns
+        if pattern.strip() and not pattern.startswith("#")
+    ]
+
+
+def _ignore_layer(base: Path, doc_dir: Path, patterns: list[str]) -> IgnoreLayer | None:
+    """Anchor patterns at the directory they were written in. Returns None when
+    that directory is not above the document, so its patterns cannot apply."""
+    patterns = _clean(patterns)
+    if not patterns:
+        return None
+    try:
+        prefix = doc_dir.resolve().relative_to(base.resolve()).as_posix()
+    except ValueError:
+        return None
+    return IgnoreLayer(patterns, "" if prefix == "." else prefix)
+
+
+def _ignore_dirs(project: Path, doc_dir: Path) -> list[Path]:
+    """Every directory from the project root down to the document directory."""
+    project, doc_dir = project.resolve(), doc_dir.resolve()
+    if project not in doc_dir.parents:
+        return [doc_dir]
+    chain = [doc_dir]
+    while chain[-1] != project:
+        chain.append(chain[-1].parent)
+    return list(reversed(chain))
+
+
 def load(project: Path, doc_dir: Path) -> dict:
     """Load layered config while protecting credential-bound profile fields.
     Project/document layers cannot override user profile base_url or verify_ssl.
     """
     data = _read(config_path())
     user_profile_names = set(data.get("profiles", {}))
+    layers: list[IgnoreLayer] = []
+
+    def add_ignore(base: Path, patterns: list[str]) -> None:
+        layer = _ignore_layer(base, doc_dir, patterns)
+        if layer:
+            layers.append(layer)
+
+    # The user config has no directory of its own, so its patterns are the
+    # document's; .elportignore files layer in from the project root down.
+    add_ignore(doc_dir, data.pop("ignore", []))
+    for directory in _ignore_dirs(project, doc_dir):
+        ignore_file = directory / ".elportignore"
+        if ignore_file.exists():
+            add_ignore(directory, ignore_file.read_text(encoding="utf-8").splitlines())
     seen: set[Path] = set()
     for p in (project / ".elport.toml", doc_dir / ".elport.toml"):
         resolved = p.resolve()
@@ -65,9 +113,10 @@ def load(project: Path, doc_dir: Path) -> dict:
                 profile[key] = value
         for k, v in layer.items():
             if k == "ignore":
-                data.setdefault("ignore", []).extend(v)
+                add_ignore(p.parent, v)
             elif k != "profiles":
                 data[k] = v
+    data["ignore"] = layers
     return data
 
 

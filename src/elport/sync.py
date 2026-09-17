@@ -81,20 +81,6 @@ def _warn_unmatched_attachments(body: str, uploads: list[dict], base_url: str) -
         )
 
 
-def ignore_patterns(doc_dir: Path, config: dict) -> list[str]:
-    ignore_file = doc_dir / ".elportignore"
-    file_patterns = (
-        ignore_file.read_text(encoding="utf-8").splitlines()
-        if ignore_file.exists()
-        else []
-    )
-    return [
-        pattern.strip()
-        for pattern in file_patterns + config.get("ignore", [])
-        if pattern.strip() and not pattern.startswith("#")
-    ]
-
-
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -396,7 +382,7 @@ def push(
     meta_base = _synced_meta(meta)
     resolved_profile, base_url, _, _ = config_module.resolve(config, profile, meta)
 
-    refs = plan(body, path.parent, ignore_patterns(path.parent, config))
+    refs = plan(body, path.parent, config.get("ignore", []))
     files = sorted({ref.file for ref in refs if ref.file})
 
     remote = Remote(client, entity, eid, base_url) if eid else None
@@ -1061,7 +1047,7 @@ def status(path: Path, client, config: dict, profile=None) -> None:
         _, base_url, _ = config_module.base_target(config, profile, meta)
         remote = Remote(client, entity, eid, base_url)
         saved = state.load(base_url, entity, str(eid))
-    refs = plan(body, path.parent, ignore_patterns(path.parent, config))
+    refs = plan(body, path.parent, config.get("ignore", []))
     files = sorted({ref.file for ref in refs if ref.file})
     if saved is None:
         print("local: base unavailable (comparison unavailable)")

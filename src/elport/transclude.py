@@ -69,6 +69,15 @@ def _masked(text: str) -> str:
     return "".join(mask)
 
 
+@dataclass(frozen=True)
+class IgnoreLayer:
+    """Ignore patterns plus the document directory's path relative to the
+    directory those patterns are anchored at (empty when they share it)."""
+
+    patterns: list[str]
+    prefix: str = ""
+
+
 def _path_matches(relative: str, pattern: str) -> bool:
     pattern_parts = tuple(pattern.split("/"))
     path_parts = tuple(relative.split("/"))
@@ -89,7 +98,7 @@ def _path_matches(relative: str, pattern: str) -> bool:
     return matches(0, 0)
 
 
-def _ignored(relative: str, patterns: list[str]) -> bool:
+def _matches(relative: str, patterns: list[str]) -> bool:
     """Match a small gitignore-like subset against a relative POSIX path.
     Patterns use fnmatch syntax; ``**/`` may span zero or more directories.
     A trailing slash matches that directory and every file below it.
@@ -118,6 +127,17 @@ def _ignored(relative: str, patterns: list[str]) -> bool:
         if _path_matches(relative, pattern):
             return True
     return False
+
+
+def _ignored(relative: str, layers: list[IgnoreLayer]) -> bool:
+    """Each layer's patterns stay anchored at their own directory, so the
+    document-relative path is put back under that directory before matching."""
+    return any(
+        _matches(
+            f"{layer.prefix}/{relative}" if layer.prefix else relative, layer.patterns
+        )
+        for layer in layers
+    )
 
 
 def _unescape_markdown_destination(value: str) -> str:
@@ -271,7 +291,7 @@ def extract(text: str) -> list[Reference]:
 
 
 def _candidate(
-    doc_dir: Path, value: str, ignore: list[str]
+    doc_dir: Path, value: str, ignore: list[IgnoreLayer]
 ) -> tuple[Path | None, bool, str]:
     if not value or value.startswith("#"):
         return None, False, ""
@@ -313,7 +333,9 @@ def _candidate(
     return p, False, fragment
 
 
-def _warn_reference_definitions(text: str, doc_dir: Path, ignore: list[str]) -> None:
+def _warn_reference_definitions(
+    text: str, doc_dir: Path, ignore: list[IgnoreLayer]
+) -> None:
     for match in _REFERENCE_DEFINITION.finditer(_masked(text)):
         destination = (match.group(1) or match.group(2) or "").strip()
         if not destination:
@@ -327,7 +349,9 @@ def _warn_reference_definitions(text: str, doc_dir: Path, ignore: list[str]) -> 
             )
 
 
-def plan(text: str, doc_dir: Path, ignore: list[str] | None = None) -> list[Reference]:
+def plan(
+    text: str, doc_dir: Path, ignore: list[IgnoreLayer] | None = None
+) -> list[Reference]:
     ignore = ignore or []
     _warn_reference_definitions(text, doc_dir, ignore)
     refs = extract(text)
