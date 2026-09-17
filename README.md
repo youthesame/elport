@@ -25,6 +25,7 @@ uploading, just write its eLabFTW URL. Code fences, inline code, and HTML commen
 ```sh
 elport login labA                       # store base_url (config) + api_key (OS keyring), interactively
 elport new "CRISPR titration"           # create the entity, scaffold report.md with id
+# ...or start from an entity made in the Web UI: elport clone 357
 # ...edit report.md, drop fig1.png / data.csv next to it...
 elport status                           # what would sync? (read-only)
 elport push                             # upload references + push the body
@@ -45,6 +46,7 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 | `elport comments [<doc>]` | Print the remote comment thread (terminal only; never written into the body). |
 | `elport comment [<doc>] "<text>"` | Post one comment to the entity (no edit/delete; use the Web UI). |
 | `elport new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Create an entity + scaffold front matter. |
+| `elport clone <id> [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Start `<doc>` from an entity that already exists: scaffold front matter, then pull. |
 | `elport whoami [--profile <name>]` | Auth check: user, team + role, API-key read/write, server version, scopes. |
 | `elport login [<profile>]` | Store base_url → `config.toml`, api_key → OS keyring. Prompts; the key is not echoed. |
 | `elport logout [<profile>]` | Remove the stored api_key for a profile; keeps base_url. |

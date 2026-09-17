@@ -18,6 +18,7 @@ _EXAMPLES = """\
 examples:
   elport login                       store credentials for the default profile
   elport new "Cell viability assay"  create a remote entity and report.md
+  elport clone 357                  start report.md from an existing entity
   elport push                        upload report.md (add -n to preview first)
   elport status                      show local/remote sync state
   elport pull                        download the remote body and attachments
@@ -172,6 +173,24 @@ def _parser() -> argparse.ArgumentParser:
         help="local document to create (default: report.md)",
     )
 
+    clone_parser = commands.add_parser(
+        "clone", help="start a local document from an existing remote entity"
+    )
+    clone_parser.add_argument("id", type=int, help="id of the remote entity")
+    clone_parser.add_argument(
+        "--entity",
+        choices=ENTITIES,
+        default="experiments",
+        help="entity type to clone (default: experiments)",
+    )
+    clone_parser.add_argument("--profile", help="config profile to use")
+    clone_parser.add_argument(
+        "-o",
+        "--output",
+        default="report.md",
+        help="local document to create (default: report.md)",
+    )
+
     whoami_parser = commands.add_parser(
         "whoami", help="show the authenticated user and active team"
     )
@@ -269,6 +288,36 @@ def _new(args) -> None:
     url = remote.get("sharelink")
     if url:
         print(f"  → {url}")
+
+
+def _clone(args) -> None:
+    eid = frontmatter.validate_id(args.id)
+    path = Path(args.output)
+    if path.exists():
+        raise RuntimeError(f"output already exists: {path}")
+    if not path.parent.is_dir():
+        raise RuntimeError(f"output parent does not exist: {path.parent}")
+    meta = {"id": eid, "entity": args.entity}
+    data = config.load(Path.cwd(), path.parent)
+    resolved_profile, client = _resolved_client(data, args.profile, meta)
+    meta["profile"] = resolved_profile
+    # The base is keyed by entity, not by file: a second clone would reset the
+    # base of whatever working copy already holds it, so refuse instead.
+    base = state.path(client.root, args.entity, str(eid))
+    if base.exists():
+        raise RuntimeError(
+            f"{args.entity}/{eid} already has a working copy; pull there instead "
+            f"(to start over, delete its base: {base})"
+        )
+    frontmatter.atomic_write(path, frontmatter.render(meta, ""))
+    try:
+        pull(path, client, data, args.profile)
+    except BaseException:
+        # Drop the scaffold so the clone can be retried, unless the pull got far
+        # enough to record a base: then the document is real, whatever failed after.
+        if not base.exists():
+            path.unlink(missing_ok=True)
+        raise
 
 
 def _color(text: str, code: int) -> str:
@@ -392,6 +441,9 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "new":
             _new(args)
+            return 0
+        if args.cmd == "clone":
+            _clone(args)
             return 0
         if args.cmd == "whoami":
             _whoami(args.profile)

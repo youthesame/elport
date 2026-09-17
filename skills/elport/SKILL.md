@@ -25,6 +25,7 @@ elport merge                     # after a conflict: git merge-file .base.md/.re
 elport comments                  # print the remote comment thread (read-only, terminal only)
 elport comment "text"            # post one comment (no edit/delete)
 elport new "title" --entity experiments -o report.md   # create entity + scaffold frontmatter
+elport clone 357 --entity experiments -o report.md    # start from an existing entity: scaffold + pull
 elport whoami                    # auth check: user, team+role, API-key read/write, server version, scopes
 elport profile [use <name>]      # list profiles (default marked), or switch the default
 elport login [profile]           # store base_url (config) + api_key (OS keyring); prompts, no echo
