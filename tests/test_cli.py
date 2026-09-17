@@ -123,14 +123,12 @@ def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch, cap
     assert meta["title"] == "Experiment"
     assert meta["profile"] == "test"
     assert body == ""
-    assert saved == [
-        (
-            "https://e.example",
-            "experiments",
-            "42",
-            {"remote_base": "server empty\n", "local_base": "", "team": 7},
-        )
-    ]
+    assert saved[-1] == (
+        "https://e.example",
+        "experiments",
+        "42",
+        {"remote_base": "server empty\n", "local_base": "", "team": 7},
+    )
     assert capsys.readouterr().out == (
         f"created experiments/42: {output}\n  → https://e.example/experiments/42\n"
     )
@@ -347,7 +345,7 @@ def test_atomic_write_works_without_fchmod(tmp_path, monkeypatch):
     assert path.read_text(encoding="utf-8") == "after"
 
 
-def test_new_persists_created_id_before_state_initialization_failure(
+def test_new_persists_created_id_and_resumable_base_on_followup_failure(
     tmp_path, monkeypatch
 ):
     class FailingGetClient(NewClient):
@@ -367,11 +365,8 @@ def test_new_persists_created_id_before_state_initialization_failure(
         "_resolved_client",
         lambda *args: ("test", FailingGetClient()),
     )
-    monkeypatch.setattr(
-        cli.state,
-        "save",
-        lambda *args: pytest.fail("state should not be saved after GET failure"),
-    )
+    saved = []
+    monkeypatch.setattr(cli.state, "save", lambda *args: saved.append(args))
 
     assert cli.main(["new", "Experiment", "-o", str(output)]) == 1
 
@@ -379,6 +374,17 @@ def test_new_persists_created_id_before_state_initialization_failure(
     assert meta["id"] == 42
     assert meta["profile"] == "test"
     assert body == ""
+    # Issue #13: a provisional base lets a plain `elport push` resume this entity.
+    assert [args[-1] for args in saved] == [
+        {
+            "remote_base": "",
+            "local_base": "",
+            "meta_base": {},
+            "team": 7,
+            "pending_create": True,
+            "body_sent": False,
+        }
+    ]
 
 
 def test_new_rejects_missing_parent_before_remote_creation(tmp_path, monkeypatch):

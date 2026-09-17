@@ -339,6 +339,31 @@ def _warn_permission_narrowing(
             )
 
 
+def mark_created(
+    base_url: str, entity: str, eid: object, team=None, body_sent: bool = False
+) -> None:
+    """Record a provisional base as soon as the remote entity exists, so a failure
+    later in the same run can be resumed by a plain retry instead of pull/--force
+    (deleting the local id instead would create a duplicate entity). The bases are
+    empty because nothing has been stored yet: while ``body_sent`` is false the
+    remote must still be empty, so conflict detection keeps working as usual. Once
+    a body PATCH has been sent, the stored body is ours but its server-normalized
+    form is unknown, so the next push skips the comparison instead."""
+    state.save(
+        base_url,
+        entity,
+        str(eid),
+        {
+            "remote_base": "",
+            "local_base": "",
+            "meta_base": {},
+            "team": team,
+            "pending_create": True,
+            "body_sent": body_sent,
+        },
+    )
+
+
 def push(
     path: Path,
     client,
@@ -425,9 +450,20 @@ def push(
             )
     if eid and saved is None and not force:
         raise RuntimeError("base unavailable; run pull first or use --force")
+    # A base left after an interrupted creation that already sent a body describes
+    # no stored form, so it cannot be compared against the remote.
+    # An unresolved conflict (pending_remote) ends the resume: that remote body is
+    # a real change waiting for a merge, not the entity we were about to fill in.
+    resuming = bool(
+        saved
+        and saved.get("pending_create")
+        and saved.get("body_sent")
+        and "pending_remote" not in saved
+    )
     if (
         remote is not None
         and saved
+        and not resuming
         and remote_doc.get("body", "") != saved.get("remote_base", "")
         and not force
     ):
@@ -446,6 +482,7 @@ def push(
         force
         and remote is not None
         and saved
+        and not resuming
         and remote_doc.get("body", "") != saved.get("remote_base", "")
         and not dry_run
     ):
@@ -455,6 +492,14 @@ def push(
             file=sys.stderr,
         )
 
+    if resuming and not dry_run and remote_doc.get("body", ""):
+        # The sent body's stored form is unknowable (the server normalizes it), so
+        # an interrupted PATCH cannot be told apart from a Web edit. Say so.
+        print(
+            "warning: resuming an interrupted creation; "
+            "the remote body is being overwritten",
+            file=sys.stderr,
+        )
     if not dry_run:
         _confirm_permission_widening(permission_changes, assume_yes)
         if eid is not None:
@@ -495,6 +540,7 @@ def push(
 
     _confirm_large_uploads(new_uploads, assume_yes)
 
+    pending_create = bool(saved and saved.get("pending_create"))
     if not eid:
         created = client.create(entity, meta.get("title") or path.stem)
         eid = frontmatter.parse_server_id(created.get("id"))
@@ -502,6 +548,8 @@ def push(
         meta["entity"] = entity
         meta["profile"] = resolved_profile
         frontmatter.atomic_write(path, frontmatter.render(meta, body))
+        mark_created(base_url, entity, eid, identity.get("team"))
+        pending_create = True
     remote = Remote(client, entity, eid, base_url)
 
     narrowing = {
@@ -533,8 +581,13 @@ def push(
             payload[f"can{field}_base"] = target
 
     if saved and not force:
+        # A resumed create has no stored base, so guard the window opened by this
+        # run instead: the remote must still look like it did when we started.
+        reference = (
+            remote_doc.get("body", "") if resuming else saved.get("remote_base", "")
+        )
         latest = remote.get()
-        if latest.get("body", "") != saved.get("remote_base", ""):
+        if latest.get("body", "") != reference:
             _raise_conflict(
                 path,
                 latest.get("body", ""),
@@ -544,6 +597,8 @@ def push(
                 "remote changed after uploads; body was not updated and uploads remain",
             )
 
+    if pending_create:
+        mark_created(base_url, entity, eid, identity.get("team"), body_sent=True)
     remote.patch(payload)
     stored = remote.get()
     if stored.get("content_type") != 2:
@@ -599,6 +654,10 @@ def _promote_pending_remote(base_url: str | None, entity: str, eid: object) -> N
     if saved is not None and "pending_remote" in saved:
         updated = {**saved, "remote_base": saved["pending_remote"]}
         del updated["pending_remote"]
+        # The promoted base is a real GET'd body, so the creation is no longer
+        # provisional and normal conflict detection applies again.
+        updated.pop("pending_create", None)
+        updated.pop("body_sent", None)
         state.save(base_url, entity, str(eid), updated)
 
 

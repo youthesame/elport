@@ -535,3 +535,40 @@ def test_merge_handles_document_name_starting_with_dash(tmp_path, monkeypatch):
     )
     assert not (tmp_path / "-note.base.md").exists()
     assert not (tmp_path / "-note.remote.md").exists()
+
+
+def test_merge_clears_the_provisional_creation_flags(tmp_path, monkeypatch, configured):
+    """After a merge the base is a real stored body, so push must guard it again."""
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local\n")
+    stored_state = {
+        "local_base": "",
+        "remote_base": "",
+        "meta_base": {},
+        "team": 7,
+        "pending_create": True,
+        "body_sent": True,
+        "pending_remote": "remote\n",
+    }
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+    monkeypatch.setattr(
+        sync.state,
+        "save",
+        lambda *args: (stored_state.clear(), stored_state.update(args[3])),
+    )
+    (tmp_path / "report.base.md").write_text(
+        frontmatter.render({"id": 1, "entity": "experiments", "title": "Test"}, ""),
+        encoding="utf-8",
+    )
+    (tmp_path / "report.remote.md").write_text(
+        frontmatter.render(
+            {"id": 1, "entity": "experiments", "title": "Test"}, "remote\n"
+        ),
+        encoding="utf-8",
+    )
+
+    sync.merge(doc, {}, resolved=True)
+
+    assert stored_state["remote_base"] == "remote\n"
+    assert "pending_create" not in stored_state
+    assert "body_sent" not in stored_state
