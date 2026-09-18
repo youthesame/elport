@@ -12,6 +12,8 @@ files) to/from eLabFTW entities. **Local is the source of truth.**
   base) are owned solely by the tests. **To change behavior, update the tests first**, then implement. Do not
   create prose restatements of the contract (they become a drift source).
 - **Why it is built this way = [docs/DESIGN.md](docs/DESIGN.md)** (frozen: background, scope, settled decisions).
+  Decisions made *after* those design sessions live in **[docs/adr/](docs/adr/)** and take precedence over DESIGN
+  where they overlap; DESIGN is not edited to match, it only gains a pointer.
 - **Measured eLabFTW API facts = [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** (observation log of the external
   world; update only when the target instance version changes).
 - **User-facing usage = [README.md](README.md)** (commands, front matter, config).

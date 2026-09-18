@@ -121,7 +121,8 @@ similar, **consult it and pull in only what is needed** when a missing feature b
 11. **File name**: not fixed (default `report.md`, any name allowed; sidecar `<name>.remote.md`).
 12. **Default entity kind**: `experiments` (overridable in front matter).
 13. **`status` / `diff` are MVP**: read-only, side-effect-free (`status` = preflight display, `diff` = source-form
-    comparison). `log`/`show` (revision browsing) are out of MVP.
+    comparison). `log`/`show` (revision browsing) are out of MVP. (This was a scope cut, not a name
+    reservation; the names were freed in [ADR-0001](adr/0001-git-like-and-gh-like-command-vocabularies.md).)
 
 > The **measured facts** that justify keeping a two-form base locally, and why server normalization bears directly
 > on conflict detection, live in [ELABFTW-API.md](ELABFTW-API.md). The **behavioral contract itself** (span-based
@@ -183,7 +184,8 @@ must not enter the body or a written sidecar. Post via `elport comment <note> ".
 the Web UI handles it).
 
 **Deferred.** Revision browsing (`elport log` / `elport show`, read-only), task steps, and reciprocal links are out of
-this batch (their measured API shape is in [ELABFTW-API.md](ELABFTW-API.md)).
+this batch (their measured API shape is in [ELABFTW-API.md](ELABFTW-API.md)). Revision browsing holds no claim on the
+names `log`/`show`; see [ADR-0001](adr/0001-git-like-and-gh-like-command-vocabularies.md).
 
 ---
 

@@ -117,3 +117,6 @@ class Client:
     def statuses(self, team_id, entity):
         resource = "experiments_status" if entity == "experiments" else "items_status"
         return self.request("GET", f"/teams/{team_id}/{resource}").json()
+
+    def search(self, entity, params):
+        return self.request("GET", f"/{entity}", params=params).json()

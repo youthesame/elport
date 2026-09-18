@@ -24,6 +24,7 @@ uploading, just write its eLabFTW URL. Code fences, inline code, and HTML commen
 
 ```sh
 elport login labA                       # store base_url (config) + api_key (OS keyring), interactively
+elport list                             # what do I already have on the server? (read-only)
 elport new "CRISPR titration"           # create the entity, scaffold report.md with id
 # ...or start from an entity made in the Web UI: elport clone 357
 # ...edit report.md, drop fig1.png / data.csv next to it...
@@ -47,6 +48,8 @@ Default document is `report.md`; any name works. Exit code `0` on success, `1` o
 | `elport comment [<doc>] "<text>"` | Post one comment to the entity (no edit/delete; use the Web UI). |
 | `elport new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Create an entity + scaffold front matter. |
 | `elport clone <id> [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Start `<doc>` from an entity that already exists: scaffold front matter, then pull. |
+| `elport list [--entity experiments\|items] [--scope self\|team\|all] [-q <term>] [--limit <n>] [--offset <n>] [--json]` | List remote entities as `id  date  title`. Defaults to your own (`--scope self`), 50 at a time. Read-only. |
+| `elport view <id> [--entity experiments\|items] [--profile <name>]` | Print one remote body to stdout, exactly as stored. Writes nothing locally. |
 | `elport whoami [--profile <name>]` | Auth check: user, team + role, API-key read/write, server version, scopes. |
 | `elport login [<profile>]` | Store base_url → `config.toml`, api_key → OS keyring. Prompts; the key is not echoed. |
 | `elport logout [<profile>]` | Remove the stored api_key for a profile; keeps base_url. |
@@ -56,6 +59,15 @@ Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>`, `-f/--for
 losing the Web-side change), `-y/--yes` (skip the confirmations for widening `read`/`write` beyond your team and for new uploads over
 25 MiB; non-interactive runs need `-y` for either),
 `--entity {experiments,items}`.
+
+> `list` and `view` only read the server, so they compose. To bring down everything you have written, list your
+> own ids and clone each one into its own directory:
+>
+> ```sh
+> elport list --limit 1000 --json | jq -r '.[].id' | while read -r id; do
+>   mkdir -p "note-$id" && (cd "note-$id" && elport clone "$id")
+> done
+> ```
 
 > pull writes referenced files back by **basename only**. A subdirectory path like `assets/fig.png` is flattened to
 > `fig.png`.

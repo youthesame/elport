@@ -8,7 +8,7 @@ import sys
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
-from . import config, frontmatter, state
+from . import browse, config, frontmatter, state
 from .client import Client
 from .sync import (
     comment,
@@ -29,6 +29,8 @@ examples:
   elport login                       store credentials for the default profile
   elport new "Cell viability assay"  create a remote entity and report.md
   elport clone 357                  start report.md from an existing entity
+  elport list                        list your own entities on the server
+  elport view 357                    print a remote body without cloning it
   elport push                        upload report.md (add -n to preview first)
   elport status                      show local/remote sync state
   elport pull                        download the remote body and attachments
@@ -182,6 +184,46 @@ def _parser() -> argparse.ArgumentParser:
         default="report.md",
         help="local document to create (default: report.md)",
     )
+
+    list_parser = commands.add_parser("list", help="list remote entities (read-only)")
+    list_parser.add_argument(
+        "--entity",
+        choices=ENTITIES,
+        help="entity type to list (default: experiments)",
+    )
+    list_parser.add_argument(
+        "--scope",
+        choices=tuple(browse.SCOPES),
+        default="self",
+        help="whose entities to list (default: self)",
+    )
+    list_parser.add_argument(
+        "-q", "--query", help="search term matched against title, body and elabid"
+    )
+    list_parser.add_argument(
+        "--limit",
+        type=int,
+        default=browse.DEFAULT_LIMIT,
+        help=f"maximum number of results (default: {browse.DEFAULT_LIMIT})",
+    )
+    list_parser.add_argument(
+        "--offset", type=int, default=0, help="skip this many results"
+    )
+    list_parser.add_argument(
+        "--json", action="store_true", help="emit the raw API rows as JSON"
+    )
+    list_parser.add_argument("--profile", help="config profile to use")
+
+    view_parser = commands.add_parser(
+        "view", help="print a remote body to stdout (read-only)"
+    )
+    view_parser.add_argument("id", type=int, help="id of the remote entity")
+    view_parser.add_argument(
+        "--entity",
+        choices=ENTITIES,
+        help="entity type to view (default: experiments)",
+    )
+    view_parser.add_argument("--profile", help="config profile to use")
 
     clone_parser = commands.add_parser(
         "clone", help="start a local document from an existing remote entity"
@@ -338,6 +380,14 @@ def _color(text: str, code: int) -> str:
     return text
 
 
+def _browse_target(args) -> tuple[str, Client]:
+    data = config.load(Path.cwd(), Path.cwd())
+    entity = args.entity or data.get("entity", "experiments")
+    if entity not in ENTITIES:
+        raise ValueError("entity must be one of: experiments, items")
+    return entity, _resolved_client(data, args.profile, {})[1]
+
+
 def _whoami(profile: str | None) -> None:
     data = config.load(Path.cwd(), Path.cwd())
     profile_name, client = _resolved_client(data, profile, {})
@@ -456,6 +506,22 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "clone":
             _clone(args)
+            return 0
+        if args.cmd == "list":
+            entity, client = _browse_target(args)
+            browse.entities(
+                client,
+                entity,
+                scope=args.scope,
+                limit=args.limit,
+                offset=args.offset,
+                query=args.query,
+                as_json=args.json,
+            )
+            return 0
+        if args.cmd == "view":
+            entity, client = _browse_target(args)
+            browse.view(client, entity, args.id)
             return 0
         if args.cmd == "whoami":
             _whoami(args.profile)

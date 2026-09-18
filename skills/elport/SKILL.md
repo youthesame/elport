@@ -26,6 +26,11 @@ elport comments                  # print the remote comment thread (read-only, t
 elport comment "text"            # post one comment (no edit/delete)
 elport new "title" --entity experiments -o report.md   # create entity + scaffold frontmatter
 elport clone 357 --entity experiments -o report.md    # start from an existing entity: scaffold + pull
+elport list                      # your own entities as `id  date  title` (read-only, no local doc needed)
+elport list --scope team -q blot # widen to the team / search title+body+elabid; --limit, --offset page
+elport list --json               # raw API rows; pipe to jq to drive clone/view
+#   default --limit is 50; a full page warns on stderr, so raise --limit rather than assume it is all
+elport view 357                  # print one remote body to stdout, as stored (read-only, writes nothing)
 elport whoami                    # auth check: user, team+role, API-key read/write, server version, scopes
 elport profile [use <name>]      # list profiles (default marked), or switch the default
 elport login [profile]           # store base_url (config) + api_key (OS keyring); prompts, no echo
@@ -74,6 +79,9 @@ A push overwrites the shared server body; discarding remote changes with `--forc
   it would skip. If push stops with `re-run with --yes`, ask rather than add `-y` on your own.
 - **Keep secrets out of the note and repo.** API keys live in the OS keyring via `elport login`;
   base_url in `~/.config/elport/`. Never print, echo, or write a key into a file, note, or log.
+- **`list` and `view` never write.** They need no local document and touch no base, so they are
+  safe to run before anything is set up. Use them to find an entity instead of guessing an `id`.
+  `view` prints the body exactly as stored, so a note written in the Web UI comes out as HTML.
 - **`id` is server-assigned** by `new` and the first `push`. Never invent or hand-edit it,
   since a wrong id overwrites the wrong entity.
 - **Markdown mode is required.** If push aborts with `remote entity is not in markdown mode`,

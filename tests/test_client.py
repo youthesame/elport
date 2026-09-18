@@ -182,3 +182,18 @@ def test_statuses_uses_entity_status_endpoint(monkeypatch, entity, resource):
 
     assert client.statuses(7, entity) == []
     assert calls == [(("GET", f"/teams/7/{resource}"), {})]
+
+
+def test_search_sends_query_params_to_the_entity_collection(monkeypatch):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append((args, kwargs)) or _Response([{"id": 1}]),
+    )
+
+    assert client.search("experiments", {"scope": 1, "limit": 5}) == [{"id": 1}]
+    assert calls == [
+        (("GET", "/experiments"), {"params": {"scope": 1, "limit": 5}}),
+    ]
