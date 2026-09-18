@@ -29,6 +29,7 @@ uv tool install git+https://github.com/youthesame/elport
 
 ```sh
 elport login labA                       # base_url（config）と api_key（OS キーリング）を対話形式で保存
+elport list                             # サーバー上にある自分のノートを確認（読み取り専用）
 elport new "CRISPR titration"           # ノートを作成し、id 入りの report.md 雛形を生成
 # ...Web UI で作成済みのノートから始めるなら: elport clone 357
 # ...report.md を編集し、同じ階層に fig1.png や data.csv を配置...
@@ -53,6 +54,8 @@ elport push                             # 参照ファイルをアップロー�
 | `elport comment [<doc>] "<text>"` | ノートにコメントを 1 件投稿します（編集・削除は Web UI で行ってください）。 |
 | `elport new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | ノートを新規作成し、フロントマターを含むドキュメント雛形を生成します。 |
 | `elport clone <id> [--entity experiments\|items] [--profile <name>] [-o <doc>]` | 既存ノートから開始します。フロントマターを生成してから pull します。 |
+| `elport list [--entity experiments\|items] [--scope self\|team\|all] [-q <term>] [--limit <n>] [--offset <n>] [--json]` | リモートのノートを `id  日付  タイトル` の形式で一覧表示します。デフォルトは自分のノートのみ（`--scope self`）で 50 件ずつ。読み取り専用。 |
+| `elport view <id> [--entity experiments\|items] [--profile <name>]` | リモートの本文を保存されているままの形で標準出力へ表示します。ローカルには何も書き込みません。 |
 | `elport whoami [--profile <name>]` | 認証状態の確認: ユーザー情報、チームと権限ロール、API キーの read/write 権限、サーバーバージョン、スコープを表示します。 |
 | `elport login [<profile>]` | `base_url` を `config.toml` に、`api_key` を OS キーリングに対話形式で保存します（キーは画面にエコーバックされません）。 |
 | `elport logout [<profile>]` | 指定プロファイルの保存済み `api_key` をキーリングから削除します（`base_url` は保持されます）。 |
@@ -62,6 +65,15 @@ elport push                             # 参照ファイルをアップロー�
 `-f/--force`（変更されたリモートを強制上書き。Web 側の変更は失われます）、`-y/--yes`（`read`/`write`
 の公開範囲を自チーム外へ広げる際と、25 MiB を超えるファイルを新規アップロードする際の確認プロンプトをスキップ。
 非対話シェル環境ではどちらも `-y` が必須）、`--entity {experiments,items}`。
+
+> `list` と `view` はサーバーを読むだけなので、他のコマンドと自由に組み合わせられます。これまで書いた自分のノートを
+> すべて手元に持ってくるには、自分の id を一覧し、それぞれを個別のディレクトリへ clone してください。
+>
+> ```sh
+> elport list --limit 1000 --json | jq -r '.[].id' | while read -r id; do
+>   mkdir -p "note-$id" && (cd "note-$id" && elport clone "$id")
+> done
+> ```
 
 > `pull` は参照されているファイルを**ファイル名のみ**で書き戻します。`assets/fig.png`
 > のようなサブディレクトリを含むパスは `fig.png` に平坦化されます。

@@ -1014,3 +1014,146 @@ def test_clone_keeps_the_document_when_the_pull_fails_after_saving_a_base(
     assert cli.main(["clone", "357", "-o", str(output)]) == 1
 
     assert frontmatter.parse(output.read_text())[1] == "remote body\n"
+
+
+def _stub_browse_client(monkeypatch, client):
+    monkeypatch.setattr(config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", client)
+    )
+
+
+class BrowseClient:
+    def __init__(self, rows=None, body=""):
+        self.rows = list(rows or [])
+        self.body = body
+        self.searches = []
+        self.root = "https://e.example"
+
+    def search(self, entity, params):
+        self.searches.append((entity, dict(params)))
+        return self.rows
+
+    def get(self, entity, eid):
+        return {"body": self.body}
+
+
+def test_list_command_defaults_to_self_scoped_experiments(monkeypatch, capsys):
+    client = BrowseClient(rows=[{"id": 4, "date": "2026-09-18", "title": "Note"}])
+    _stub_browse_client(monkeypatch, client)
+
+    assert cli.main(["list"]) == 0
+
+    entity, params = client.searches[0]
+    assert entity == "experiments"
+    assert params["scope"] == 1
+    assert capsys.readouterr().out == "4  2026-09-18  Note\n"
+
+
+def test_list_command_forwards_its_options(monkeypatch):
+    client = BrowseClient(rows=[])
+    _stub_browse_client(monkeypatch, client)
+
+    assert (
+        cli.main(
+            [
+                "list",
+                "--entity",
+                "items",
+                "--scope",
+                "team",
+                "--limit",
+                "3",
+                "--offset",
+                "6",
+                "-q",
+                "blot",
+            ]
+        )
+        == 0
+    )
+
+    assert client.searches == [
+        ("items", {"scope": 2, "limit": 3, "offset": 6, "q": "blot"}),
+    ]
+
+
+def test_list_command_needs_no_local_document(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    client = BrowseClient(rows=[])
+    _stub_browse_client(monkeypatch, client)
+
+    assert cli.main(["list"]) == 0
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_view_command_prints_the_remote_body(monkeypatch, capsys):
+    client = BrowseClient(body="remote text\n")
+    _stub_browse_client(monkeypatch, client)
+
+    assert cli.main(["view", "42"]) == 0
+
+    assert capsys.readouterr().out == "remote text\n"
+
+
+def test_view_command_reports_an_invalid_id_as_a_cli_error(monkeypatch, capsys):
+    client = BrowseClient()
+    _stub_browse_client(monkeypatch, client)
+
+    assert cli.main(["view", "0"]) == 1
+    assert capsys.readouterr().err != ""
+
+
+def test_list_command_honors_the_entity_config_key(monkeypatch):
+    client = BrowseClient(rows=[])
+    monkeypatch.setattr(config, "load", lambda *args: {"entity": "items"})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", client)
+    )
+
+    assert cli.main(["list"]) == 0
+
+    assert client.searches[0][0] == "items"
+
+
+def test_list_command_lets_the_cli_entity_win_over_the_config_key(monkeypatch):
+    client = BrowseClient(rows=[])
+    monkeypatch.setattr(config, "load", lambda *args: {"entity": "items"})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", client)
+    )
+
+    assert cli.main(["list", "--entity", "experiments"]) == 0
+
+    assert client.searches[0][0] == "experiments"
+
+
+def test_view_command_honors_the_entity_config_key(monkeypatch):
+    client = BrowseClient(body="text\n")
+    gets = []
+    monkeypatch.setattr(config, "load", lambda *args: {"entity": "items"})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", client)
+    )
+    monkeypatch.setattr(client, "get", lambda entity, eid: gets.append(entity) or {})
+
+    assert cli.main(["view", "5"]) == 0
+
+    assert gets == ["items"]
+
+
+def test_list_command_rejects_dash_n_so_it_cannot_be_read_as_dry_run(monkeypatch):
+    client = BrowseClient(rows=[])
+    _stub_browse_client(monkeypatch, client)
+
+    with pytest.raises(SystemExit):
+        cli.main(["list", "-n", "5"])
+
+
+def test_list_command_reports_a_negative_offset_as_a_cli_error(monkeypatch, capsys):
+    client = BrowseClient(rows=[])
+    _stub_browse_client(monkeypatch, client)
+
+    assert cli.main(["list", "--offset", "-1"]) == 1
+    assert capsys.readouterr().err != ""
+    assert client.searches == []
