@@ -15,10 +15,11 @@ uv tool install git+https://github.com/youthesame/elport
 
 ## The core idea
 
-One local file maps to one eLabFTW entry: Markdown with a YAML front matter block (inline HTML allowed). On `push`,
-elport uploads every real local file the body references, in any notation, and swaps each path for its real eLabFTW
-URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry instead of
-uploading, just write its eLabFTW URL. Code fences, inline code, and HTML comments are never parsed.
+One local file maps to one eLabFTW entry: Markdown with a YAML front matter block, inline HTML allowed.
+
+On `push`, elport uploads every real local file the body references, in any notation, and swaps each path for its
+real eLabFTW URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry
+instead of uploading, write its eLabFTW URL. Code fences, inline code, and HTML comments are never parsed.
 
 ## Quick start
 
@@ -26,7 +27,7 @@ uploading, just write its eLabFTW URL. Code fences, inline code, and HTML commen
 elport login labA                       # store base_url (config) + api_key (OS keyring), interactively
 elport list                             # what do I already have on the server? (read-only)
 elport new "CRISPR titration"           # create the entity, scaffold report.md with id
-# ...or start from an entity made in the Web UI: elport clone 357
+# ...or start from an entity made in the Web UI: elport clone <id>
 # ...edit report.md, drop fig1.png / data.csv next to it...
 elport status                           # what would sync? (read-only)
 elport push                             # upload references + push the body
@@ -34,53 +35,70 @@ elport push                             # upload references + push the body
 
 ## Commands
 
-Default document is `report.md`; any name works. Exit code `0` on success, `1` on failure.
+Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works.
+Exit code `0` on success, `1` on failure. Run `elport <command> --help` for the full flags.
+
+### Sync
 
 | Command | Summary |
 |---|---|
-| `elport push [<doc>]` | Push `<doc>` to one entity. Creates it (writing `id` back) if unset. Runs mode + conflict checks first. |
-| `elport pull [<doc>]` | Fetch the body and metadata, reverse-transclude URLs back to local paths, download referenced files. |
-| `elport fetch [<doc>]` | Download every attachment on the entity, including files the body never references. Read-only. |
-| `elport status [<doc>]` | Side-effect-free: is local changed? was the remote edited? which files upload? what mode? |
-| `elport diff [<doc>]` | Source-form diff. Default local ↔ remote; `--base` for local ↔ last push. Never sends. |
-| `elport merge [<doc>]` | After a conflict, 3-way `.base.md`/`.remote.md` into `<doc>` via `git merge-file`. Local-only; git optional. |
-| `elport comments [<doc>]` | Print the remote comment thread (terminal only; never written into the body). |
-| `elport comment [<doc>] "<text>"` | Post one comment to the entity (no edit/delete; use the Web UI). |
-| `elport new "<title>" [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Create an entity + scaffold front matter. |
-| `elport clone <id> [--entity experiments\|items] [--profile <name>] [-o <doc>]` | Start `<doc>` from an entity that already exists: scaffold front matter, then pull. |
-| `elport list [--entity experiments\|items] [--scope self\|team\|all] [-q <term>] [--limit <n>] [--offset <n>] [--json]` | List remote entities as `id  date  title`. Defaults to your own (`--scope self`), 50 at a time. Read-only. |
-| `elport view <id> [--entity experiments\|items] [--profile <name>]` | Print one remote body to stdout, exactly as stored. Writes nothing locally. |
-| `elport whoami [--profile <name>]` | Auth check: user, team + role, API-key read/write, server version, scopes. |
-| `elport login [<profile>]` | Store base_url → `config.toml`, api_key → OS keyring. Prompts; the key is not echoed. |
-| `elport logout [<profile>]` | Remove the stored api_key for a profile; keeps base_url. |
-| `elport profile [use <name>]` | List profiles (default marked), or set the default profile. |
+| `push` | Upload the body and its referenced files to one entity. |
+| `pull` | Fetch the body and metadata, and download referenced files. |
+| `fetch` | Download every attachment, referenced or not. Read-only. |
+| `status` | Report what would sync, and in which mode. Read-only. |
+| `diff` | Diff local against remote, or against the last push with `--base`. |
+| `merge` | Merge `.base.md` and `.remote.md` into `<doc>` after a conflict. |
 
-Options: `-n/--dry-run` (push rehearsal, no send), `--profile <name>`, `-f/--force` (push over a changed remote,
-losing the Web-side change), `-y/--yes` (skip the confirmations for widening `read`/`write` beyond your team and for new uploads over
-25 MiB; non-interactive runs need `-y` for either),
-`--entity {experiments,items}`.
+`push` creates the entity and writes `id` back to the front matter when `id` is unset, and it runs the mode and
+conflict checks first. `merge` is local-only and shells out to `git merge-file`, with git itself optional.
 
-> `list` and `view` only read the server, so they compose. To bring down everything you have written, list your
-> own ids and clone each one into its own directory:
->
-> ```sh
-> elport list --limit 1000 --json | jq -r '.[].id' | while read -r id; do
->   mkdir -p "note-$id" && (cd "note-$id" && elport clone "$id")
-> done
-> ```
+### Entities
 
-> pull writes referenced files back by **basename only**. A subdirectory path like `assets/fig.png` is flattened to
-> `fig.png`.
+| Command | Summary |
+|---|---|
+| `new "<title>"` | Create an entity and scaffold front matter. |
+| `clone <id>` | Start `<doc>` from an entity that already exists, then pull. |
+| `list` | List remote entities as `id  date  title`. Read-only. |
+| `view <id>` | Print one remote body to stdout, exactly as stored. |
+| `comments` | Print the remote comment thread. |
+| `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
 
-> pull only downloads files the body links to. Attachments that sit on the entity without being embedded, like raw
-> data or spectra, stay on the server. Run `elport fetch` to pull those down too. fetch is read-only. It never parses
-> the body, touches the base, or feeds the push manifest, so a fetched file is not uploaded again unless you link it
-> in the body yourself. If a local file differs, fetch leaves it in place and writes the remote copy beside it as
-> `<name>.remote`.
+`new` and `clone` write to `report.md` unless you pass `-o <doc>`. `list` defaults to your own entities
+(`--scope self`) and returns 50 at a time, with `-q <term>`, `--limit`, `--offset`, and `--json` to narrow it.
+`comments` prints to the terminal only, never into the body.
+
+### Setup
+
+| Command | Summary |
+|---|---|
+| `login [<profile>]` | Store base_url in `config.toml`, api_key in the OS keyring. |
+| `logout [<profile>]` | Remove the stored api_key. Keeps base_url. |
+| `profile [use <name>]` | List profiles, or set the default one. |
+| `whoami` | Check auth: user, team, role, key permissions, server version, scopes. |
+
+### Shared options
+
+- `-n/--dry-run` rehearses a push without sending.
+- `-f/--force` pushes over a changed remote, losing the Web-side change.
+- `-y/--yes` skips the two confirmations: widening `read`/`write` beyond your team, and new uploads over 25 MiB.
+  A non-interactive run needs `-y` for either.
+- `--profile <name>` and `--entity {experiments,items}` pick the destination.
+
+### pull and fetch
+
+Neither command is a superset of the other.
+
+- `pull` writes referenced files back by **basename only**. A subdirectory path like `assets/fig.png` lands as
+  `fig.png`.
+- `pull` only downloads files the body links to. Attachments that sit on the entity without being embedded, like
+  raw data or spectra, stay on the server.
+- `fetch` brings those down. It never parses the body, touches the base, or feeds the push manifest, so a fetched
+  file is not uploaded again unless you link it in the body yourself.
+- If a local file differs, `fetch` leaves it in place and writes the remote copy beside it as `<name>.remote`.
 
 ## Document format (front matter)
 
-A YAML block at the top (generated/completed on push if absent):
+A YAML block at the top, generated or completed on push if absent:
 
 ```markdown
 ---
@@ -98,34 +116,42 @@ write: owner                  # optional; same scale
 # Body. Markdown, inline HTML allowed ...
 ```
 
-- Holds **only** `id` + human metadata + optional `profile`; base and hashes live in state. Front matter is
-  stripped before the body is sent.
-- `title` / `category` / `status` / `read` / `write` are reflected **only when present**. Omit a key and elport
-  leaves that remote value untouched. pull writes them back from the server, so a key you never wrote may appear
-  after a pull; a key you edited locally but have not pushed is kept. `tags` are add-only on both sides, so pull
-  keeps the union. `read`/`write` set the eLabFTW base visibility only, so individual Web-UI
-  grants are preserved; widening beyond your team asks for confirmation (`-y` skips; non-interactive needs `-y`).
-- If front matter and CLI disagree on profile / entity / id, elport **stops** rather than guessing.
+The block holds only `id`, human metadata, and an optional `profile`. The base and the hashes live in state. elport
+strips the front matter before sending the body.
+
+`title`, `category`, `status`, `read`, and `write` are reflected **only when present**. Omit a key and elport leaves
+that remote value untouched. `pull` writes them back from the server, so a key you never wrote may appear after a
+pull, while a key you edited locally but have not pushed is kept. `tags` are add-only on both sides, so pull keeps
+the union.
+
+`read`/`write` set the eLabFTW base visibility only, so individual Web-UI grants survive. Widening beyond your team
+asks for confirmation.
+
+If the front matter and the CLI disagree on profile, entity, or id, elport **stops** rather than guessing.
 
 ## Conflicts
 
-Since you may also edit the body in the Web UI, `push` compares the current remote against the stored base first:
+Since you may also edit the body in the Web UI, `push` compares the current remote against the stored base first.
 
-- **unchanged** → proceeds.
-- **changed** → aborts. elport writes `<name>.base.md` (ancestor) and `<name>.remote.md`; run `elport merge` to 3-way
-  them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then push. (push refuses a body that still has
-  markers.)
-- **no base on this machine** → aborts; `elport pull` first, or `--force` to overwrite blind.
+- **unchanged** proceeds.
+- **changed** aborts. elport writes `<name>.base.md` (the ancestor) and `<name>.remote.md`. Run `elport merge` to
+  3-way them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then push. A body that still has markers is
+  refused.
+- **no base on this machine** aborts. Run `elport pull` first, or `--force` to overwrite blind.
 
-`--force` discards the Web-side change, so use it deliberately. eLabFTW keeps server-side history recoverable from the
-Web UI as a safety net. elport keeps no local history of its own. Want per-edit history? `git init` your notes folder,
-since the files are plain Markdown.
+`--force` discards the Web-side change, so use it deliberately. eLabFTW keeps server-side history recoverable from
+the Web UI as a safety net, but elport keeps no local history of its own. Want per-edit history? `git init` your
+notes folder, since the files are plain Markdown.
 
 ## Configuration & auth
 
-**No credentials in the project.** `elport login` stores the API key in your OS keyring (Keychain / Credential
-Manager / Secret Service); base_url and other non-secrets live in `~/.config/elport/config.toml` (mode `600`, key
-never printed).
+**No credentials in the project.**
+
+### Where the key lives
+
+`elport login` stores the API key in your OS keyring: Keychain, Credential Manager, or Secret Service. Everything
+that is not a secret, base_url included, goes in `~/.config/elport/config.toml` with mode `600`. elport never
+prints the key.
 
 ```toml
 # ~/.config/elport/config.toml
@@ -136,12 +162,30 @@ base_url   = "https://lab-a.example.org"
 verify_ssl = true
 ```
 
-Credentials resolve **env → keyring+config → plaintext**: `ELABFTW_BASE_URL`+`ELABFTW_API_KEY` for CI, the keyring
-pair as the normal default, then a warned plaintext-in-config fallback only when no keyring backend exists. Profiles
-layer like settings.json (`config.toml` → `<project>/.elport.toml` → `<dir>/.elport.toml`, one per team); your first
-`elport login` becomes the default, `elport profile use <name>` switches it, or set `profile:` per note. `.elportignore`
-excludes referenced files `.gitignore`-style, additive across those layers plus every `.elportignore` from the
-project root down to the document directory (each pattern anchored at its own directory).
+### Which credentials win
+
+elport checks three sources, in order, and stops at the first hit.
+
+1. `ELABFTW_BASE_URL` + `ELABFTW_API_KEY` in the environment. This is how CI authenticates.
+2. The keyring and config pair from `elport login`. The normal default.
+3. A plaintext key in the config. A last resort, used with a warning, and only when no keyring backend exists.
+
+### Profiles
+
+Profiles layer like settings.json, one per team:
+
+```
+~/.config/elport/config.toml  →  <project>/.elport.toml  →  <dir>/.elport.toml
+```
+
+Your first `elport login` becomes the default. `elport profile use <name>` switches it, or set `profile:` in a
+note's front matter to pin that one file.
+
+### .elportignore
+
+`.elportignore` excludes referenced files, `.gitignore`-style, so they are never uploaded. It is additive across
+the same layers as profiles, plus every `.elportignore` from the project root down to the document directory. Each
+pattern is anchored at its own directory.
 
 ## Learn more
 
@@ -152,11 +196,21 @@ project root down to the document directory (each pattern anchored at its own di
 
 ## Development
 
-Structure: `client.py` (API wrapper) / `transclude.py` (both directions) / `config.py` / `state.py` (base) /
-`sync.py` (push/pull/status/diff) / `cli.py`. **The tests are the authoritative behavioral contract, so change tests
-first.** Live API behavior can be checked against <https://demo.elabftw.net>.
+| Module | Role |
+|---|---|
+| `cli.py` | Argument parsing and dispatch |
+| `sync.py` | push, pull, status, diff |
+| `transclude.py` | Path ↔ URL rewriting, both directions |
+| `client.py` | eLabFTW API wrapper |
+| `state.py` | The stored base and its hashes |
+| `config.py` | Profiles and credential resolution |
+| `frontmatter.py` | The YAML block |
+| `browse.py` | list and view |
 
-## Related
+**The tests are the authoritative behavioral contract, so change tests first.** You can check live API behavior
+against <https://demo.elabftw.net>.
+
+## Acknowledgments
 
 - [elab-doc-sync](https://github.com/Kosaku-Noba/elab-doc-sync)
 - [elAPI](https://github.com/uhd-urz/elAPI)
