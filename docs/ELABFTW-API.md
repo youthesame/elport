@@ -122,7 +122,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   - Delete: `DELETE .../comments/{cid}` → **204**.
   - Note: the sub-id is server-assigned and **not 1-based per entity** (measured first comment got id 5). Read it
     from the POST `Location` / the GET list; do not assume `{id}/comments/1`.
-- **Comments are out-of-sync data → do not embed in the body** (CLAUDE.md invariant). Surface via sidecar / terminal.
+- **Comments are out-of-sync data → do not embed in the body** (AGENTS.md invariant). Surface via sidecar / terminal.
 
 ## Steps (task checklist; measured 5.6.12, 2026-08-11)
 
