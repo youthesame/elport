@@ -29,7 +29,7 @@ cannot supply, so an explicit `elport revisions` describes it better than a git-
 - `list` and `view` are the sanctioned names for remote browsing, and `show` is free.
 - New commands should be placed in one vocabulary consciously, by **what they operate on** rather
   than by whether they write locally. A command that operates on a local document and its base is
-  git-like and is bound by the sync invariants (CLAUDE.md); a command that reads a remote entity the
+  git-like and is bound by the sync invariants (AGENTS.md); a command that reads a remote entity the
   user has no local document for is gh-like and stays read-only and side-effect-free.
 - Auth and configuration commands (`login`, `logout`, `profile`, `whoami`) sit in neither set. They
   operate on credentials and config, not on an entity or a document, so the split does not classify
