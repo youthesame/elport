@@ -14,6 +14,12 @@ Python 3.10 以上が必要です。`uv` ツールとしてインストールす
 uv tool install elport    # 更新: uv tool upgrade elport
 ```
 
+pip でもインストールできます:
+
+```sh
+pip install elport        # 更新: pip install -U elport
+```
+
 ## コンセプト
 
 ローカルの 1 ファイルが eLabFTW 上の 1 つのノートに対応します。YAML フロントマターを持つ Markdown ファイルとして記述し、
