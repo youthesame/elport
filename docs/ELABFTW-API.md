@@ -6,12 +6,12 @@
 
 - **Nature**: a living reference. It records **observations of the external world that is eLabFTW**. Re-acquiring
   these facts requires hitting a live server (expensive), so they are kept as settled findings. **Update it only
-  when the target instance's version changes.**
+  when the demo's version changes** (all live checks run on demo.elabftw.net only; no other instance is used).
 - **What it is not**: not elport's own design rationale (that is [DESIGN.md](DESIGN.md)); not the behavioral contract
   (that is the **tests**). It holds only "how eLabFTW actually behaves."
 - **Observation environment**: unless noted, "measured" means confirmed on **demo.elabftw.net 5.6.12
-  (2026-08-07..08)**. Base URL is `{base_url}/api/v2`. **Re-confirm version-dependent behavior on the target
-  instance's own version** (see § Version-specific).
+  (2026-08-07..08)**. Base URL is `{base_url}/api/v2`. **Each fact names the demo version it was measured on**
+  (see § Version-specific).
 
 ---
 
@@ -29,6 +29,8 @@
   the `Location` header (e.g. `/api/v2/experiments/42`) or as JSON `id`. **`id` is never client-generated; it
   is always the server-assigned value.**
 - Update: `PATCH /api/v2/{entity}/{id}` (JSON: `title`/`body`/`content_type`, etc.).
+  - **Returns the stored entity** (measured demo 6.0.5, 2026-10-02: identical, body and all keys, to an
+    immediate `GET`, including normalized bodies and metadata/permission changes; empty body comes back `null`).
 - User: `GET /api/v2/users/me` (`team` = active team ID, `teams`).
 
 ## Body normalization (the fact most directly tied to conflict detection)
@@ -211,16 +213,17 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 
 **User's real instance = eLabFTW 5.5.3**:
 
-- **#6416 is resolved** (5.5.3 includes fix commit `1ef3de57`). `content_type:2` can be assumed to work. For extra
-  assurance, confirm once on the real instance that "`content_type:2` persists after PATCH."
-- **`<figure>` rendering**: actual rendering in markdown mode is render-dependent, so eyeball it once on the real
-  instance (raw-HTML preservation in `body_html` confirmed on demo 5.6.12; 5.5.3 presumed the same path).
+- **#6416 is resolved** (5.5.3 includes fix commit `1ef3de57`). `content_type:2` can be assumed to work; push's
+  `content_type == 2` check aborts if it does not.
+- **`<figure>` rendering**: raw-HTML preservation in `body_html` confirmed on demo 5.6.12; 5.5.3 presumed the same
+  path.
 - **Revision GET**: confirmed retrievable on demo 5.6.12. Whether 5.5.3 supports it need only be checked if you
   implement the read-only revision aid (not needed for MVP core behavior).
 - **Tag deletion API**: MVP is add-only. If you later delete, confirm feasibility of `DELETE .../tags/{id}` etc.
 
-**Note**: demo tracks recent versions and can be bumped on reset. Confirming version-dependent behavior on demo does
-not guarantee the same on the real instance if it runs a different version.
+**Note**: demo tracks recent versions and can be bumped on reset. Version-dependent behavior is confirmed on demo
+only; it is not verified on the real instance, which is never used for checks. Re-measure on the demo when its
+version changes.
 
 ---
 

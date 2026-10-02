@@ -50,7 +50,11 @@ class FakeClient:
         self.calls.append("patch")
         self.saved_payload = payload
         self.remote_doc.update(payload)
-        return {}
+        # The body PATCH answers with the stored entity (it replaced the re-GET),
+        # so it takes the next queued remote form.
+        if "body" in payload and self.gets:
+            return self.gets.pop(0)
+        return dict(self.remote_doc)
 
     def add_tag(self, entity, eid, tag):
         self.calls.append(f"tag:{tag}")
