@@ -11,7 +11,7 @@
 Python 3.10 以上が必要です。`uv` ツールとしてインストールすると `elport` コマンドが利用可能になります:
 
 ```sh
-uv tool install git+https://github.com/youthesame/elport
+uv tool install elport    # 更新は uv tool upgrade elport
 ```
 
 ## コンセプト
@@ -52,10 +52,11 @@ elport push                             # 参照ファイルをアップロー�
 | `fetch` | 参照の有無にかかわらず、添付ファイルをすべてダウンロードします。読み取り専用。 |
 | `status` | 同期予定の内容と動作モードを表示します。読み取り専用。 |
 | `diff` | ローカルとリモートの差分。`--base` で直近 push 時との差分。 |
-| `merge` | 競合後、`.base.md` と `.remote.md` を `<doc>` に 3 方向マージします。 |
+| `merge` | 競合後、`.base.md` と `.remote.md` を `<doc>` に 3 方向マージします。`git` が必要です。 |
 
 `push` は `id` が未設定の場合にノートを新規作成し、`id` をフロントマターへ書き戻します。実行前にモード検証と
-競合チェックを行います。`merge` はローカル完結で `git merge-file` を呼び出すため、git リポジトリ化は任意です。
+競合チェックを行います。`merge` はローカル完結で `git merge-file` を呼び出すため `git` のインストールが必要ですが、
+フォルダを git リポジトリにする必要はありません。
 
 ### ノート操作
 
@@ -219,7 +220,8 @@ elport は次の 3 つを順に確認し、最初に見つかったものを使�
 | `browse.py` | list と view |
 
 **テストが動作仕様の唯一の権威であるため、仕様を変更する際は必ずテストから先に更新してください。** 実際の API
-挙動は公開デモ環境 <https://demo.elabftw.net> で確認できます。
+挙動は公開デモ環境 <https://demo.elabftw.net> で確認できます。リリースは `vX.Y.Z` タグを push するだけで、CI
+がテスト・ビルドし PyPI へ公開します。
 
 ## 謝辞
 
