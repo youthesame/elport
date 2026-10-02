@@ -20,7 +20,6 @@ elport = "elport.cli:main"
 
 [project.urls]
 Repository = "https://github.com/youthesame/elport"
-Issues = "https://github.com/youthesame/elport/issues"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

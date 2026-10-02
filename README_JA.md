@@ -11,7 +11,7 @@
 Python 3.10 以上が必要です。`uv` ツールとしてインストールすると `elport` コマンドが利用可能になります:
 
 ```sh
-uv tool install elport    # 更新は uv tool upgrade elport
+uv tool install elport    # 更新: uv tool upgrade elport
 ```
 
 ## コンセプト
@@ -220,8 +220,7 @@ elport は次の 3 つを順に確認し、最初に見つかったものを使�
 | `browse.py` | list と view |
 
 **テストが動作仕様の唯一の権威であるため、仕様を変更する際は必ずテストから先に更新してください。** 実際の API
-挙動は公開デモ環境 <https://demo.elabftw.net> で確認できます。リリースは `vX.Y.Z` タグを push するだけで、CI
-がテスト・ビルドし PyPI へ公開します。
+挙動は公開デモ環境 <https://demo.elabftw.net> で確認できます。
 
 ## 謝辞
 

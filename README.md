@@ -10,7 +10,7 @@ along with every figure and data file the body references, to eLabFTW entities. 
 Python 3.10+, installed as a `uv` tool (provides the `elport` command):
 
 ```sh
-uv tool install elport    # upgrade later with: uv tool upgrade elport
+uv tool install elport    # upgrade: uv tool upgrade elport
 ```
 
 ## The core idea
@@ -209,8 +209,7 @@ pattern is anchored at its own directory.
 | `browse.py` | list and view |
 
 **The tests are the authoritative behavioral contract, so change tests first.** You can check live API behavior
-against <https://demo.elabftw.net>. To release, push a `vX.Y.Z` tag: CI tests the commit, builds it, and publishes
-it to PyPI.
+against <https://demo.elabftw.net>.
 
 ## Acknowledgments
 
