@@ -109,3 +109,108 @@ def test_fetch_leaves_identical_local_file_untouched(tmp_path, configured, capsy
     assert (tmp_path / "raw_data.csv").read_bytes() == b"data"
     assert not (tmp_path / "raw_data.csv.remote").exists()
     assert "conflicts written to" not in capsys.readouterr().out
+
+
+def test_fetch_skips_download_when_local_file_matches_server_hash(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    (tmp_path / "raw_data.csv").write_bytes(b"data")
+    client = FakeClient(uploads=[_upload(3, "raw_data.csv")])
+
+    sync.fetch(doc, client, {})
+
+    assert client.calls == ["uploads"]
+
+
+@pytest.mark.parametrize(
+    "hash_fields",
+    [
+        {},
+        {"hash": hashlib.md5(b"data").hexdigest(), "hash_algorithm": "md5"},
+        {"hash": hashlib.sha256(b"data").hexdigest()},
+        {"hash": "not-a-sha256-digest", "hash_algorithm": "sha256"},
+    ],
+)
+def test_fetch_downloads_when_server_hash_is_unknown(hash_fields, tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    (tmp_path / "raw_data.csv").write_bytes(b"data")
+    upload = {k: v for k, v in _upload(3, "raw_data.csv").items() if "hash" not in k}
+    client = FakeClient(uploads=[{**upload, **hash_fields}])
+
+    sync.fetch(doc, client, {})
+
+    assert client.calls == ["uploads", "download"]
+
+
+def test_fetch_downloads_when_local_file_differs_from_server_hash(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    (tmp_path / "raw_data.csv").write_bytes(b"local-different")
+    client = FakeClient(uploads=[_upload(3, "raw_data.csv")])
+
+    sync.fetch(doc, client, {})
+
+    assert client.calls == ["uploads", "download"]
+    assert (tmp_path / "raw_data.csv.remote").read_bytes() == b"data"
+
+
+def test_fetch_rejects_symlink_even_when_its_content_matches(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    (tmp_path / "linked.csv").write_bytes(b"data")
+    (tmp_path / "raw_data.csv").symlink_to(tmp_path / "linked.csv")
+    client = FakeClient(uploads=[_upload(3, "raw_data.csv")])
+
+    with pytest.raises(RuntimeError, match="unsafe attachment destination"):
+        sync.fetch(doc, client, {})
+
+    assert "download" not in client.calls
+
+
+def test_fetch_same_name_collision_is_rejected_even_when_one_matches_local(
+    tmp_path, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    (tmp_path / "raw_data.csv").write_bytes(b"data")
+    client = FakeClient(
+        uploads=[
+            _upload(3, "raw_data.csv"),
+            _upload(4, "Raw_Data.csv", b"other"),
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="basename collision"):
+        sync.fetch(doc, client, {})
+
+
+def test_fetch_matching_local_file_leaves_stale_conflict_copy_alone(
+    tmp_path, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    (tmp_path / "raw_data.csv").write_bytes(b"data")
+    (tmp_path / "raw_data.csv.remote").write_bytes(b"older remote")
+    client = FakeClient(uploads=[_upload(3, "raw_data.csv")])
+
+    sync.fetch(doc, client, {})
+
+    assert client.calls == ["uploads"]
+    assert (tmp_path / "raw_data.csv.remote").read_bytes() == b"older remote"
+    assert "conflicts written to" not in capsys.readouterr().out
+
+
+def test_fetch_identical_conflict_copy_does_not_hide_a_differing_local_file(
+    tmp_path, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    (tmp_path / "raw_data.csv").write_bytes(b"local-different")
+    (tmp_path / "raw_data.csv.remote").write_bytes(b"data")
+    client = FakeClient(uploads=[_upload(3, "raw_data.csv")])
+
+    sync.fetch(doc, client, {})
+
+    assert client.calls == ["uploads", "download"]
+    assert "conflicts written to: raw_data.csv.remote" in capsys.readouterr().out
