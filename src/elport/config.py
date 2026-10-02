@@ -16,7 +16,9 @@ from keyring.errors import KeyringError
 
 from .transclude import IgnoreLayer
 
-PLAINTEXT_WARNING = "warning: using plaintext api_key (chmod 600 recommended)"
+PLAINTEXT_WARNING = (
+    "note: no OS keyring; api_key stored in ~/.config/elport/config.toml (mode 600)"
+)
 
 
 def config_path() -> Path:
