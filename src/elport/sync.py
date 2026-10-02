@@ -92,8 +92,8 @@ def _sha256(path: Path) -> str:
 def _remote_sha256(upload: dict) -> str | None:
     if str(upload.get("hash_algorithm", "")).lower() != "sha256":
         return None
-    value = upload.get("hash") or upload.get("sha256")
-    return str(value).lower() if value else None
+    value = str(upload.get("hash") or upload.get("sha256") or "").lower()
+    return value if re.fullmatch(r"[0-9a-f]{64}", value) else None
 
 
 def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
@@ -897,6 +897,9 @@ def _place_attachments(
             continue
         target = path.parent / name
         _validate_attachment_target(target, path.parent)
+        digest = _remote_sha256(upload)
+        if digest and target.is_file() and _sha256(target) == digest:
+            continue  # already in place; the download would change nothing
         data = prefetched if prefetched is not None else remote.download(upload["id"])
         _validate_attachment_target(target, path.parent)
         try:

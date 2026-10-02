@@ -1068,3 +1068,37 @@ def test_pull_keeps_category_id_when_its_title_is_numeric(
     sync.pull(doc, client, {})
 
     assert frontmatter.parse(doc.read_text())[0]["category"] == 16
+
+
+def test_pull_skips_matching_attachment_and_saves_the_same_state(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    (tmp_path / "data.csv").write_bytes(b"data")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "data.csv",
+        "storage": 1,
+        "hash": hashlib.sha256(b"data").hexdigest(),
+        "hash_algorithm": "sha256",
+    }
+    remote_body = f"[file]({sync.download_url('https://e.example', upload)})"
+    client = FakeClient(gets=[{"body": remote_body}], uploads=[upload])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    saved = []
+    monkeypatch.setattr(sync.state, "save", lambda *args: saved.append(args[3]))
+
+    sync.pull(doc, client, {})
+
+    assert client.calls == ["me", "get", "uploads"]
+    assert frontmatter.parse(doc.read_text())[1] == "[file](data.csv)"
+    assert saved == [
+        {
+            "remote_base": remote_body,
+            "local_base": "[file](data.csv)",
+            "meta_base": {},
+            "team": 7,
+        }
+    ]
