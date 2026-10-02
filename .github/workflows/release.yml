@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # hatch-vcs derives the version from tags.
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - run: uv build
+
+      - name: Check the wheel's version matches the tag
+        run: test "$(uvx --from dist/*.whl elport --version)" = "elport ${GITHUB_REF_NAME#v}"
+
+      - run: uv publish --trusted-publishing always

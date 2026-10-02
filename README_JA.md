@@ -11,7 +11,7 @@
 Python 3.10 以上が必要です。`uv` ツールとしてインストールすると `elport` コマンドが利用可能になります:
 
 ```sh
-uv tool install git+https://github.com/youthesame/elport
+uv tool install elport    # 更新: uv tool upgrade elport
 ```
 
 ## コンセプト
@@ -52,10 +52,11 @@ elport push                             # 参照ファイルをアップロー�
 | `fetch` | 参照の有無にかかわらず、添付ファイルをすべてダウンロードします。読み取り専用。 |
 | `status` | 同期予定の内容と動作モードを表示します。読み取り専用。 |
 | `diff` | ローカルとリモートの差分。`--base` で直近 push 時との差分。 |
-| `merge` | 競合後、`.base.md` と `.remote.md` を `<doc>` に 3 方向マージします。 |
+| `merge` | 競合後、`.base.md` と `.remote.md` を `<doc>` に 3 方向マージします。`git` が必要です。 |
 
 `push` は `id` が未設定の場合にノートを新規作成し、`id` をフロントマターへ書き戻します。実行前にモード検証と
-競合チェックを行います。`merge` はローカル完結で `git merge-file` を呼び出すため、git リポジトリ化は任意です。
+競合チェックを行います。`merge` はローカル完結で `git merge-file` を呼び出すため `git` のインストールが必要ですが、
+フォルダを git リポジトリにする必要はありません。
 
 ### ノート操作
 

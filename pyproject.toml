@@ -3,6 +3,7 @@ name = "elport"
 # Version comes from the latest git tag (hatch-vcs). Don't set it here; release by tagging.
 dynamic = ["version"]
 description = "Git-like sync CLI for eLabFTW (local-first push/pull of Markdown/HTML lab notes)"
+readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -16,6 +17,9 @@ dependencies = [
 
 [project.scripts]
 elport = "elport.cli:main"
+
+[project.urls]
+Repository = "https://github.com/youthesame/elport"
 
 [build-system]
 requires = ["hatchling", "hatch-vcs"]

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # release.yml gates publishing on these checks.
 
 # Cancel superseded runs on the same ref.
 concurrency:
@@ -27,7 +28,7 @@ jobs:
 
       # setup-uv stopped publishing major tags at v8; pin the full version.
       # Caching defaults to `auto`, which is what we want here.
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@v10.2.0
         with:
           python-version: ${{ matrix.python-version }}
 

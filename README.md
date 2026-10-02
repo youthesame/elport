@@ -1,6 +1,6 @@
 # elport: a git-like sync CLI for eLabFTW
 
-[English](README.md) | [日本語](README_JA.md)
+[English](https://github.com/youthesame/elport/blob/main/README.md) | [日本語](https://github.com/youthesame/elport/blob/main/README_JA.md)
 
 Write lab notes locally in Markdown, with inline HTML like `<figure>` where you want it. Then `push`/`pull` them,
 along with every figure and data file the body references, to eLabFTW entities. **Local is the source of truth.**
@@ -10,7 +10,7 @@ along with every figure and data file the body references, to eLabFTW entities. 
 Python 3.10+, installed as a `uv` tool (provides the `elport` command):
 
 ```sh
-uv tool install git+https://github.com/youthesame/elport
+uv tool install elport    # upgrade: uv tool upgrade elport
 ```
 
 ## The core idea
@@ -47,10 +47,11 @@ Exit code `0` on success, `1` on failure. Run `elport <command> --help` for the 
 | `fetch` | Download every attachment, referenced or not. Read-only. |
 | `status` | Report what would sync, and in which mode. Read-only. |
 | `diff` | Diff local against remote, or against the last push with `--base`. |
-| `merge` | Merge `.base.md` and `.remote.md` into `<doc>` after a conflict. |
+| `merge` | Merge `.base.md` and `.remote.md` into `<doc>` after a conflict. Requires `git`. |
 
 `push` creates the entity and writes `id` back to the front matter when `id` is unset, and it runs the mode and
-conflict checks first. `merge` is local-only and shells out to `git merge-file`, with git itself optional.
+conflict checks first. `merge` is local-only: it runs `git merge-file`, so `git` must be installed, but the folder
+need not be a git repository.
 
 ### Entities
 
@@ -189,10 +190,10 @@ pattern is anchored at its own directory.
 
 ## Learn more
 
-- **Why it works this way** → [docs/DESIGN.md](docs/DESIGN.md)
-- **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
+- **Why it works this way** → [docs/DESIGN.md](https://github.com/youthesame/elport/blob/main/docs/DESIGN.md)
+- **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](https://github.com/youthesame/elport/blob/main/docs/ELABFTW-API.md)
 - **The behavioral contract** → the test suite (`tests/`) is authoritative
-- **Driving elport from an AI agent** → [skills/elport/SKILL.md](skills/elport/SKILL.md)
+- **Driving elport from an AI agent** → [skills/elport/SKILL.md](https://github.com/youthesame/elport/blob/main/skills/elport/SKILL.md)
 
 ## Development
 
