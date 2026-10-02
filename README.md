@@ -13,6 +13,12 @@ Python 3.10+, installed as a `uv` tool (provides the `elport` command):
 uv tool install elport    # upgrade: uv tool upgrade elport
 ```
 
+Or with pip:
+
+```sh
+pip install elport        # upgrade: pip install -U elport
+```
+
 ## The core idea
 
 One local file maps to one eLabFTW entry: Markdown with a YAML front matter block, inline HTML allowed.
