@@ -1158,3 +1158,75 @@ def test_resumed_create_warns_when_it_overwrites_a_nonempty_remote(
     sync.push(doc, client, {})
 
     assert "resuming an interrupted creation" in capsys.readouterr().err
+
+
+class _IdOnlyUploadClient(FakeClient):
+    """Like eLabFTW: the upload POST answers with an id only."""
+
+    def __init__(self, listed=True, **kwargs):
+        super().__init__(**kwargs)
+        self.listed = listed
+
+    def upload(self, entity, eid, path):
+        self.calls.append("upload")
+        uid = 100 + len(self.upload_list)
+        if self.listed:
+            self.upload_list.append(
+                {
+                    "id": uid,
+                    "long_name": f"aa/{uid}",
+                    "real_name": path.name,
+                    "storage": 1,
+                }
+            )
+        return {"id": uid}
+
+
+def test_id_only_upload_responses_are_completed_with_one_listing(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    for name in ("a.csv", "b.csv", "c.csv"):
+        (tmp_path / name).write_text(name)
+    write_doc(doc, "[a](a.csv) [b](b.csv) [c](c.csv)")
+    client = _IdOnlyUploadClient(
+        gets=[
+            {"body": "remote"},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.calls == [
+        "me",
+        "get",
+        "uploads",
+        "upload",
+        "upload",
+        "upload",
+        "uploads",
+        "get",
+        "patch",
+    ]
+    urls = [sync.download_url("https://e.example", u) for u in client.upload_list]
+    assert client.saved_payload is not None
+    assert client.saved_payload["body"] == "[a]({}) [b]({}) [c]({})".format(*urls)
+
+
+def test_upload_missing_from_the_listing_stops_before_the_body_patch(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "a.csv").write_text("a")
+    write_doc(doc, "[a](a.csv)")
+    client = _IdOnlyUploadClient(listed=False, gets=[{"body": "remote"}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    with pytest.raises(RuntimeError, match="metadata could not be retrieved"):
+        sync.push(doc, client, {})
+
+    assert "patch" not in client.calls

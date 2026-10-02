@@ -114,15 +114,23 @@ def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
     return None
 
 
-def _complete_upload(remote: Remote, uploaded: dict) -> dict:
-    if all(key in uploaded for key in ("long_name", "real_name", "storage")):
+def _complete_uploads(remote: Remote, uploaded: dict[Path, dict]) -> dict[Path, dict]:
+    """eLabFTW answers an upload with an id only; one listing fills them all in."""
+
+    def complete(upload: dict) -> bool:
+        return all(key in upload for key in ("long_name", "real_name", "storage"))
+
+    if all(complete(upload) for upload in uploaded.values()):
         return uploaded
-    upload_id = str(uploaded.get("id", ""))
-    refreshed = remote.uploads()
-    match = next((u for u in refreshed if str(u.get("id", "")) == upload_id), None)
-    if match is None:
-        raise RuntimeError("uploaded file metadata could not be retrieved")
-    return match
+    listed = {str(upload.get("id", "")): upload for upload in remote.uploads()}
+    result = {}
+    for path, upload in uploaded.items():
+        if not complete(upload):
+            upload = listed.get(str(upload.get("id", "")))
+            if upload is None:
+                raise RuntimeError("uploaded file metadata could not be retrieved")
+        result[path] = upload
+    return result
 
 
 def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
@@ -546,13 +554,15 @@ def push(
     if narrowing:
         remote.patch(narrowing)
 
-    urls: dict[Path, str] = {}
-    for file_path in files:
-        upload = reused[file_path]
-        if upload is None:
-            upload = _complete_upload(remote, remote.upload(file_path))
-            uploads.append(upload)
-        urls[file_path] = download_url(remote.base_url, upload)
+    uploaded = _complete_uploads(
+        remote, {file_path: remote.upload(file_path) for file_path in new_uploads}
+    )
+    urls = {
+        file_path: download_url(
+            remote.base_url, reused[file_path] or uploaded[file_path]
+        )
+        for file_path in files
+    }
 
     sent = replace_spans(body, refs, urls)
     payload = {"body": sent, "content_type": 2}
