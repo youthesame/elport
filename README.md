@@ -168,7 +168,7 @@ elport checks three sources, in order, and stops at the first hit.
 
 1. `ELABFTW_BASE_URL` + `ELABFTW_API_KEY` in the environment. This is how CI authenticates.
 2. The keyring and config pair from `elport login`. The normal default.
-3. A plaintext key in the config. A last resort, used with a warning, and only when no keyring backend exists.
+3. A plaintext key in `~/.config/elport/config.toml`. A last resort, used with a warning, and only when no keyring backend exists (e.g. WSL, headless servers).
 
 ### Profiles
 
