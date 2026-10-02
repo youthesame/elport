@@ -125,7 +125,6 @@ def test_push_order_includes_post_upload_recheck(
         "upload",
         "get",
         "patch",
-        "get",
         "save",
     ]
     assert capsys.readouterr().out == (
@@ -797,7 +796,49 @@ def test_dry_run_previews_declared_status_without_mutation(
     sync.push(doc, client, {}, dry_run=True)
 
     assert "status: Running\n" in capsys.readouterr().out
-    assert client.calls == ["me", "statuses", "get", "uploads"]
+    assert client.calls == ["me", "statuses", "get"]
+
+
+def test_push_without_referenced_files_skips_upload_listing(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(
+        gets=[
+            {"body": "remote"},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: client.calls.append("save"))
+
+    sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get", "get", "patch", "save"]
+
+
+def test_remote_base_is_the_patch_response_not_a_later_get(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(
+        gets=[
+            {"body": "remote"},
+            {"body": "remote"},
+            {"body": "stored", "content_type": 2},
+            {"body": "web edit after push", "content_type": 2},
+        ]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    saved = []
+    monkeypatch.setattr(sync.state, "save", lambda *args: saved.append(args[3]))
+
+    sync.push(doc, client, {})
+
+    assert saved[0]["remote_base"] == "stored"
 
 
 def test_content_type_must_be_exactly_markdown(tmp_path, monkeypatch, configured):
@@ -944,7 +985,6 @@ def test_new_push_resumes_after_failure_without_force(
         def __init__(self):
             super().__init__(remote_doc={"body": ""})
             self.creates = 0
-            self.patched = False
             self.broken = True
 
         def create(self, entity, title):
@@ -962,13 +1002,10 @@ def test_new_push_resumes_after_failure_without_force(
 
         def patch(self, entity, eid, payload):
             self._break("patch")
-            self.patched = True
-            return super().patch(entity, eid, payload)
-
-        def get(self, entity, eid):
-            if self.patched:
-                self._break("verify")
-            return super().get(entity, eid)
+            stored = super().patch(entity, eid, payload)
+            # Applied server-side, but the response (the stored form) is lost.
+            self._break("verify")
+            return stored
 
     doc = tmp_path / "report.md"
     (tmp_path / "data.csv").write_text("x", encoding="utf-8")

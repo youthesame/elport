@@ -491,7 +491,7 @@ def push(
         if eid is not None:
             _warn_permission_narrowing(path, permission_changes, remote_doc)
 
-    uploads = remote.uploads() if remote is not None else []
+    uploads = remote.uploads() if remote is not None and files else []
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
     if dry_run:
@@ -585,8 +585,7 @@ def push(
 
     if pending_create:
         mark_created(base_url, entity, eid, identity.get("team"), body_sent=True)
-    remote.patch(payload)
-    stored = remote.get()
+    stored = remote.patch(payload)
     if stored.get("content_type") != 2:
         raise RuntimeError("remote entity is not in markdown mode")
 

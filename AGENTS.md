@@ -15,7 +15,7 @@ files) to/from eLabFTW entities. **Local is the source of truth.**
   Decisions made *after* those design sessions live in **[docs/adr/](docs/adr/)** and take precedence over DESIGN
   where they overlap; DESIGN is not edited to match, it only gains a pointer.
 - **Measured eLabFTW API facts = [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** (observation log of the external
-  world; update only when the target instance version changes).
+  world; update only when the demo's version changes).
 - **User-facing usage = [README.md](README.md)** (commands, front matter, config).
 - **Driving elport from an agent = [skills/elport/SKILL.md](skills/elport/SKILL.md)** (for the downstream operating
   context).
@@ -28,7 +28,8 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
 - **Local is authoritative.** push is a full-body overwrite with conflict detection. Do not silently add two-way
   auto-sync.
 - push transclusion runs on the **outgoing copy** and **never rewrites the local original**.
-- **base is two-form**: remote-base (the body re-`GET`'d after a successful push, not the sent bytes) and local-base
+- **base is two-form**: remote-base (the stored body returned by the push `PATCH`, not the sent bytes;
+  [ADR-0002](docs/adr/0002-remote-base-from-the-patch-response.md)) and local-base
   (the local original at push/pull time). **Always compare same-form** (remote↔remote-base, local↔local-base). With
   only one form, server normalization (non-convergent) yields a false conflict / permanent-dirty every time. See
   the "Body normalization" section of ELABFTW-API.
@@ -60,6 +61,6 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
 - The core engine (reference scan/replace, path safety, reverse transclusion) and the sync semantics are
   unit-tested **without network** (the API layer is mocked). These tests are the authority for behavior, so
   **changes go test-first.**
-- When live API behavior needs confirming, use the **public demo <https://demo.elabftw.net>** (public, periodically
-  reset, disposable). Confirm version-dependent behavior on the real target instance too (see the version-specific
-  section of ELABFTW-API.md).
+- When live API behavior needs confirming, use **only the public demo <https://demo.elabftw.net>** (public,
+  periodically reset, disposable). Never use any other instance. Record the demo version a fact was measured on;
+  version-dependent behavior is confirmed on the demo's current version only.

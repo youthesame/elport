@@ -13,18 +13,28 @@ def _entity_path(entity: str, eid: object, suffix: str = "") -> str:
     return f"/{entity}/{validate_id(eid)}{suffix}"
 
 
+def _normalized(entity: dict) -> dict:
+    # eLabFTW returns null for an empty body; normalize at the API boundary.
+    if entity.get("body") is None:
+        entity["body"] = ""
+    return entity
+
+
 class Client:
     def __init__(self, base_url: str, api_key: str, verify_ssl: bool = True):
         self.base = base_url.rstrip("/") + "/api/v2"
         self.root = base_url.rstrip("/")
         self.key = api_key
         self.verify = verify_ssl
+        # One connection for the whole command: each fresh TCP+TLS handshake costs
+        # about as much as the request itself.
+        self.session = requests.Session()
 
     def request(self, method, path, **kwargs):
         headers = kwargs.pop("headers", {})
         headers["Authorization"] = self.key
         try:
-            r = requests.request(
+            r = self.session.request(
                 method,
                 self.base + path,
                 headers=headers,
@@ -48,11 +58,7 @@ class Client:
         return self.request("GET", "/apikeys").json()
 
     def get(self, entity, eid):
-        data = self.request("GET", _entity_path(entity, eid)).json()
-        # eLabFTW returns null for an empty body; normalize at the API boundary.
-        if data.get("body") is None:
-            data["body"] = ""
-        return data
+        return _normalized(self.request("GET", _entity_path(entity, eid)).json())
 
     def create(self, entity, title):
         r = self.request(
@@ -67,9 +73,10 @@ class Client:
         return result
 
     def patch(self, entity, eid, payload):
+        """Return the stored entity, which eLabFTW sends back on PATCH."""
         response = self.request("PATCH", _entity_path(entity, eid), json=payload)
         try:
-            return response.json()
+            return _normalized(response.json())
         except ValueError:
             return {}
 

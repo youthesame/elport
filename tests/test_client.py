@@ -44,14 +44,44 @@ def test_get_normalizes_null_body(monkeypatch):
     assert client.get("experiments", 1)["body"] == ""
 
 
+def test_patch_returns_stored_entity_with_null_body_normalized(monkeypatch):
+    client = Client("https://example.org", "key")
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: _Response({"body": None, "content_type": 2}),
+    )
+    assert client.patch("experiments", 1, {"body": ""}) == {
+        "body": "",
+        "content_type": 2,
+    }
+
+
+def test_requests_reuse_one_session(monkeypatch):
+    sessions = []
+
+    def request(self, *args, **kwargs):
+        sessions.append(self)
+        return _Response({})
+
+    monkeypatch.setattr("elport.client.requests.Session.request", request)
+    client = Client("https://example.org", "key")
+
+    client.request("GET", "/users/me")
+    client.request("GET", "/info")
+
+    assert len(sessions) == 2
+    assert sessions[0] is sessions[1]
+
+
 def test_request_uses_bounded_timeout(monkeypatch):
     captured = {}
 
-    def request(*args, **kwargs):
+    def request(self, *args, **kwargs):
         captured.update(kwargs)
         return _Response({})
 
-    monkeypatch.setattr("elport.client.requests.request", request)
+    monkeypatch.setattr("elport.client.requests.Session.request", request)
 
     Client("https://example.org", "key").request("GET", "/users/me")
 
@@ -59,10 +89,10 @@ def test_request_uses_bounded_timeout(monkeypatch):
 
 
 def test_request_reports_connection_failure_without_internal_details(monkeypatch):
-    def request(*args, **kwargs):
+    def request(self, *args, **kwargs):
         raise requests.exceptions.ConnectionError("boom")
 
-    monkeypatch.setattr("elport.client.requests.request", request)
+    monkeypatch.setattr("elport.client.requests.Session.request", request)
 
     with pytest.raises(OSError) as error:
         Client("https://example.org", "key").request("GET", "/users/me")
