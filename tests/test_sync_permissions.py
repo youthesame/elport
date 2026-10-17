@@ -402,6 +402,7 @@ def test_permission_widening_interactive_yes_applies_once(
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
     monkeypatch.setattr(sync.state, "save", lambda *args: None)
     monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sync.sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(
         "builtins.input", lambda prompt: prompts.append(prompt) or "YES"
     )
@@ -427,6 +428,7 @@ def test_permission_widening_interactive_no_stops_before_uploads(
     client = FakeClient(remote_doc={"body": "remote", "canread_base": 30})
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
     monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sync.sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda prompt: "n")
     monkeypatch.setattr(
         sync,

@@ -21,6 +21,10 @@ def require_https(base_url: str) -> None:
         raise ValueError(f"base_url must start with https://: {base_url}")
 
 
+class NotFoundError(RuntimeError):
+    pass
+
+
 def _normalized(entity: dict) -> dict:
     # eLabFTW returns null for an empty body; normalize at the API boundary.
     if entity.get("body") is None:
@@ -54,7 +58,8 @@ class Client:
         except requests.exceptions.RequestException as exc:
             raise OSError(f"could not reach {self.root} (connection failed)") from exc
         if not r.ok:
-            raise RuntimeError(f"API {r.status_code}: {r.text[:300]}")
+            error = NotFoundError if r.status_code == 404 else RuntimeError
+            raise error(f"API {r.status_code}: {r.text[:300]}")
         return r
 
     def me(self):
@@ -114,6 +119,16 @@ class Client:
 
     def add_tag(self, entity, eid, tag):
         self.request("POST", _entity_path(entity, eid, "/tags"), json={"tag": tag})
+
+    def add_link(self, entity, eid, target_entity, target_id):
+        # eLabFTW answers 400 without a JSON content type, even for no body.
+        self.request(
+            "POST",
+            _entity_path(
+                entity, eid, f"/{target_entity}_links/{validate_id(target_id)}"
+            ),
+            json={},
+        )
 
     def add_comment(self, entity, eid, text):
         self.request(

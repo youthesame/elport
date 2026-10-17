@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from _sync_harness import FakeClient, saved_state, write_doc
+from _sync_harness import FakeClient, LinkClient, Store, saved_state, write_doc
 
 from elport import sync
 
@@ -231,3 +231,50 @@ def test_status_does_not_warn_when_reference_matches_this_entity(
     sync.status(doc, client, {})
 
     assert "kept as a URL" not in capsys.readouterr().err
+
+
+def test_status_shows_a_lock(tmp_path, monkeypatch, configured, capsys):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "same")
+    Store(monkeypatch, {"1": saved_state(local="same", remote="same")})
+    client = LinkClient(gets=[{"body": "same", "content_type": 2, "locked": 1}])
+
+    summary = sync.status(doc, client, {})
+
+    assert (
+        "lock: locked (push refused; unlock in the Web UI)" in capsys.readouterr().out
+    )
+    assert summary == "locked"
+
+
+def test_status_reports_a_remote_that_is_gone(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "same")
+    Store(monkeypatch, {"1": saved_state(local="same", remote="same")})
+    client = LinkClient()
+
+    def missing(entity, eid):
+        raise sync.NotFoundError("API 404: not found")
+
+    client.get = missing
+    client.uploads = missing
+
+    assert sync.status(doc, client, {}) == "remote missing"
+    assert "remote: missing (deleted on the server?)" in capsys.readouterr().out
+    assert doc.exists()
+
+
+def test_status_summary_names_pending_uploads_and_permissions(
+    tmp_path, monkeypatch, configured
+):
+    (tmp_path / "fig.png").write_bytes(b"png")
+    doc = tmp_path / "report.md"
+    write_doc(doc, "![f](fig.png)", read="team")
+    Store(monkeypatch, {"1": saved_state(local="![f](fig.png)", remote="same")})
+    client = LinkClient(gets=[{"body": "same", "content_type": 2, "canread_base": 10}])
+
+    summary = sync.status(doc, client, {})
+
+    assert summary == "1 new upload(s), permissions differ"

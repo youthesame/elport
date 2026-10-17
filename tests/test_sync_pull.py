@@ -4,7 +4,15 @@ import hashlib
 import shlex
 
 import pytest
-from _sync_harness import FakeClient, saved_state, write_doc
+from _sync_harness import (
+    EXP12,
+    FakeClient,
+    LinkClient,
+    Store,
+    elport_doc,
+    saved_state,
+    write_doc,
+)
 
 from elport import frontmatter, sync
 
@@ -1106,5 +1114,72 @@ def test_pull_skips_matching_attachment_and_saves_the_same_state(
             "local_base": "[file](data.csv)",
             "meta_base": {},
             "team": 7,
+            "path": str(doc.resolve()),
         }
     ]
+
+
+def test_pull_turns_recorded_entity_urls_back_into_paths(
+    tmp_path, monkeypatch, configured
+):
+    doc = elport_doc(
+        tmp_path / "exp13" / "report.md", "[prev](../exp12/report.md)", id=13
+    )
+    store = Store(
+        monkeypatch,
+        {
+            "13": {
+                **saved_state(local="[prev](../exp12/report.md)", remote="old"),
+                "doc_links": {EXP12: {"markdown": "../exp12/report.md"}},
+                "links": [["experiments", 12]],
+            }
+        },
+    )
+    remote = (
+        f"edited [prev]({EXP12.replace('&', '&amp;')}) "
+        "[web](https://e.example/experiments.php?mode=view&id=99)"
+    )
+    client = LinkClient(gets=[{"body": remote}])
+
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[1] == (
+        "edited [prev](../exp12/report.md) "
+        "[web](https://e.example/experiments.php?mode=view&id=99)"
+    )
+    saved = store.data["13"]
+    assert saved["doc_links"] == {EXP12: {"markdown": "../exp12/report.md"}}
+    assert saved["links"] == [["experiments", 12]]
+    assert saved["path"] == str(doc.resolve())
+
+
+def test_pull_reports_up_to_date_when_the_remote_is_unchanged(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "same")
+    Store(monkeypatch, {"1": saved_state(local="same", remote="same")})
+
+    assert sync.pull(doc, LinkClient(gets=[{"body": "same"}]), {}) == "up to date"
+
+
+def test_diff_compares_against_the_paths_push_wrote(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = elport_doc(
+        tmp_path / "exp13" / "report.md", "[prev](../exp12/report.md)\n", id=13
+    )
+    Store(
+        monkeypatch,
+        {
+            "13": {
+                **saved_state(),
+                "doc_links": {EXP12: {"markdown": "../exp12/report.md"}},
+            }
+        },
+    )
+    client = LinkClient(gets=[{"body": f"[prev]({EXP12})\n"}])
+
+    sync.diff(doc, client, {})
+
+    assert capsys.readouterr().out == ""
