@@ -10,6 +10,8 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from . import frontmatter
+
 _ANGLE_DESTINATION = re.compile(
     r"!?(?<!\\)(?:\[[^\]]*\])\(\s*(<([^<>\n]*)>)\s*"
     r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))?\)"""
@@ -31,6 +33,7 @@ class Reference:
     file: Path | None = None
     fragment: str = ""
     kind: str = "markdown"  # "markdown" (bare), "angle", or "html"
+    doc: Path | None = None  # set for a link to another elport document
 
 
 def _masked(text: str) -> str:
@@ -351,6 +354,41 @@ def _candidate(
     return p, False, fragment
 
 
+def _linked_document(doc_dir: Path, value: str) -> tuple[Path, str] | None:
+    """A link to another elport document, which push sends as that entity's URL.
+    Only its front matter is read, so ``..`` may leave the document directory
+    here (never for an attachment); hidden paths stay excluded."""
+    if not value or value.startswith(("#", "/", "\\")) or "?" in value:
+        return None
+    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
+        return None
+    raw, _, fragment = value.partition("#")
+    if any(
+        part.startswith(".") and part not in (".", "..")
+        for part in re.split(r"[\\/]+", raw)
+    ):
+        return None
+    target = (doc_dir / raw).resolve()
+    if not target.is_file():
+        return None
+    # A document is known by its front matter, whatever its name; peek first so
+    # a large data file is never read whole.
+    with target.open("rb") as stream:
+        if stream.read(3) != b"---":
+            return None
+    try:
+        meta = frontmatter.parse(target.read_text(encoding="utf-8"))[0]
+    except (UnicodeDecodeError, ValueError):
+        return None  # not elport's front matter: an ordinary Markdown file
+    if not meta:
+        return None
+    if "id" not in meta or not meta.get("profile"):
+        raise ValueError(
+            f"linked document has no id or profile yet; push it first: {raw}"
+        )
+    return target, f"#{fragment}" if fragment else ""
+
+
 def _warn_reference_definitions(
     text: str, doc_dir: Path, ignore: list[IgnoreLayer]
 ) -> None:
@@ -375,6 +413,10 @@ def plan(
     refs = extract(text)
     names: dict[str, Path] = {}
     for ref in refs:
+        linked = _linked_document(doc_dir, ref.path)
+        if linked is not None:
+            ref.doc, ref.fragment = linked
+            continue
         p, warn, fragment = _candidate(doc_dir, ref.path, ignore)
         if warn:
             print(
@@ -399,10 +441,11 @@ def replace_spans(text: str, refs: list[Reference], urls: dict[Path, str]) -> st
     pieces: list[str] = []
     pos = 0
     for r in refs:
-        if r.file is None or r.file.resolve() not in normalized:
+        target = r.file or r.doc
+        if target is None or target.resolve() not in normalized:
             continue
         pieces.append(text[pos : r.start])
-        pieces.append(normalized[r.file.resolve()] + r.fragment)
+        pieces.append(normalized[target.resolve()] + r.fragment)
         pos = r.end
     pieces.append(text[pos:])
     return "".join(pieces)
@@ -493,6 +536,20 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
     for start, end, name in reversed(replacements):
         result = result[:start] + name + result[end:]
     return result, placed
+
+
+def relink(text: str, doc_links: dict[str, dict[str, str]]) -> str:
+    """Put back the document links push recorded (sent URL → written destination).
+    Any other URL, such as one pasted in the Web UI, stays a URL."""
+    if not doc_links:
+        return text
+    result = text
+    for reference in reversed(extract(text)):
+        family = "html" if reference.kind == "html" else "markdown"
+        written = doc_links.get(html.unescape(reference.path), {}).get(family)
+        if written is not None:
+            result = result[: reference.start] + written + result[reference.end :]
+    return result
 
 
 def unmatched_download_urls(text: str, uploads: list[dict], base_url: str) -> list[str]:

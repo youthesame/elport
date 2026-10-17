@@ -1,7 +1,9 @@
 from pathlib import Path
 
 import pytest
+from _sync_harness import elport_doc
 
+from elport import frontmatter
 from elport.transclude import (
     IgnoreLayer,
     download_url,
@@ -1222,3 +1224,49 @@ def test_reverse_html_attribute_round_trips_through_push_parser(
         (tmp_path / real_name).resolve()
     ]
     assert used == [upload]
+
+
+def test_plan_marks_a_link_to_an_elport_document_outside_the_directory(tmp_path):
+    target = elport_doc(tmp_path / "exp12" / "report.md", id=12)
+    here = tmp_path / "exp13"
+    here.mkdir()
+
+    (ref,) = plan("[prev](../exp12/report.md#method)", here)
+
+    assert ref.doc == target.resolve()
+    assert ref.file is None
+    assert ref.fragment == "#method"
+
+
+def test_plan_uploads_plain_markdown_as_an_attachment(tmp_path):
+    (tmp_path / "notes.md").write_text("# no front matter\n")
+
+    (ref,) = plan("[notes](notes.md)", tmp_path)
+
+    assert ref.doc is None
+    assert ref.file == (tmp_path / "notes.md").resolve()
+
+
+def test_plan_rejects_a_link_to_a_document_that_was_never_pushed(tmp_path):
+    (tmp_path / "draft.md").write_text(frontmatter.render({"title": "Draft"}, "x"))
+
+    with pytest.raises(ValueError, match="no id.*draft.md"):
+        plan("[draft](draft.md)", tmp_path)
+
+
+def test_plan_never_follows_a_hidden_path_to_a_document(tmp_path, capsys):
+    elport_doc(tmp_path / ".private" / "report.md", id=12)
+
+    (ref,) = plan("[x](.private/report.md)", tmp_path)
+
+    assert ref.doc is None and ref.file is None
+
+
+def test_plan_knows_a_document_by_front_matter_not_by_name(tmp_path):
+    target = elport_doc(tmp_path / "prev.markdown", id=12)
+    (tmp_path / "data.bin").write_bytes(b"\x00\xff" * 10)
+
+    doc_ref, data_ref = plan("[p](prev.markdown) [d](data.bin)", tmp_path)
+
+    assert doc_ref.doc == target.resolve() and doc_ref.file is None
+    assert data_ref.doc is None and data_ref.file == (tmp_path / "data.bin").resolve()

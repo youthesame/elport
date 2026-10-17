@@ -110,6 +110,16 @@ def parse(text: str) -> tuple[dict, str]:
     return data, body
 
 
+def document_meta(path: Path) -> dict | None:
+    """Front matter of an elport document (one holding ``id`` and ``profile``,
+    which elport writes itself), or None for any other Markdown."""
+    try:
+        meta = parse(path.read_text(encoding="utf-8"))[0]
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+    return meta if "id" in meta and meta.get("profile") else None
+
+
 def render(meta: dict, body: str) -> str:
     return (
         "---\n"

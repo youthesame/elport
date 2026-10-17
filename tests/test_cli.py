@@ -1,8 +1,12 @@
+import io
 import stat
+import sys
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import keyring.errors
 import pytest
+from _sync_harness import elport_doc
 
 from elport import cli, config, frontmatter, sync
 
@@ -127,7 +131,12 @@ def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch, cap
         "https://e.example",
         "experiments",
         "42",
-        {"remote_base": "server empty\n", "local_base": "", "team": 7},
+        {
+            "remote_base": "server empty\n",
+            "local_base": "",
+            "team": 7,
+            "path": str(output.resolve()),
+        },
     )
     assert capsys.readouterr().out == (
         f"created experiments/42: {output}\n  → https://e.example/experiments/42\n"
@@ -311,7 +320,9 @@ def test_push_missing_document_reports_friendly_error(tmp_path, monkeypatch, cap
     assert "[Errno 2]" not in error
 
 
-def test_status_directory_reports_friendly_error(tmp_path, monkeypatch, capsys):
+def test_status_of_a_directory_without_documents_is_a_friendly_error(
+    tmp_path, monkeypatch, capsys
+):
     document = tmp_path / "report.md"
     document.mkdir()
     monkeypatch.setattr(cli.config, "load", lambda *args: {})
@@ -319,7 +330,7 @@ def test_status_directory_reports_friendly_error(tmp_path, monkeypatch, capsys):
     assert cli.main(["status", str(document)]) == 1
 
     error = capsys.readouterr().err
-    assert f"document not found: {document}" in error
+    assert f"no elport documents under {document}" in error
     assert "[Errno 21]" not in error
     assert "Is a directory" not in error
 
@@ -941,6 +952,7 @@ def test_clone_scaffolds_frontmatter_and_pulls(tmp_path, monkeypatch):
             "write": "owner",
         },
         "team": 7,
+        "path": str(output.resolve()),
     }
 
 
@@ -1157,3 +1169,309 @@ def test_list_command_reports_a_negative_offset_as_a_cli_error(monkeypatch, caps
     assert cli.main(["list", "--offset", "-1"]) == 1
     assert capsys.readouterr().err != ""
     assert client.searches == []
+
+
+# --- discovery -------------------------------------------------------------
+
+
+def test_documents_finds_only_elport_documents(tmp_path):
+    a = elport_doc(tmp_path / "a" / "report.md")
+    b = elport_doc(tmp_path / "b.md", id=2)
+    (tmp_path / "README.md").write_text("# readme\n")
+    (tmp_path / "hugo.md").write_text("---\nlayout: post\n---\nx\n")
+    (tmp_path / "draft.md").write_text(frontmatter.render({"title": "t"}, "x"))
+    (tmp_path / "noprofile.md").write_text(frontmatter.render({"id": 3}, "x"))
+    elport_doc(tmp_path / ".hidden" / "report.md")
+    elport_doc(tmp_path / "a" / "report.remote.md")
+    elport_doc(tmp_path / "a" / "report.base.md")
+
+    found, skipped = cli._documents(tmp_path)
+
+    assert found == [a, b]
+    assert skipped == 4
+
+
+def test_expand_keeps_order_and_drops_duplicates(tmp_path):
+    a = elport_doc(tmp_path / "x" / "a.md")
+    b = elport_doc(tmp_path / "b.md")
+
+    found, skipped = cli._expand([b, tmp_path / "x", a])
+
+    assert found == [b, a]
+    assert skipped == 0
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("CRISPR滴定実験", "42-CRISPR滴定実験"),
+        ('a/b\\c:d*e?f"g<h>i|j', "42-a_b_c_d_e_f_g_h_i_j"),
+        ("..hidden ", "42-hidden"),
+        ("", "42"),
+        ("x" * 80, "42-" + "x" * 50),
+        ("ｶﾞ", "42-ｶﾞ"),
+        ("ガ", "42-ガ"),
+    ],
+)
+def test_directory_name_keeps_unicode_and_replaces_unsafe_characters(title, expected):
+    assert cli._directory_name(42, title) == expected
+
+
+# --- batch commands --------------------------------------------------------
+
+
+@pytest.fixture
+def stub_target(monkeypatch):
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+    monkeypatch.setattr(cli, "_LazyClient", lambda *args: object())
+
+
+def test_push_of_a_directory_prints_one_line_per_document_and_keeps_going(
+    tmp_path, monkeypatch, capsys, stub_target
+):
+    a = elport_doc(tmp_path / "a.md", id=1)
+    b = elport_doc(tmp_path / "b.md", id=2)
+    (tmp_path / "notes.md").write_text("plain\n")
+
+    def fake_push(path, client, data, profile, dry_run, force, yes):
+        if path == b:
+            print("warning: something odd", file=sys.stderr)
+            raise RuntimeError("remote changed; use pull or --force")
+        print("verbose single-document output")
+        return "pushed (body updated)"
+
+    monkeypatch.setattr(cli, "push", fake_push)
+
+    assert cli.main(["push", str(tmp_path)]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out.splitlines() == [
+        f"✓ {a}  experiments/1  pushed (body updated)",
+        f"✗ {b}  experiments/2  remote changed; use pull or --force",
+        "1 done, 1 failed, 1 skipped",
+    ]
+    assert "    warning: something odd" in captured.err
+
+
+def test_pull_batch_marks_unchanged_documents(
+    tmp_path, monkeypatch, capsys, stub_target
+):
+    a = elport_doc(tmp_path / "a.md")
+    monkeypatch.setattr(cli, "pull", lambda *args: "up to date")
+
+    assert cli.main(["pull", str(a), str(a)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"· {a}  experiments/1  up to date",
+        "1 up to date",
+    ]
+
+
+def test_status_batch_marks_documents_with_something_to_sync(
+    tmp_path, monkeypatch, capsys, stub_target
+):
+    a = elport_doc(tmp_path / "a.md", id=1)
+    b = elport_doc(tmp_path / "b.md", id=2)
+    monkeypatch.setattr(
+        cli,
+        "status",
+        lambda path, *args: "up to date" if path == a else "local dirty",
+    )
+
+    assert cli.main(["status", str(tmp_path)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"· {a}  experiments/1  up to date",
+        f"* {b}  experiments/2  local dirty",
+        "1 up to date, 1 to sync",
+    ]
+
+
+def test_diff_batch_prints_each_non_empty_diff_under_a_header(
+    tmp_path, monkeypatch, capsys, stub_target
+):
+    a = elport_doc(tmp_path / "a.md", id=1)
+    elport_doc(tmp_path / "b.md", id=2)
+
+    def fake_diff(path, *args):
+        if path == a:
+            print("-old\n+new")
+
+    monkeypatch.setattr(cli, "diff", fake_diff)
+
+    assert cli.main(["diff", str(tmp_path)]) == 0
+
+    assert capsys.readouterr().out == f"=== {a}\n-old\n+new\n"
+
+
+def test_dry_run_batch_shows_each_plan(tmp_path, monkeypatch, capsys, stub_target):
+    a = elport_doc(tmp_path / "a.md")
+
+    def fake_push(*args):
+        print("Upload plan:\n  fig.png")
+        return "dry run"
+
+    monkeypatch.setattr(cli, "push", fake_push)
+
+    assert cli.main(["push", "-n", str(tmp_path)]) == 0
+
+    assert capsys.readouterr().out.splitlines() == [
+        f"✓ {a}  experiments/1  dry run",
+        f"=== {a}",
+        "Upload plan:",
+        "  fig.png",
+        "1 done",
+    ]
+
+
+def test_batch_refuses_force_before_touching_anything(
+    tmp_path, monkeypatch, capsys, stub_target
+):
+    elport_doc(tmp_path / "a.md")
+    monkeypatch.setattr(cli, "push", lambda *args: pytest.fail("pushed"))
+
+    assert cli.main(["push", "-f", str(tmp_path)]) == 1
+
+    assert "--force works on one document at a time" in capsys.readouterr().err
+
+
+def test_a_directory_without_documents_is_an_error(tmp_path, capsys, stub_target):
+    (tmp_path / "README.md").write_text("x")
+
+    assert cli.main(["status", str(tmp_path)]) == 1
+
+    assert f"no elport documents under {tmp_path} (1 skipped)" in (
+        capsys.readouterr().err
+    )
+
+
+def test_a_batch_never_prompts(monkeypatch):
+    monkeypatch.setattr(sync.sys.stdin, "isatty", lambda: True)
+    with (
+        redirect_stdout(io.StringIO()),
+        pytest.raises(RuntimeError, match="re-run with --yes"),
+    ):
+        sync._confirm_permission_widening([("read", "public", 50, 30)], False)
+
+
+# --- clone --all -----------------------------------------------------------
+
+
+class MirrorClient:
+    root = "https://e.example"
+
+    def __init__(self, rows):
+        self.rows = rows
+        self.searches = []
+
+    def search(self, entity, params):
+        self.searches.append((entity, dict(params)))
+        rows = self.rows.get(entity, [])
+        return rows[params["offset"] : params["offset"] + params["limit"]]
+
+
+@pytest.fixture
+def mirror_env(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+    monkeypatch.setattr(cli.state, "_dir", lambda create=False: tmp_path / "state")
+    (tmp_path / "state").mkdir()
+    cloned = []
+
+    def fake_clone(eid, entity, path, profile):
+        cloned.append((entity, eid, path))
+        elport_doc(path, id=eid, entity=entity)
+        return "cloned"
+
+    monkeypatch.setattr(cli, "_clone_to", fake_clone)
+    return cloned
+
+
+def test_clone_all_lays_out_every_entity_and_skips_ones_already_present(
+    tmp_path, monkeypatch, capsys, mirror_env
+):
+    root = tmp_path / "backup"
+    elport_doc(root / "experiments" / "1-old" / "report.md", id=1)
+    client = MirrorClient(
+        {
+            "experiments": [
+                {"id": 1, "title": "old"},
+                {"id": 2, "title": "滴定/実験"},
+            ],
+            "items": [{"id": 7, "title": "Buffer"}],
+        }
+    )
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+
+    assert cli.main(["clone", "--all", str(root)]) == 0
+
+    exp = root / "experiments" / "2-滴定_実験" / "report.md"
+    item = root / "items" / "7-Buffer" / "report.md"
+    assert mirror_env == [("experiments", 2, exp), ("items", 7, item)]
+    assert capsys.readouterr().out.splitlines() == [
+        f"✓ {exp}  experiments/2  cloned",
+        f"✓ {item}  items/7  cloned",
+        "2 done, 1 up to date",
+    ]
+    assert {params["scope"] for _, params in client.searches} == {1}
+
+
+def test_clone_all_pages_through_every_result_in_the_chosen_scope(
+    tmp_path, monkeypatch, mirror_env
+):
+    rows = [{"id": n, "title": f"t{n}"} for n in range(1, 251)]
+    client = MirrorClient({"experiments": rows})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+    argv = ["clone", "--all", str(tmp_path / "b"), "--entity", "experiments"]
+
+    assert cli.main([*argv, "--scope", "team"]) == 0
+
+    assert len(mirror_env) == 250
+    assert {params["scope"] for _, params in client.searches} == {2}
+
+
+def test_clone_all_skips_an_entity_with_a_working_copy_elsewhere(
+    tmp_path, monkeypatch, capsys, mirror_env
+):
+    elsewhere = elport_doc(tmp_path / "work" / "report.md", id=3)
+    sync.state.save(
+        "https://e.example",
+        "experiments",
+        "3",
+        {"remote_base": "", "local_base": "", "path": str(elsewhere)},
+    )
+    client = MirrorClient({"experiments": [{"id": 3, "title": "x"}]})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+
+    assert (
+        cli.main(["clone", "--all", str(tmp_path / "b"), "--entity", "experiments"])
+        == 0
+    )
+
+    assert mirror_env == []
+    assert f"· experiments/3  working copy at {elsewhere}" in capsys.readouterr().out
+
+
+def test_clone_all_removes_the_empty_directory_when_a_clone_fails(
+    tmp_path, monkeypatch, capsys, mirror_env
+):
+    client = MirrorClient({"experiments": [{"id": 4, "title": "x"}]})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+    monkeypatch.setattr(
+        cli,
+        "_clone_to",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("API 403: forbidden")),
+    )
+
+    assert (
+        cli.main(["clone", "--all", str(tmp_path / "b"), "--entity", "experiments"])
+        == 1
+    )
+
+    assert not (tmp_path / "b" / "experiments" / "4-x").exists()
+    assert "✗" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv", [["clone"], ["clone", "3", "--all", "x"]])
+def test_clone_needs_exactly_one_of_id_and_all(argv, capsys):
+    assert cli.main(argv) == 1
+    assert "exactly one of <id> or --all" in capsys.readouterr().err

@@ -19,6 +19,8 @@ elport diff --base               # local ↔ last push (what YOU changed; zero n
 elport push                      # upload refs + PATCH body as markdown (content_type:2)
 elport push -n                   # --dry-run: full rehearsal, upload + path→URL plan, no writes
 elport push report.md            # doc defaults to report.md; any name works
+elport status notes/             # a directory = every elport document under it; one line each
+elport push notes/ a.md          # push/pull/fetch/status/diff take several paths; exit 1 if any failed
 elport pull                      # fetch body + metadata, reverse-transclude URLs → local paths, download files
 elport fetch                     # download every attachment, incl. non-embedded ones (read-only, no base/manifest)
 elport merge                     # after a conflict: git merge-file .base.md/.remote.md → doc (local)
@@ -26,6 +28,7 @@ elport comments                  # print the remote comment thread (read-only, t
 elport comment "text"            # post one comment (no edit/delete)
 elport new "title" --entity experiments -o report.md   # create entity + scaffold frontmatter
 elport clone 357 --entity experiments -o report.md    # start from an existing entity: scaffold + pull
+elport clone --all backup/       # mirror: every entity not yet under backup/ (re-run safe; then pull backup/)
 elport list                      # your own entities as `id  date  title` (read-only, no local doc needed)
 elport list --scope team -q blot # widen to the team / search title+body+elabid; --limit, --offset page
 elport list --json               # raw API rows; pipe to jq to drive clone/view
@@ -82,6 +85,10 @@ A push overwrites the shared server body; discarding remote changes with `--forc
 - **`list` and `view` never write.** They need no local document and touch no base, so they are
   safe to run before anything is set up. Use them to find an entity instead of guessing an `id`.
   `view` prints the body exactly as stored, so a note written in the Web UI comes out as HTML.
+- **Link another note by its local path** (`[prev](../exp12/report.md)`): push sends its URL,
+  never the file. A target without `id` stops the push: push the target first.
+- **A locked entity cannot be pushed**, even with `--force`. Tell the user to unlock it in the Web
+  UI; never try to work around the lock.
 - **`id` is server-assigned** by `new` and the first `push`. Never invent or hand-edit it,
   since a wrong id overwrites the wrong entity.
 - **Markdown mode is required.** If push aborts with `remote entity is not in markdown mode`,

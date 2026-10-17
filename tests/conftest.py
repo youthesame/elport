@@ -18,3 +18,4 @@ def configured(monkeypatch):
         lambda config, profile, meta: ("test", "https://e.example", True),
     )
     monkeypatch.setattr(sync.state, "save", lambda *args: None)
+    monkeypatch.setattr(sync.config_module, "load", lambda project, doc_dir: {})

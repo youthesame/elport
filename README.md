@@ -25,7 +25,7 @@ One local file maps to one eLabFTW entry: Markdown with a YAML front matter bloc
 
 On `push`, elport uploads every real local file the body references, in any notation, and swaps each path for its
 real eLabFTW URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry
-instead of uploading, write its eLabFTW URL. Code fences, inline code, and HTML comments are never parsed.
+instead of uploading, write its eLabFTW URL or its local document's path. Code fences, inline code, and HTML comments are never parsed.
 
 ## Quick start
 
@@ -41,7 +41,8 @@ elport push                             # upload references + push the body
 
 ## Commands
 
-Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works.
+Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works. Sync commands
+also take a directory: every elport document under it, one line each.
 Exit code `0` on success, `1` on failure. Run `elport <command> --help` for the full flags.
 
 ### Sync
@@ -65,6 +66,7 @@ need not be a git repository.
 |---|---|
 | `new "<title>"` | Create an entity and scaffold front matter. |
 | `clone <id>` | Start `<doc>` from an entity that already exists, then pull. |
+| `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. |
 | `list` | List remote entities as `id  date  title`. Read-only. |
 | `view <id>` | Print one remote body to stdout, exactly as stored. |
 | `comments` | Print the remote comment thread. |
@@ -146,6 +148,7 @@ Since you may also edit the body in the Web UI, `push` compares the current remo
 - **changed** aborts. elport writes `<name>.base.md` (the ancestor) and `<name>.remote.md`. Run `elport merge` to
   3-way them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then push. A body that still has markers is
   refused.
+- **locked** aborts, even with `--force`. Unlock it in the Web UI.
 - **no base on this machine** aborts. Run `elport pull` first, or `--force` to overwrite blind.
 
 `--force` discards the Web-side change, so use it deliberately. eLabFTW keeps server-side history recoverable from

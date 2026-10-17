@@ -17,10 +17,12 @@ from typing import Any
 
 from . import config as config_module
 from . import frontmatter, state
+from .client import NotFoundError
 from .transclude import (
     download_url,
     extract,
     plan,
+    relink,
     replace_spans,
     reverse,
     safe_name,
@@ -28,6 +30,8 @@ from .transclude import (
 )
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
+UP_TO_DATE = "up to date"
+ENTITY_PAGES = {"experiments": "experiments.php", "items": "database.php"}
 PERMISSION_AUDIENCES = {
     "account": "everyone with an account",
     "public": "everyone incl. anonymous; no login required",
@@ -135,12 +139,71 @@ def _complete_uploads(remote: Remote, uploaded: dict[Path, dict]) -> dict[Path, 
     return result
 
 
+def _can_prompt() -> bool:
+    # A prompt written to a captured or piped stdout would wait unseen.
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def entity_url(base_url: str, entity: str, eid: object) -> str:
+    return f"{base_url.rstrip('/')}/{ENTITY_PAGES[entity]}?mode=view&id={eid}"
+
+
+def _document_links(refs, body: str):
+    """URLs for links to other documents, the record pull reverses them with
+    (sent URL → syntax family → destination as written), and each target's
+    (server, entity, id)."""
+    urls, record, targets = {}, {}, []
+    for ref in refs:
+        if ref.doc is None:
+            continue
+        meta = frontmatter.parse(ref.doc.read_text(encoding="utf-8"))[0]
+        # The target resolves under its own directory's config, as it would
+        # when pushed itself.
+        own = config_module.load(Path.cwd(), ref.doc.parent)
+        entity = meta.get("entity") or own.get("entity", "experiments")
+        if entity not in ENTITY_PAGES:
+            raise ValueError(f"linked document has an invalid entity: {ref.path}")
+        _, base_url, _ = config_module.base_target(own, None, meta)
+        urls[ref.doc] = entity_url(base_url, entity, meta["id"])
+        # Keyed by syntax family: the same URL may have been written as an HTML
+        # attribute and as a Markdown destination, which do not encode alike.
+        family = "html" if ref.kind == "html" else "markdown"
+        sent = urls[ref.doc] + ref.fragment
+        record.setdefault(sent, {})[family] = body[ref.start : ref.end]
+        targets.append((base_url.rstrip("/"), entity, meta["id"]))
+    return urls, record, targets
+
+
+def _check_working_copy(saved: dict | None, path: Path, entity: str, eid) -> None:
+    """A base belongs to one file. A recorded file that is gone means the
+    document moved; one that still holds this entity is a second copy."""
+    recorded = (saved or {}).get("path")
+    if not recorded or Path(recorded) == path.resolve():
+        return
+    other = Path(recorded)
+    try:
+        meta = frontmatter.parse(other.read_text(encoding="utf-8"))[0]
+    except (OSError, UnicodeDecodeError, ValueError):
+        return
+    if meta.get("id") == eid and meta.get("entity", entity) == entity:
+        raise RuntimeError(
+            f"{entity}/{eid} is tracked at {other}; work there, "
+            "or delete one of the copies"
+        )
+
+
+def _carried(saved: dict | None) -> dict:
+    """Link records outlive a pull: only push rewrites them."""
+    saved = saved or {}
+    return {key: saved[key] for key in ("doc_links", "links") if saved.get(key)}
+
+
 def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
     large = [path for path in paths if path.stat().st_size > LARGE_UPLOAD_BYTES]
     if not large or assume_yes:
         return
     names = ", ".join(f"{path.name} ({path.stat().st_size} bytes)" for path in large)
-    if not sys.stdin.isatty():
+    if not _can_prompt():
         raise RuntimeError(
             f"large upload requires confirmation ({names}); re-run with --yes"
         )
@@ -309,7 +372,7 @@ def _confirm_permission_widening(
         f"{field} → {keyword} ({PERMISSION_AUDIENCES[keyword]})"
         for field, keyword, _, _ in widening
     )
-    if not sys.stdin.isatty():
+    if not _can_prompt():
         raise RuntimeError(
             f"permission widening requires confirmation ({summary}); re-run with --yes"
         )
@@ -368,7 +431,7 @@ def push(
     dry_run: bool = False,
     force: bool = False,
     assume_yes: bool = False,
-) -> None:
+) -> str:
     meta, body, entity, eid = _document(path, config)
     if not force:
         lines = body.splitlines()
@@ -394,9 +457,11 @@ def push(
 
     refs = plan(body, path.parent, config.get("ignore", []))
     files = sorted({ref.file for ref in refs if ref.file})
+    link_urls, doc_links, link_targets = _document_links(refs, body)
 
     remote = Remote(client, entity, eid, base_url) if eid else None
     saved = state.load(base_url, entity, str(eid)) if eid else None
+    _check_working_copy(saved, path, entity, eid)
     identity = client.me()
     _check_team_match(saved, identity)
     category = _resolve_category(
@@ -406,6 +471,12 @@ def push(
         client, entity, identity.get("team"), meta.get("status")
     )
     remote_doc = remote.get() if remote is not None else {}
+    if remote_doc.get("locked"):
+        # eLabFTW lets the owner keep writing to a locked entity (ADR-0004).
+        raise RuntimeError(
+            f"{entity}/{eid} is locked; unlock it in the Web UI to push "
+            "(--force does not override a lock)"
+        )
     permission_changes = _permission_changes(
         meta, remote_doc, identity, eid is not None
     )
@@ -532,7 +603,10 @@ def push(
                 target = f"UPLOAD_PENDING:{file_path.name}"
             target += ref.fragment
             print(f"{ref.path} -> {target}")
-        return
+        for ref in refs:
+            if ref.doc is not None:
+                print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
+        return "dry run"
 
     _confirm_large_uploads(new_uploads, assume_yes)
 
@@ -565,6 +639,7 @@ def push(
         )
         for file_path in files
     }
+    urls.update(link_urls)
 
     sent = replace_spans(body, refs, urls)
     payload = {"body": sent, "content_type": 2}
@@ -601,23 +676,42 @@ def push(
     if stored.get("content_type") != 2:
         raise RuntimeError("remote entity is not in markdown mode")
 
-    state.save(
-        base_url,
-        entity,
-        str(eid),
-        {
-            "remote_base": stored.get("body", ""),
-            "local_base": body,
-            "meta_base": meta_base,
-            "team": identity.get("team"),
-        },
-    )
+    registered = [list(link) for link in (saved or {}).get("links", [])]
+    record = {
+        "remote_base": stored.get("body", ""),
+        "local_base": body,
+        "meta_base": meta_base,
+        "team": identity.get("team"),
+        "path": str(path.resolve()),
+    }
+    if doc_links:
+        record["doc_links"] = doc_links
+    if registered:
+        record["links"] = registered
+    state.save(base_url, entity, str(eid), record)
 
     existing_tags = _remote_tags(remote_doc)
     for tag in meta.get("tags", []) or []:
         if tag not in existing_tags:
             client.add_tag(entity, eid, tag)
             existing_tags.add(tag)
+
+    # Add-only, tracked in state rather than read back: a link removed in the
+    # Web UI stays removed, and nothing is ever deleted (ADR-0003).
+    new_links = []
+    for target_base, target_entity, target_id in link_targets:
+        link = [target_entity, target_id]
+        if (
+            target_base != base_url.rstrip("/")
+            or (target_entity, target_id) == (entity, eid)
+            or link in registered + new_links
+        ):
+            continue
+        client.add_link(entity, eid, target_entity, target_id)
+        new_links.append(link)
+        state.save(
+            base_url, entity, str(eid), {**record, "links": registered + new_links}
+        )
 
     title = meta.get("title") or path.stem
     body_changed = saved is None or body != saved.get("local_base", "")
@@ -626,6 +720,8 @@ def push(
     print(f"pushed {entity}/{eid}: {title}")
     print(f"  body {'updated' if body_changed else 'unchanged'} (markdown)")
     print(f"  uploads: {reused_count} reused, {new_count} new")
+    if new_links:
+        print(f"  links: {len(new_links)} new")
     if permission_changes:
         applied = " ".join(
             f"{field}={keyword}" for field, keyword, _, _ in permission_changes
@@ -634,6 +730,12 @@ def push(
     url = stored.get("sharelink")
     if url:
         print(f"  → {url}")
+    details = ["body updated" if body_changed else "body unchanged"]
+    if new_count:
+        details.append(f"{new_count} new upload(s)")
+    if new_links:
+        details.append(f"{len(new_links)} new link(s)")
+    return f"pushed ({', '.join(details)})"
 
 
 def _sidecar_path(path: Path) -> Path:
@@ -765,6 +867,7 @@ def _raise_conflict(
     """Write git merge-file inputs (remote + base sidecars, attachments) and raise."""
     uploads = _reversible_uploads(uploads)
     remote_source, remote_used = reverse(remote_body, uploads, remote.base_url)
+    remote_source = relink(remote_source, saved.get("doc_links", {}))
     base_source = saved.get("local_base", "")
     _, base_used = reverse(saved.get("remote_base", ""), uploads, remote.base_url)
     used = []
@@ -942,28 +1045,32 @@ def _place_attachments(
     return conflicts
 
 
-def pull(path: Path, client, config: dict, profile=None) -> None:
+def pull(path: Path, client, config: dict, profile=None) -> str:
     meta, body, entity, eid = _document(path, config)
     if not eid:
         raise RuntimeError("id is required")
     _, base_url, _, _ = config_module.resolve(config, profile, meta)
     remote = Remote(client, entity, eid, base_url)
     saved = state.load(base_url, entity, str(eid))
+    _check_working_copy(saved, path, entity, eid)
     identity = client.me()
     _check_team_match(saved, identity)
     remote_doc = remote.get()
+    up_to_date = saved is not None and remote_doc.get("body", "") == saved.get(
+        "remote_base", ""
+    )
     base_meta = (saved or {}).get("meta_base", {})
     local_dirty = saved is not None and body != saved.get("local_base", "")
     if local_dirty and remote_doc.get("body", "") == saved.get("remote_base", ""):
         merged, new_base = _merge_meta(meta, base_meta, remote_doc)
         print("remote: unchanged (local differs from the last sync; nothing to pull)")
         if merged == meta and new_base == base_meta:
-            return
+            return UP_TO_DATE
         if merged != meta:
             frontmatter.atomic_write(path, frontmatter.render(merged, body))
             print(f"  metadata updated in {path.name}")
         state.save(base_url, entity, str(eid), {**saved, "meta_base": new_base})
-        return
+        return UP_TO_DATE
 
     uploads = remote.uploads()
     for upload in uploads:
@@ -978,6 +1085,7 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
         _reversible_uploads(uploads),
         remote.base_url,
     )
+    source = relink(source, (saved or {}).get("doc_links", {}))
 
     no_base_conflict = saved is None and bool(body.strip()) and body != source
     if local_dirty:
@@ -1025,6 +1133,8 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
             "local_base": source,
             "meta_base": new_base,
             "team": identity.get("team"),
+            "path": str(path.resolve()),
+            **_carried(saved),
         },
     )
     title = meta.get("title") or remote_doc.get("title") or path.stem
@@ -1033,9 +1143,10 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
     url = remote_doc.get("sharelink")
     if url:
         print(f"  → {url}")
+    return UP_TO_DATE if up_to_date else "pulled"
 
 
-def fetch(path: Path, client, config: dict, profile=None) -> None:
+def fetch(path: Path, client, config: dict, profile=None) -> str:
     """Download every attachment on the entity, including files the body does not
     reference. Read-only: it never parses the body, touches base state, or feeds the
     push manifest. A local file that differs is preserved; the remote copy lands
@@ -1067,9 +1178,11 @@ def fetch(path: Path, client, config: dict, profile=None) -> None:
         print("  " + ", ".join(names))
     if conflicts:
         print("  conflicts written to: " + ", ".join(conflicts))
+        return f"fetched {len(names)} attachment(s); conflicts: {', '.join(conflicts)}"
+    return f"fetched {len(names)} attachment(s)"
 
 
-def status(path: Path, client, config: dict, profile=None) -> None:
+def status(path: Path, client, config: dict, profile=None) -> str:
     meta, body, entity, eid = _document(path, config)
     saved = None
     remote = None
@@ -1077,41 +1190,53 @@ def status(path: Path, client, config: dict, profile=None) -> None:
         _, base_url, _ = config_module.base_target(config, profile, meta)
         remote = Remote(client, entity, eid, base_url)
         saved = state.load(base_url, entity, str(eid))
+        _check_working_copy(saved, path, entity, eid)
     refs = plan(body, path.parent, config.get("ignore", []))
     files = sorted({ref.file for ref in refs if ref.file})
+    summary = []
     if saved is None:
         print("local: base unavailable (comparison unavailable)")
+        summary.append("no base")
     elif body == saved.get("local_base", ""):
         print("local: clean")
     else:
         print('local: dirty (use "elport push")')
+        summary.append("local dirty")
     print("uploads local:", ", ".join(path.name for path in files) or "none")
 
     if remote is None:
         print("uploads new:", ", ".join(path.name for path in files) or "none")
         print("uploads reuse: none")
         print("remote: no id (comparison unavailable)")
-        return
+        return "not pushed yet"
     try:
         uploads = remote.uploads()
         remote_doc = remote.get()
+    except NotFoundError:
+        # Local is authoritative: the document stays, only the report changes.
+        print("remote: missing (deleted on the server?)")
+        return "remote missing"
     except OSError:
         print("uploads reuse: unavailable (offline?)")
         print("remote: unavailable (offline?)")
         print("mode: unavailable (offline?)")
-        return
+        return "remote unavailable (offline?)"
 
     _warn_unmatched_attachments(body, uploads, remote.base_url)
     reused = [path.name for path in files if _matching_upload(path, uploads)]
     new = [path.name for path in files if path.name not in reused]
     print("uploads new:", ", ".join(new) or "none")
     print("uploads reuse:", ", ".join(reused) or "none")
+    if new:
+        summary.append(f"{len(new)} new upload(s)")
     print(
         "mode:",
         "markdown"
         if remote_doc.get("content_type") == 2
         else remote_doc.get("content_type", "unknown"),
     )
+    if remote_doc.get("locked"):
+        print("lock: locked (push refused; unlock in the Web UI)")
     permission_changes = _permission_changes(meta, remote_doc, {}, True)
     if permission_changes:
         permission_keywords = {
@@ -1124,12 +1249,18 @@ def status(path: Path, client, config: dict, profile=None) -> None:
             for field, keyword, target, current in permission_changes
         )
         print(f"permissions: {permissions}")
+        if any(target != current for _, _, target, current in permission_changes):
+            summary.append("permissions differ")
     if saved is None:
         print("remote: base unavailable (comparison unavailable)")
     elif remote_doc.get("body", "") == saved.get("remote_base", ""):
         print("remote: unchanged")
     else:
         print('remote: changed (use "elport pull")')
+        summary.append("remote changed")
+    if remote_doc.get("locked"):
+        summary.append("locked")
+    return ", ".join(summary) or UP_TO_DATE
 
 
 def _normalize_remote_diff(text: str) -> str:
@@ -1158,6 +1289,7 @@ def diff(path: Path, client, config: dict, profile=None, base_only=False) -> Non
         other = reverse(remote_doc.get("body", ""), remote.uploads(), remote.base_url)[
             0
         ]
+        other = relink(other, (saved or {}).get("doc_links", {}))
         other = _normalize_remote_diff(other)
         local = _normalize_remote_diff(body)
         fromfile = "remote"

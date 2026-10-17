@@ -144,6 +144,16 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - On `GET {entity}/{id}` the links come back expanded under `items_links[]` / `experiments_links[]` (each with
   `title`, `category_title`, …). A self-link (exp→itself) is rejected (400).
 
+## Lock (measured 6.0.8, 2026-10-17)
+
+- `PATCH {entity}/{id}` with `{"action":"lock"}` → 200 (toggles the lock).
+- `GET {entity}/{id}` reports it as `locked` (`0`/`1`), `locked_at`, `lockedby` (user id); unlocked →
+  `0`, `null`, `null`. Also returned: `timestamped`, `timestamped_at`, `timestampedby`.
+- Entity pages (measured 6.0.8, 2026-10-17, unauthenticated route check): experiments are
+  `experiments.php?mode=view&id=`, items are **`database.php`**`?mode=view&id=` (`items.php` is 404).
+- **Trap: the lock does not stop the owner's API writes.** A body `PATCH` on an entity the same user locked →
+  **200**, body changed, with a changelog entry. A lock-aware client must refuse on its own.
+
 ## Permissions (canread / canwrite; measured 5.6.12, 2026-08-11)
 
 - Each entity has `canread` / `canwrite`, each split into **a base level (integer) + an explicit JSON allow-list**.

@@ -35,6 +35,10 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
   the "Body normalization" section of ELABFTW-API.
 - **Do not embed out-of-sync data (comments, steps, revision bodies) in the body.** Use a sidecar or terminal
   output (do not pollute the source).
+- A link to another elport document (front matter with `id` + `profile`) is sent as its entity URL and **never
+  uploaded**; it is the only link that may use `..`, and pull reverses only the URLs push recorded
+  ([ADR-0003](docs/adr/0003-folder-sync-and-document-links.md)). push refuses a locked entity even with `--force`
+  ([ADR-0004](docs/adr/0004-refuse-pushing-to-locked-entities.md)).
 - Upload targets are **only files under the document directory.** Exclude schemed URLs, absolute paths, `..`
   escapes, and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`)**. A pulled
   remote body must not make the next push exfiltrate local secrets; **never parse inside code fences, inline code,

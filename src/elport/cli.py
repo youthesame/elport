@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import io
 import os
 import re
 import sys
+import unicodedata
+from collections import Counter
+from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
-from . import browse, config, frontmatter, state
+from . import browse, config, frontmatter, state, sync
 from .client import Client
 from .sync import (
     comment,
@@ -23,6 +28,10 @@ from .sync import (
 )
 
 ENTITIES = ("experiments", "items")
+SEARCH_PAGE = 100
+SIDECARS = (".remote.md", ".base.md")
+TITLE_LIMIT = 50
+_WORDS = {"✓": "done", "·": sync.UP_TO_DATE, "*": "to sync", "✗": "failed"}
 
 _EXAMPLES = """\
 examples:
@@ -34,6 +43,8 @@ examples:
   elport push                        upload report.md (add -n to preview first)
   elport status                      show local/remote sync state
   elport pull                        download the remote body and attachments
+  elport push notes/                 push every document under notes/
+  elport clone --all backup/         back up all your entities (re-run to add new ones)
 """
 
 
@@ -41,6 +52,16 @@ def _add_target_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--profile", help="config profile to use")
     parser.add_argument(
         "--entity", choices=ENTITIES, help="target entity type (default: experiments)"
+    )
+
+
+def _add_docs_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "doc",
+        nargs="*",
+        default=["report.md"],
+        help="documents or directories (default: report.md); "
+        "a directory means every elport document under it",
     )
 
 
@@ -59,12 +80,7 @@ def _parser() -> argparse.ArgumentParser:
     push_parser = commands.add_parser(
         "push", help="upload the local document (full-body overwrite)"
     )
-    push_parser.add_argument(
-        "doc",
-        nargs="?",
-        default="report.md",
-        help="local document (default: report.md)",
-    )
+    _add_docs_argument(push_parser)
     _add_target_options(push_parser)
     push_parser.add_argument(
         "-n",
@@ -88,32 +104,17 @@ def _parser() -> argparse.ArgumentParser:
     pull_parser = commands.add_parser(
         "pull", help="download the remote body and attachments"
     )
-    pull_parser.add_argument(
-        "doc",
-        nargs="?",
-        default="report.md",
-        help="local document (default: report.md)",
-    )
+    _add_docs_argument(pull_parser)
     _add_target_options(pull_parser)
 
     fetch_parser = commands.add_parser(
         "fetch", help="download all remote attachments (read-only)"
     )
-    fetch_parser.add_argument(
-        "doc",
-        nargs="?",
-        default="report.md",
-        help="local document (default: report.md)",
-    )
+    _add_docs_argument(fetch_parser)
     _add_target_options(fetch_parser)
 
     status_parser = commands.add_parser("status", help="show local/remote sync state")
-    status_parser.add_argument(
-        "doc",
-        nargs="?",
-        default="report.md",
-        help="local document (default: report.md)",
-    )
+    _add_docs_argument(status_parser)
     _add_target_options(status_parser)
 
     comments_parser = commands.add_parser(
@@ -138,12 +139,7 @@ def _parser() -> argparse.ArgumentParser:
     _add_target_options(comment_parser)
 
     diff_parser = commands.add_parser("diff", help="show changes against the base")
-    diff_parser.add_argument(
-        "doc",
-        nargs="?",
-        default="report.md",
-        help="local document (default: report.md)",
-    )
+    _add_docs_argument(diff_parser)
     _add_target_options(diff_parser)
     diff_parser.add_argument(
         "--base",
@@ -228,12 +224,24 @@ def _parser() -> argparse.ArgumentParser:
     clone_parser = commands.add_parser(
         "clone", help="start a local document from an existing remote entity"
     )
-    clone_parser.add_argument("id", type=int, help="id of the remote entity")
+    clone_parser.add_argument("id", type=int, nargs="?", help="id of the remote entity")
+    clone_parser.add_argument(
+        "--all",
+        dest="all_root",
+        metavar="ROOT",
+        help="clone every entity not yet under ROOT into "
+        "ROOT/<entity>/<id>-<title>/report.md",
+    )
     clone_parser.add_argument(
         "--entity",
         choices=ENTITIES,
-        default="experiments",
-        help="entity type to clone (default: experiments)",
+        help="entity type to clone (default: experiments; both with --all)",
+    )
+    clone_parser.add_argument(
+        "--scope",
+        choices=tuple(browse.SCOPES),
+        default="self",
+        help="whose entities --all clones (default: self)",
     )
     clone_parser.add_argument("--profile", help="config profile to use")
     clone_parser.add_argument(
@@ -336,6 +344,7 @@ def _new(args) -> None:
             "remote_base": remote.get("body", ""),
             "local_base": "",
             "team": team,
+            "path": str(path.resolve()),
         },
     )
     print(f"created {args.entity}/{eid}: {path}")
@@ -344,34 +353,96 @@ def _new(args) -> None:
         print(f"  → {url}")
 
 
-def _clone(args) -> None:
-    eid = frontmatter.validate_id(args.id)
-    path = Path(args.output)
+def _clone(args) -> int:
+    if (args.id is None) == (args.all_root is None):
+        raise ValueError("clone needs exactly one of <id> or --all")
+    if args.all_root is not None:
+        return _clone_all(args)
+    _clone_to(args.id, args.entity or "experiments", Path(args.output), args.profile)
+    return 0
+
+
+def _every(client, entity: str, scope: str):
+    # Page until an empty answer: a server that caps the page size below ours
+    # must not end the walk early.
+    offset = 0
+    while True:
+        rows = client.search(
+            entity,
+            {"scope": browse.SCOPES[scope], "limit": SEARCH_PAGE, "offset": offset},
+        )
+        if not rows:
+            return
+        yield from rows
+        offset += len(rows)
+
+
+def _clone_all(args) -> int:
+    root = Path(args.all_root)
+    data = config.load(Path.cwd(), root)
+    profile_name, client = _resolved_client(data, args.profile, {})
+    present = set()
+    for path in _documents(root)[0] if root.is_dir() else []:
+        meta = frontmatter.document_meta(path) or {}
+        present.add(
+            (meta.get("profile"), meta.get("entity", "experiments"), meta.get("id"))
+        )
+    report = _Report()
+    for entity in [args.entity] if args.entity else ENTITIES:
+        for row in _every(client, entity, args.scope):
+            eid = frontmatter.parse_server_id(row.get("id"))
+            if (profile_name, entity, eid) in present:
+                report.counts["·"] += 1
+                continue
+            saved = state.load(client.root, entity, str(eid))
+            if saved is not None:
+                where = saved.get("path") or "an unrecorded path"
+                report.line("·", f"{entity}/{eid}  working copy at {where}")
+                continue
+            directory = root / entity / _directory_name(eid, row.get("title") or "")
+            path = directory / "report.md"
+
+            def work(eid=eid, entity=entity, directory=directory, path=path):
+                directory.mkdir(parents=True, exist_ok=True)
+                try:
+                    return _clone_to(eid, entity, path, profile_name)
+                except BaseException:
+                    if not any(directory.iterdir()):
+                        directory.rmdir()
+                    raise
+
+            report.run(str(path), f"{entity}/{eid}", work)
+    return report.finish(0)
+
+
+def _clone_to(eid, entity: str, path: Path, profile: str | None) -> str:
+    eid = frontmatter.validate_id(eid)
     if path.exists():
         raise RuntimeError(f"output already exists: {path}")
     if not path.parent.is_dir():
         raise RuntimeError(f"output parent does not exist: {path.parent}")
-    meta = {"id": eid, "entity": args.entity}
+    meta = {"id": eid, "entity": entity}
     data = config.load(Path.cwd(), path.parent)
-    resolved_profile, client = _resolved_client(data, args.profile, meta)
+    resolved_profile, client = _resolved_client(data, profile, meta)
     meta["profile"] = resolved_profile
     # The base is keyed by entity, not by file: a second clone would reset the
     # base of whatever working copy already holds it, so refuse instead.
-    base = state.path(client.root, args.entity, str(eid))
+    base = state.path(client.root, entity, str(eid))
     if base.exists():
         raise RuntimeError(
-            f"{args.entity}/{eid} already has a working copy; pull there instead "
+            f"{entity}/{eid} already has a working copy; pull there instead "
             f"(to start over, delete its base: {base})"
         )
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
     try:
-        pull(path, client, data, args.profile)
+        pull(path, client, data, profile)
     except BaseException:
         # Drop the scaffold so the clone can be retried, unless the pull got far
         # enough to record a base: then the document is real, whatever failed after.
         if not base.exists():
             path.unlink(missing_ok=True)
         raise
+    return "cloned"
 
 
 def _color(text: str, code: int) -> str:
@@ -483,6 +554,135 @@ def _profile(action: str, name: str | None) -> None:
         print(f"{marker}{profile_name}  {base_url}".rstrip())
 
 
+def _run(args, path: Path) -> str | None:
+    data, client = _target(path, args.profile, args.entity)
+    if args.cmd == "push":
+        return push(
+            path, client, data, args.profile, args.dry_run, args.force, args.yes
+        )
+    if args.cmd == "pull":
+        return pull(path, client, data, args.profile)
+    if args.cmd == "fetch":
+        return fetch(path, client, data, args.profile)
+    if args.cmd == "status":
+        return status(path, client, data, args.profile)
+    return diff(path, client, data, args.profile, args.base)
+
+
+def _documents(root: Path) -> tuple[list[Path], int]:
+    """elport documents under ``root``, and how many other Markdown files were
+    passed over. Hidden paths and conflict sidecars are not counted at all."""
+    found, skipped = [], 0
+    for path in sorted(root.rglob("*.md")):
+        relative = path.relative_to(root)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        if path.name.endswith(SIDECARS) or not path.is_file():
+            continue
+        if frontmatter.document_meta(path) is None:
+            skipped += 1
+        else:
+            found.append(path)
+    return found, skipped
+
+
+def _expand(paths: list[Path]) -> tuple[list[Path], int]:
+    """A file stays as given; a directory becomes the documents under it."""
+    found, skipped, seen = [], 0, set()
+    for path in paths:
+        if path.is_dir():
+            inside, passed = _documents(path)
+            skipped += passed
+        else:
+            inside = [path]
+        for document in inside:
+            if document.resolve() not in seen:
+                seen.add(document.resolve())
+                found.append(document)
+    return found, skipped
+
+
+def _directory_name(eid: int, title: str) -> str:
+    name = unicodedata.normalize("NFC", title)
+    name = re.sub(r'[/\\:*?"<>|\x00-\x1f\x7f]', "_", name)
+    name = name.strip().lstrip(".").strip()[:TITLE_LIMIT].rstrip(" .")
+    return f"{eid}-{name}" if name else str(eid)
+
+
+class _Report:
+    """One line per document, a tally at the end; failures never stop the run."""
+
+    def __init__(self):
+        self.counts: Counter[str] = Counter()
+
+    def line(self, mark: str, text: str) -> None:
+        self.counts[mark] += 1
+        print(f"{mark} {text}")
+
+    def run(
+        self, label: str, ident: str, work: Callable[[], str | None], mark: str = "✓"
+    ) -> str:
+        """Run one document's command with its own output captured, so a prompt
+        can never wait unseen (sync refuses to prompt without a terminal).
+        Returns the captured stdout; a None summary prints no line."""
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with redirect_stdout(out), redirect_stderr(err):
+                summary = work()
+        except (ValueError, RuntimeError, OSError) as error:
+            self.line("✗", f"{label}  {ident}  {error}")
+        else:
+            if summary is not None:
+                self.line(
+                    "·" if summary == sync.UP_TO_DATE else mark,
+                    f"{label}  {ident}  {summary}",
+                )
+        for text in err.getvalue().splitlines():
+            print(f"    {text}", file=sys.stderr)
+        return out.getvalue()
+
+    def finish(self, skipped: int) -> int:
+        parts = [
+            f"{self.counts[mark]} {word}"
+            for mark, word in _WORDS.items()
+            if self.counts[mark]
+        ]
+        if skipped:
+            parts.append(f"{skipped} skipped")
+        if parts:
+            print(", ".join(parts))
+        return 1 if self.counts["✗"] else 0
+
+
+def _ident(path: Path) -> str:
+    try:
+        meta = frontmatter.parse(path.read_text(encoding="utf-8"))[0]
+    except (OSError, UnicodeDecodeError, ValueError):
+        meta = {}
+    return f"{meta.get('entity', 'experiments')}/{meta.get('id', '-')}"
+
+
+def _batch(args, paths: list[Path]) -> int:
+    if getattr(args, "force", False):
+        # --force discards Web-side edits; that is never a bulk decision.
+        raise ValueError("--force works on one document at a time")
+    documents, skipped = _expand(paths)
+    if not documents:
+        where = ", ".join(str(path) for path in paths)
+        raise RuntimeError(f"no elport documents under {where} ({skipped} skipped)")
+    report = _Report()
+    mark = "*" if args.cmd == "status" else "✓"
+    for path in documents:
+        output = report.run(
+            str(path), _ident(path), lambda path=path: _run(args, path), mark
+        )
+        # diff and a dry run exist to be read; everything else is the one line.
+        if output and (args.cmd == "diff" or getattr(args, "dry_run", False)):
+            print(f"=== {path}")
+            print(output, end="")
+    return report.finish(skipped)
+
+
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -505,8 +705,7 @@ def main(argv=None) -> int:
             _new(args)
             return 0
         if args.cmd == "clone":
-            _clone(args)
-            return 0
+            return _clone(args)
         if args.cmd == "list":
             entity, client = _browse_target(args)
             browse.entities(
@@ -532,31 +731,20 @@ def main(argv=None) -> int:
             merge(path, data, args.profile, args.resolved)
             return 0
 
-        path = Path(args.doc)
-        data, client = _target(path, args.profile, args.entity)
-        if args.cmd == "push":
-            push(
-                path,
-                client,
-                data,
-                args.profile,
-                args.dry_run,
-                args.force,
-                args.yes,
-            )
-        elif args.cmd == "pull":
-            pull(path, client, data, args.profile)
-        elif args.cmd == "fetch":
-            fetch(path, client, data, args.profile)
-        elif args.cmd == "status":
-            status(path, client, data, args.profile)
-        elif args.cmd == "comments":
-            comments(path, client, data, args.profile)
-        elif args.cmd == "comment":
-            comment(path, client, data, args.profile, text=args.text)
-        elif args.cmd == "diff":
-            diff(path, client, data, args.profile, args.base)
-        return 0
+        if args.cmd in ("comments", "comment"):
+            path = Path(args.doc)
+            data, client = _target(path, args.profile, args.entity)
+            if args.cmd == "comments":
+                comments(path, client, data, args.profile)
+            else:
+                comment(path, client, data, args.profile, text=args.text)
+            return 0
+
+        paths = [Path(doc) for doc in args.doc]
+        if len(paths) == 1 and not paths[0].is_dir():
+            _run(args, paths[0])
+            return 0
+        return _batch(args, paths)
     except (ValueError, RuntimeError, OSError) as error:
         print(str(error), file=sys.stderr)
         return 1

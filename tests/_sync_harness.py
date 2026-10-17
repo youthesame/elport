@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from elport import frontmatter
+from elport import frontmatter, sync
 
 
 class FakeClient:
@@ -91,3 +91,47 @@ def write_doc(path: Path, body: str, **extra):
 
 def saved_state(local="local", remote="remote"):
     return {"local_base": local, "remote_base": remote, "team": 7}
+
+
+def elport_doc(path, body="body", **meta):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    values = {"id": 1, "entity": "experiments", "profile": "test", **meta}
+    path.write_text(frontmatter.render(values, body), encoding="utf-8")
+    return path
+
+
+class Store:
+    """In-memory state keyed like the real one."""
+
+    def __init__(self, monkeypatch, initial=None):
+        self.data = dict(initial or {})
+        monkeypatch.setattr(
+            sync.state, "load", lambda base, entity, eid: self.data.get(eid)
+        )
+        monkeypatch.setattr(
+            sync.state,
+            "save",
+            lambda base, entity, eid, value: self.data.__setitem__(eid, value),
+        )
+
+
+class LinkClient(FakeClient):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.links = []
+
+    def add_link(self, entity, eid, target_entity, target_id):
+        self.calls.append("link")
+        self.links.append((entity, eid, target_entity, target_id))
+
+
+EXP12 = "https://e.example/experiments.php?mode=view&id=12"
+
+
+def patch_returning(client, body):
+    def patch(entity, eid, payload):
+        client.calls.append("patch")
+        client.saved_payload = payload
+        return {"body": body, "content_type": 2}
+
+    return patch
