@@ -572,3 +572,33 @@ def test_merge_clears_the_provisional_creation_flags(tmp_path, monkeypatch, conf
     assert stored_state["remote_base"] == "remote\n"
     assert "pending_create" not in stored_state
     assert "body_sent" not in stored_state
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_merge_refuses_while_remote_attachment_conflict_remains(
+    tmp_path, monkeypatch, capsys
+):
+    doc = tmp_path / "report.md"
+    base = tmp_path / "report.base.md"
+    remote = tmp_path / "report.remote.md"
+    doc.write_text("local [figure](figure.png)\n", encoding="utf-8")
+    base.write_text("[figure](figure.png)\n", encoding="utf-8")
+    # Bodies localize to the same name, so git merge-file alone sees no conflict.
+    remote.write_text("[figure](figure.png)\n", encoding="utf-8")
+    (tmp_path / "figure.png").write_bytes(b"local")
+    (tmp_path / "figure.png.remote").write_bytes(b"remote")
+    promoted = []
+    monkeypatch.setattr(sync, "_promote_pending_remote", lambda *a: promoted.append(a))
+
+    with pytest.raises(RuntimeError, match=r"figure\.png\.remote.*elport merge"):
+        sync.merge(doc, {})
+
+    assert base.exists() and remote.exists()
+    assert doc.read_text(encoding="utf-8") == "local [figure](figure.png)\n"
+    assert promoted == []
+
+    (tmp_path / "figure.png.remote").unlink()
+    sync.merge(doc, {})
+
+    assert "merged cleanly" in capsys.readouterr().out
+    assert len(promoted) == 1
