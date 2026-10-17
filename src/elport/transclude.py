@@ -471,6 +471,10 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
         name = canonical_names.setdefault(safe.casefold(), safe)
         if destination.kind == "markdown" and re.search(r"[\s()#]", name):
             name = f"<{name}{fragment}>"
+        elif destination.kind == "html":
+            name = html.escape(name) + fragment
+            if text[match.start() - 1] not in "\"'":
+                name = f'"{name}"'
         else:
             name += fragment
         replacements.append((match.start(), match.end(), name))
