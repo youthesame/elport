@@ -25,8 +25,7 @@ One local file maps to one eLabFTW entry: Markdown with a YAML front matter bloc
 
 On `push`, elport uploads every real local file the body references, in any notation, and swaps each path for its
 real eLabFTW URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry
-instead of uploading, write its eLabFTW URL, or link its local document (`../exp12/report.md`) and elport
-sends the URL for you. Code fences, inline code, and HTML comments are never parsed.
+instead of uploading, write its eLabFTW URL or its local document's path. Code fences, inline code, and HTML comments are never parsed.
 
 ## Quick start
 
@@ -42,10 +41,9 @@ elport push                             # upload references + push the body
 
 ## Commands
 
-Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works.
-`push`, `pull`, `fetch`, `status`, and `diff` also take several paths, and a
-directory means every elport document under it (see [Many documents](#many-documents)). Exit code `0` on success,
-`1` on failure. Run `elport <command> --help` for the full flags.
+Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works. Sync commands
+also take a directory: every elport document under it, one line each.
+Exit code `0` on success, `1` on failure. Run `elport <command> --help` for the full flags.
 
 ### Sync
 
@@ -68,7 +66,7 @@ need not be a git repository.
 |---|---|
 | `new "<title>"` | Create an entity and scaffold front matter. |
 | `clone <id>` | Start `<doc>` from an entity that already exists, then pull. |
-| `clone --all <root>` | Clone every entity not yet under `<root>`. Re-run it to add new ones. |
+| `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. |
 | `list` | List remote entities as `id  date  title`. Read-only. |
 | `view <id>` | Print one remote body to stdout, exactly as stored. |
 | `comments` | Print the remote comment thread. |
@@ -108,42 +106,6 @@ Neither command is a superset of the other.
 - `fetch` brings those down. It never parses the body, touches the base, or feeds the push manifest, so a fetched
   file is not uploaded again unless you link it in the body yourself.
 - If a local file differs, `fetch` leaves it in place and writes the remote copy beside it as `<name>.remote`.
-
-## Many documents
-
-Pass a directory and elport works on every **elport document** under it. An elport document is a Markdown file
-whose front matter holds `id` and `profile`, which `new`, `clone`, and the first `push` write for you. READMEs,
-other tools' front matter, hidden paths, and conflict sidecars are left alone.
-
-```sh
-elport status notes/          # one line per document
-elport push notes/ extra.md   # files and directories mix
-```
-
-```
-✓ notes/a/report.md  experiments/42  pushed (body updated, 2 new upload(s))
-✗ notes/b/report.md  experiments/43  remote changed; use pull or --force
-1 done, 1 failed, 3 skipped
-```
-
-A failure never stops the rest, but it makes the exit code `1`. `--force` works on one document at a time only.
-Prompts cannot be answered mid-batch, so a widening or large upload needs `-y`.
-
-**Links between documents.** `[previous run](../exp12/report.md)` is sent as experiment 12's URL, never uploaded.
-This is the only kind of link that may leave the document directory with `..`, because elport reads only the
-target's front matter. A target on the same server is also registered as an eLabFTW link. elport only ever adds
-links: one you remove in the Web UI stays removed. `pull` turns those URLs back into the paths you wrote. A link
-to a document that has no `id` yet stops the push.
-
-**Back up everything.** `elport clone --all backup/` lays out
-`backup/<entity>/<id>-<title>/report.md` for each of your experiments and items. Japanese titles are kept, unsafe
-characters become `_`, and a renamed entity keeps its directory. Use `--scope team|all` to include other people's
-entities, or `--entity` to clone only one type. Each copy is an ordinary document, so you can edit and push it.
-Refresh the backup with `elport clone --all backup/` (new entities) and `elport pull backup/` (existing ones). An
-entity deleted on the server shows as `remote missing` and is never deleted locally.
-
-**One working copy per entity.** elport remembers where each entity's document lives. If you move the file, it
-follows. If a second copy still exists, push and pull refuse it.
 
 ## Document format (front matter)
 
@@ -186,8 +148,7 @@ Since you may also edit the body in the Web UI, `push` compares the current remo
 - **changed** aborts. elport writes `<name>.base.md` (the ancestor) and `<name>.remote.md`. Run `elport merge` to
   3-way them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then push. A body that still has markers is
   refused.
-- **locked** in eLabFTW aborts, even with `--force`. eLabFTW would let the owner overwrite a locked note, so
-  elport refuses instead. Unlock it in the Web UI. `status` shows the lock.
+- **locked** aborts, even with `--force`. Unlock it in the Web UI.
 - **no base on this machine** aborts. Run `elport pull` first, or `--force` to overwrite blind.
 
 `--force` discards the Web-side change, so use it deliberately. eLabFTW keeps server-side history recoverable from
@@ -249,7 +210,7 @@ pattern is anchored at its own directory.
 
 | Module | Role |
 |---|---|
-| `cli.py` | Argument parsing, dispatch, and multi-document runs |
+| `cli.py` | Argument parsing and dispatch |
 | `sync.py` | push, pull, status, diff |
 | `transclude.py` | Path ↔ URL rewriting, both directions |
 | `client.py` | eLabFTW API wrapper |
