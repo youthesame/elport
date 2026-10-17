@@ -58,6 +58,10 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   was rewritten to `<figure>` + `</figure>`). The tool cannot prevent it, but remote↔remote-base comparison is
   same-form, so it does not cause false conflicts.
 - `content_type` **does not revert on a body-only PATCH** (stays 2).
+- **HTML comments survive in `body` but not in `body_html`** (measured demo 6.0.8, 2026-10-18: standalone, inline,
+  and multi-line `<!-- -->` all kept verbatim in the stored `body` and in its revision, all dropped from
+  `body_html`). The Web UI's rendered view hides them, but its **Markdown editor shows them verbatim**, so a
+  comment is not a hidden place for tool state: a user sees it and may delete it.
 
 ## content_type and known bug #6416
 
@@ -104,7 +108,9 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - Add tag: `POST /api/v2/{entity}/{id}/tags` (JSON `{"tag": "<name>"}`; a non-existent one is auto-created).
   Measured 201; the current demo joins tag names with `|` in `"tags":"CRISPR|PCR|RNA"`, while `tags_id` remains
   comma-joined. elport tolerates both `|` and `,` separators. **Add-only** (delete via Web UI).
-- Metadata: `PATCH` with `{"metadata": "<JSON string>"}`.
+- Metadata: `PATCH` with `{"metadata": "<JSON string>"}`. **Any top-level key is shown to users** (measured demo
+  6.0.8, 2026-10-18: `{"elport": {"base": …}}` rendered under "Custom fields" on the entity page), so metadata is
+  not a hidden place for tool state either.
 - Category: `PATCH` with `category` (ID). Resolve name→ID via
   `GET /api/v2/teams/{team_id}/experiments_categories` for experiments or
   `GET /api/v2/teams/{team_id}/resources_categories` for items, reading the `{id, title}` list and matching on
@@ -149,6 +155,9 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - `PATCH {entity}/{id}` with `{"action":"lock"}` → 200 (toggles the lock).
 - `GET {entity}/{id}` reports it as `locked` (`0`/`1`), `locked_at`, `lockedby` (user id); unlocked →
   `0`, `null`, `null`. Also returned: `timestamped`, `timestamped_at`, `timestampedby`.
+- **A timestamp does not lock** (measured 6.0.8, 2026-10-18): `PATCH` `{"action":"timestamp"}` → 200 sets
+  `timestamped`/`timestamped_at`/`timestampedby`, but `locked` stays `0` and a later body `PATCH` → 200 changes
+  the body. The timestamp archive does not appear in `GET .../uploads`.
 - Entity pages (measured 6.0.8, 2026-10-17, unauthenticated route check): experiments are
   `experiments.php?mode=view&id=`, items are **`database.php`**`?mode=view&id=` (`items.php` is 404).
 - **Trap: the lock does not stop the owner's API writes.** A body `PATCH` on an entity the same user locked →
@@ -190,6 +199,8 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - **Revisions are not created on every save** (measured: only 2 for 5 PATCHes; thinned by diff-size/interval
   thresholds). There is **no guarantee every recent push survives**, so Web-UI recovery is a "last resort," not a
   substitute for conflict detection.
+- **A revision's `content_type` is unreliable** (measured demo 6.0.8, 2026-10-18: a revision of a
+  `content_type:2` body was listed as `1`). Read only the revision's `body`.
 
 ---
 
