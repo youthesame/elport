@@ -89,7 +89,6 @@ A push overwrites the shared server body; discarding remote changes with `--forc
   never the file. A target without `id` stops the push: push the target first.
 - **A locked entity cannot be pushed**, even with `--force`. Tell the user to unlock it in the Web
   UI; never try to work around the lock.
-- **A batch refuses `--force`** and cannot prompt. Fix the documents marked `✗` one by one.
 - **`id` is server-assigned** by `new` and the first `push`. Never invent or hand-edit it,
   since a wrong id overwrites the wrong entity.
 - **Markdown mode is required.** If push aborts with `remote entity is not in markdown mode`,
