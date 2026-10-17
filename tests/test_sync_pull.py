@@ -269,9 +269,16 @@ def test_pull_dirty_keeps_local_base_when_old_attachment_was_deleted(
 
 @pytest.mark.parametrize(
     "real_name",
-    [".elport.toml", ".ELPORT.TOML", ".elportignore", "nested/.ELPORTIGNORE"],
+    [
+        ".elport.toml",
+        ".ELPORT.TOML",
+        ".elportignore",
+        "nested/.ELPORTIGNORE",
+        ".envrc",
+        "nested/.bashrc",
+    ],
 )
-def test_pull_skips_control_file_attachment(
+def test_pull_skips_hidden_file_attachment(
     tmp_path, monkeypatch, configured, capsys, real_name
 ):
     doc = tmp_path / "report.md"
@@ -292,9 +299,8 @@ def test_pull_skips_control_file_attachment(
     assert not (tmp_path / sync.safe_name(real_name)).exists()
     assert frontmatter.parse(doc.read_text())[1] == f"[file]({url})"
     assert "download" not in client.calls
-    assert (
-        f"refusing to place control file attachment: {sync.safe_name(real_name)}"
-        in (capsys.readouterr().err)
+    assert f"refusing to place hidden file attachment: {sync.safe_name(real_name)}" in (
+        capsys.readouterr().err
     )
 
 
@@ -321,7 +327,7 @@ def test_pull_dirty_remote_unchanged_is_noop(tmp_path, monkeypatch, configured, 
     )
 
 
-def test_pull_dirty_control_file_urls_remain_in_three_way_sidecars(
+def test_pull_dirty_hidden_file_urls_remain_in_three_way_sidecars(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
@@ -356,7 +362,7 @@ def test_pull_dirty_control_file_urls_remain_in_three_way_sidecars(
     assert not (tmp_path / ".elport.toml").exists()
 
 
-def test_pull_without_base_keeps_control_file_url_in_sidecar(
+def test_pull_without_base_keeps_hidden_file_url_in_sidecar(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"

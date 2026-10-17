@@ -424,3 +424,18 @@ def test_profile_name_requires_default_for_named_profiles():
         ValueError, match="no default profile set; run 'elport profile use <name>'"
     ):
         config._profile_name({"profiles": {"lab": {}}}, None, {})
+
+
+def test_login_refuses_http_before_storing_anything(tmp_path, monkeypatch):
+    user = tmp_path / "config.toml"
+    monkeypatch.setattr(config, "config_path", lambda: user)
+    monkeypatch.setattr(
+        config.keyring,
+        "set_password",
+        lambda *args: pytest.fail("the key must not be stored"),
+    )
+
+    with pytest.raises(ValueError, match="https://"):
+        config.login("lab", "http://e.example", "secret")
+
+    assert not user.exists()

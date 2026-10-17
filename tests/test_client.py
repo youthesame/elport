@@ -227,3 +227,22 @@ def test_search_sends_query_params_to_the_entity_collection(monkeypatch):
     assert calls == [
         (("GET", "/experiments"), {"params": {"scope": 1, "limit": 5}}),
     ]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://e.example",
+        "HTTP://e.example",
+        "e.example",
+        "https://",
+        "ftp://e.example",
+    ],
+)
+def test_client_refuses_to_send_the_key_without_https(url):
+    with pytest.raises(ValueError, match="https://"):
+        Client(url, "key")
+
+
+def test_client_accepts_https_in_any_case():
+    assert Client("HTTPS://e.example/", "key").base == "HTTPS://e.example/api/v2"

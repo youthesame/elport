@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -13,6 +14,13 @@ def _entity_path(entity: str, eid: object, suffix: str = "") -> str:
     return f"/{entity}/{validate_id(eid)}{suffix}"
 
 
+def require_https(base_url: str) -> None:
+    # The API key travels as a bare Authorization header; never send it in clear.
+    url = urlsplit(base_url)
+    if url.scheme.casefold() != "https" or not url.netloc:
+        raise ValueError(f"base_url must start with https://: {base_url}")
+
+
 def _normalized(entity: dict) -> dict:
     # eLabFTW returns null for an empty body; normalize at the API boundary.
     if entity.get("body") is None:
@@ -22,6 +30,7 @@ def _normalized(entity: dict) -> dict:
 
 class Client:
     def __init__(self, base_url: str, api_key: str, verify_ssl: bool = True):
+        require_https(base_url)
         self.base = base_url.rstrip("/") + "/api/v2"
         self.root = base_url.rstrip("/")
         self.key = api_key

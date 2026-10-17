@@ -14,6 +14,7 @@ import keyring
 import tomli_w
 from keyring.errors import KeyringError
 
+from .client import require_https
 from .transclude import IgnoreLayer
 
 PLAINTEXT_WARNING = (
@@ -174,6 +175,7 @@ def resolve(data: dict, profile: str | None, meta: dict) -> tuple[str, str, str,
 
 
 def login(name: str, url: str, api_key: str) -> None:
+    require_https(url)
     p = config_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     data = _read(p)

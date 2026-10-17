@@ -97,6 +97,8 @@ Neither command is a superset of the other.
 
 - `pull` writes referenced files back by **basename only**. A subdirectory path like `assets/fig.png` lands as
   `fig.png`.
+- Neither command writes a hidden (dot-prefixed) attachment such as `.envrc`; push never uploads one, so it can only
+  have been planted on the server.
 - `pull` only downloads files the body links to. Attachments that sit on the entity without being embedded, like
   raw data or spectra, stay on the server.
 - `fetch` brings those down. It never parses the body, touches the base, or feeds the push manifest, so a fetched
@@ -158,7 +160,7 @@ notes folder, since the files are plain Markdown.
 
 `elport login` stores the API key in your OS keyring: Keychain, Credential Manager, or Secret Service. Everything
 that is not a secret, base_url included, goes in `~/.config/elport/config.toml` with mode `600`. elport never
-prints the key.
+prints the key, and refuses a base_url that is not `https://`.
 
 ```toml
 # ~/.config/elport/config.toml

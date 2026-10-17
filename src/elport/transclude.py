@@ -39,13 +39,22 @@ def _masked(text: str) -> str:
     def blank(a: int, b: int) -> None:
         mask[a:b] = [" "] * (b - a)
 
-    # The prefix lets a fence sit inside blockquotes and list items; its closer
-    # must repeat that container prefix (the opener's own 0-3 space indent aside).
-    opener_pattern = re.compile(r"(?m)^([ \t>]*)(`{3,}|~{3,})[^\n]*(?:\n|$)")
+    # The prefix lets a fence sit inside blockquotes and list items, even on the
+    # marker's own line; its closer must repeat that container prefix, with list
+    # markers as their width in spaces (the opener's own 0-3 space indent aside,
+    # but never a list item's own content indent).
+    list_item = r"(?:[-*+]|\d{1,9}[.)])[ \t]"
+    opener_pattern = re.compile(
+        # A backtick fence's info string cannot hold a backtick (CommonMark).
+        rf"(?m)^((?:[ \t>]|{list_item})*)(`{{3,}}(?=[^`\n]*$)|~{{3,}})[^\n]*(?:\n|$)"
+    )
     pos = 0
     while opener := opener_pattern.search(text, pos):
         prefix, marker = opener.groups()
-        container = re.sub(r" {0,3}$", "", prefix)
+        items = list(re.finditer(list_item, prefix))
+        split = items[-1].end() if items else 0
+        container = re.sub(list_item, lambda m: " " * len(m[0]), prefix[:split])
+        container += re.sub(r" {0,3}$", "", prefix[split:])
         closer_pattern = re.compile(
             rf"(?m)^{re.escape(container)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
             r"[ \t]*(?:\r?\n|$)"
