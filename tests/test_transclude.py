@@ -1149,3 +1149,50 @@ def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
     )[0]
 
     assert reference.file is None
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "> ~~~\n> [code](secret.txt)\n> ~~~\n",
+        "> ```\n> [code](secret.txt)\n> ```\n",
+        "> > ~~~\n> > [code](secret.txt)\n> > ~~~\n",
+        "1.  item\n\n    ~~~\n    [code](secret.txt)\n    ~~~\n",
+        "  ~~~\n    ~~~\n[code](secret.txt)\n~~~\n",
+    ],
+)
+def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+
+    references = plan(block + "\n[real](real.txt)\n", tmp_path)
+
+    assert [reference.file for reference in references] == [real.resolve()]
+
+
+@pytest.mark.parametrize(
+    ("template", "real_name"),
+    [
+        ("<img src={url}>", "figure 1.png"),
+        ("<img src='{url}'>", "O'Brien.png"),
+        ('<img src="{url}">', 'say "hi".png'),
+        ('<img src="{url}">', "a&copy;.png"),
+        ('<img src="  {url}  ">', "figure 1.png"),
+        ("<img src=' {url} '>", "figure 1.png"),
+    ],
+)
+def test_reverse_html_attribute_round_trips_through_push_parser(
+    tmp_path: Path, template: str, real_name: str
+):
+    upload = {"id": 4, "long_name": "x/y", "real_name": real_name, "storage": 1}
+    url = download_url("https://e.example", upload)
+    (tmp_path / real_name).write_bytes(b"data")
+
+    body, used = reverse(template.format(url=url), [upload], "https://e.example")
+
+    references = plan(body, tmp_path)
+    assert [reference.file for reference in references] == [
+        (tmp_path / real_name).resolve()
+    ]
+    assert used == [upload]

@@ -19,6 +19,7 @@ from . import config as config_module
 from . import frontmatter, state
 from .transclude import (
     download_url,
+    extract,
     plan,
     replace_spans,
     reverse,
@@ -673,6 +674,22 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
         remote.unlink()
         print(f"marked resolved: {path}; run 'elport push'")
         return
+    # Both bodies localize a replaced attachment to the same name, so
+    # git merge-file cannot see that conflict; the .remote copy is its only trace.
+    pending = sorted(
+        {
+            f"{reference.path}.remote"
+            for reference in extract(remote.read_text(encoding="utf-8"))
+            # reverse() localizes to a bare name in the document directory.
+            if "/" not in reference.path
+            and (path.parent / f"{reference.path}.remote").is_file()
+        }
+    )
+    if pending:
+        raise RuntimeError(
+            "attachment conflicts remain: " + ", ".join(pending) + "; "
+            "resolve and delete them, then run 'elport merge' again"
+        )
     if shutil.which("git") is None:
         raise RuntimeError(
             f"git is not installed; merge {base} and {remote} by hand, "

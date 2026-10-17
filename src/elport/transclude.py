@@ -39,12 +39,16 @@ def _masked(text: str) -> str:
     def blank(a: int, b: int) -> None:
         mask[a:b] = [" "] * (b - a)
 
-    opener_pattern = re.compile(r"(?m)^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$)")
+    # The prefix lets a fence sit inside blockquotes and list items; its closer
+    # must repeat that container prefix (the opener's own 0-3 space indent aside).
+    opener_pattern = re.compile(r"(?m)^([ \t>]*)(`{3,}|~{3,})[^\n]*(?:\n|$)")
     pos = 0
     while opener := opener_pattern.search(text, pos):
-        marker = opener.group(1)
+        prefix, marker = opener.groups()
+        container = re.sub(r" {0,3}$", "", prefix)
         closer_pattern = re.compile(
-            rf"(?m)^ {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}[ \t]*(?:\r?\n|$)"
+            rf"(?m)^{re.escape(container)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
+            r"[ \t]*(?:\r?\n|$)"
         )
         closer = closer_pattern.search(text, opener.end())
         end = closer.end() if closer else len(text)
@@ -467,6 +471,10 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
         name = canonical_names.setdefault(safe.casefold(), safe)
         if destination.kind == "markdown" and re.search(r"[\s()#]", name):
             name = f"<{name}{fragment}>"
+        elif destination.kind == "html":
+            name = html.escape(name) + fragment
+            if text[: match.start()].rstrip()[-1:] not in ('"', "'"):
+                name = f'"{name}"'
         else:
             name += fragment
         replacements.append((match.start(), match.end(), name))
