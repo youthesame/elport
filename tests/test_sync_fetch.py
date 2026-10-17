@@ -34,18 +34,25 @@ def test_fetch_downloads_unreferenced_attachments(tmp_path, configured, capsys):
     assert "fetched experiments/1: 2 attachment(s)" in out
 
 
-def test_fetch_skips_control_file_attachments(tmp_path, configured, capsys):
+def test_fetch_skips_hidden_file_attachments(tmp_path, configured, capsys):
     doc = tmp_path / "report.md"
     write_doc(doc, "body")
     client = FakeClient(
-        uploads=[_upload(3, ".elport.toml"), _upload(4, "raw_data.csv")]
+        uploads=[
+            _upload(3, ".elport.toml"),
+            _upload(5, ".envrc"),
+            _upload(4, "raw_data.csv"),
+        ]
     )
 
     sync.fetch(doc, client, {})
 
     assert not (tmp_path / ".elport.toml").exists()
+    assert not (tmp_path / ".envrc").exists()
     assert (tmp_path / "raw_data.csv").exists()
-    assert "control file" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "refusing to place hidden file attachment: .elport.toml" in err
+    assert "refusing to place hidden file attachment: .envrc" in err
 
 
 def test_fetch_never_touches_base_state(tmp_path, monkeypatch, configured):

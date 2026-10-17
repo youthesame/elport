@@ -28,7 +28,6 @@ from .transclude import (
 )
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
-CONTROL_FILENAMES = {".elport.toml", ".elportignore"}
 PERMISSION_AUDIENCES = {
     "account": "everyone with an account",
     "public": "everyone incl. anonymous; no login required",
@@ -65,12 +64,14 @@ def _upload_name(upload: dict) -> str:
     return safe_name(str(upload.get("real_name", "attachment")))
 
 
-def _is_control_upload(upload: dict) -> bool:
-    return _upload_name(upload).casefold() in CONTROL_FILENAMES
+def _is_hidden_upload(upload: dict) -> bool:
+    # Push never uploads hidden files, so a hidden name can only be planted
+    # remotely (.elport.toml, .envrc, ...); never place one beside the note.
+    return _upload_name(upload).startswith(".")
 
 
 def _reversible_uploads(uploads: list[dict]) -> list[dict]:
-    return [upload for upload in uploads if not _is_control_upload(upload)]
+    return [upload for upload in uploads if not _is_hidden_upload(upload)]
 
 
 def _warn_unmatched_attachments(body: str, uploads: list[dict], base_url: str) -> None:
@@ -916,9 +917,9 @@ def _place_attachments(
     conflicts = []
     for upload, prefetched in _coalesce_attachments(remote, uploads):
         name = _upload_name(upload)
-        if _is_control_upload(upload):
+        if _is_hidden_upload(upload):
             print(
-                f"warning: refusing to place control file attachment: {name}",
+                f"warning: refusing to place hidden file attachment: {name}",
                 file=sys.stderr,
             )
             continue
@@ -966,9 +967,9 @@ def pull(path: Path, client, config: dict, profile=None) -> None:
 
     uploads = remote.uploads()
     for upload in uploads:
-        if _is_control_upload(upload):
+        if _is_hidden_upload(upload):
             print(
-                "warning: refusing to place control file attachment: "
+                "warning: refusing to place hidden file attachment: "
                 f"{_upload_name(upload)}",
                 file=sys.stderr,
             )
@@ -1046,9 +1047,9 @@ def fetch(path: Path, client, config: dict, profile=None) -> None:
     remote = Remote(client, entity, eid, base_url)
     uploads = remote.uploads()
     for upload in uploads:
-        if _is_control_upload(upload):
+        if _is_hidden_upload(upload):
             print(
-                "warning: refusing to place control file attachment: "
+                "warning: refusing to place hidden file attachment: "
                 f"{_upload_name(upload)}",
                 file=sys.stderr,
             )

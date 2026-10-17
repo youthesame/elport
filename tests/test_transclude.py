@@ -1159,6 +1159,12 @@ def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
         "> > ~~~\n> > [code](secret.txt)\n> > ~~~\n",
         "1.  item\n\n    ~~~\n    [code](secret.txt)\n    ~~~\n",
         "  ~~~\n    ~~~\n[code](secret.txt)\n~~~\n",
+        "- ```\n  [code](secret.txt)\n  ```\n",
+        "* ~~~\n  [code](secret.txt)\n  ~~~\n",
+        "1. ```\n   [code](secret.txt)\n   ```\n",
+        "10) ~~~\n    [code](secret.txt)\n    ~~~\n",
+        "> - ```\n>   [code](secret.txt)\n>   ```\n",
+        "- > ```\n  > [code](secret.txt)\n  > ```\n",
     ],
 )
 def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
@@ -1169,6 +1175,26 @@ def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
     references = plan(block + "\n[real](real.txt)\n", tmp_path)
 
     assert [reference.file for reference in references] == [real.resolve()]
+
+
+@pytest.mark.parametrize("line", ["```code```", "- ```code```", "> ```a`b"])
+def test_backtick_line_with_backtick_info_is_not_a_fence(tmp_path: Path, line: str):
+    # A backtick fence's info string cannot contain backticks (CommonMark).
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+
+    references = plan(f"{line}\n\n[real](real.txt)\n", tmp_path)
+
+    assert [reference.file for reference in references] == [real.resolve()]
+
+
+def test_unindented_fence_after_list_item_fence_is_not_its_closer(tmp_path: Path):
+    # The dedented fence ends the list and opens a top-level code block.
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+
+    references = plan("- ~~~\n~~~\n[code](secret.txt)\n~~~\n", tmp_path)
+
+    assert [reference.file for reference in references] == []
 
 
 @pytest.mark.parametrize(
