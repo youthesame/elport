@@ -1149,3 +1149,22 @@ def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
     )[0]
 
     assert reference.file is None
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "> ~~~\n> [code](secret.txt)\n> ~~~\n",
+        "> ```\n> [code](secret.txt)\n> ```\n",
+        "> > ~~~\n> > [code](secret.txt)\n> > ~~~\n",
+        "1.  item\n\n    ~~~\n    [code](secret.txt)\n    ~~~\n",
+    ],
+)
+def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+
+    references = plan(block + "\n[real](real.txt)\n", tmp_path)
+
+    assert [reference.file for reference in references] == [real.resolve()]

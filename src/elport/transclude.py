@@ -39,12 +39,15 @@ def _masked(text: str) -> str:
     def blank(a: int, b: int) -> None:
         mask[a:b] = [" "] * (b - a)
 
-    opener_pattern = re.compile(r"(?m)^ {0,3}(`{3,}|~{3,})[^\n]*(?:\n|$)")
+    # The prefix lets a fence sit inside blockquotes and list items; its closer
+    # must repeat the same prefix.
+    opener_pattern = re.compile(r"(?m)^([ \t>]*)(`{3,}|~{3,})[^\n]*(?:\n|$)")
     pos = 0
     while opener := opener_pattern.search(text, pos):
-        marker = opener.group(1)
+        prefix, marker = opener.groups()
         closer_pattern = re.compile(
-            rf"(?m)^ {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}[ \t]*(?:\r?\n|$)"
+            rf"(?m)^{re.escape(prefix)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
+            r"[ \t]*(?:\r?\n|$)"
         )
         closer = closer_pattern.search(text, opener.end())
         end = closer.end() if closer else len(text)
