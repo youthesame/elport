@@ -1178,6 +1178,8 @@ def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
         ("<img src='{url}'>", "O'Brien.png"),
         ('<img src="{url}">', 'say "hi".png'),
         ('<img src="{url}">', "a&copy;.png"),
+        ('<img src="  {url}  ">', "figure 1.png"),
+        ("<img src=' {url} '>", "figure 1.png"),
     ],
 )
 def test_reverse_html_attribute_round_trips_through_push_parser(
