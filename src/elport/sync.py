@@ -680,7 +680,9 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
         {
             f"{reference.path}.remote"
             for reference in extract(remote.read_text(encoding="utf-8"))
-            if (path.parent / f"{reference.path}.remote").is_file()
+            # reverse() localizes to a bare name in the document directory.
+            if "/" not in reference.path
+            and (path.parent / f"{reference.path}.remote").is_file()
         }
     )
     if pending:

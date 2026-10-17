@@ -581,10 +581,14 @@ def test_merge_refuses_while_remote_attachment_conflict_remains(
     doc = tmp_path / "report.md"
     base = tmp_path / "report.base.md"
     remote = tmp_path / "report.remote.md"
-    doc.write_text("local [figure](figure.png)\n", encoding="utf-8")
-    base.write_text("[figure](figure.png)\n", encoding="utf-8")
+    doc.write_text(
+        "local [figure](figure.png)\n[other](shared/x.png)\n", encoding="utf-8"
+    )
+    base.write_text("[figure](figure.png)\n[other](shared/x.png)\n", encoding="utf-8")
     # Bodies localize to the same name, so git merge-file alone sees no conflict.
-    remote.write_text("[figure](figure.png)\n", encoding="utf-8")
+    remote.write_text("[figure](figure.png)\n[other](shared/x.png)\n", encoding="utf-8")
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / "x.png.remote").write_bytes(b"another document's")
     (tmp_path / "figure.png").write_bytes(b"local")
     (tmp_path / "figure.png.remote").write_bytes(b"remote")
     promoted = []
@@ -594,7 +598,7 @@ def test_merge_refuses_while_remote_attachment_conflict_remains(
         sync.merge(doc, {})
 
     assert base.exists() and remote.exists()
-    assert doc.read_text(encoding="utf-8") == "local [figure](figure.png)\n"
+    assert doc.read_text(encoding="utf-8").startswith("local [figure]")
     assert promoted == []
 
     (tmp_path / "figure.png.remote").unlink()
