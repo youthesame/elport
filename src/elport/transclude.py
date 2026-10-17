@@ -40,13 +40,14 @@ def _masked(text: str) -> str:
         mask[a:b] = [" "] * (b - a)
 
     # The prefix lets a fence sit inside blockquotes and list items; its closer
-    # must repeat the same prefix.
+    # must repeat that container prefix (the opener's own 0-3 space indent aside).
     opener_pattern = re.compile(r"(?m)^([ \t>]*)(`{3,}|~{3,})[^\n]*(?:\n|$)")
     pos = 0
     while opener := opener_pattern.search(text, pos):
         prefix, marker = opener.groups()
+        container = re.sub(r" {0,3}$", "", prefix)
         closer_pattern = re.compile(
-            rf"(?m)^{re.escape(prefix)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
+            rf"(?m)^{re.escape(container)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
             r"[ \t]*(?:\r?\n|$)"
         )
         closer = closer_pattern.search(text, opener.end())

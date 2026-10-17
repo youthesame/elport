@@ -1158,6 +1158,7 @@ def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
         "> ```\n> [code](secret.txt)\n> ```\n",
         "> > ~~~\n> > [code](secret.txt)\n> > ~~~\n",
         "1.  item\n\n    ~~~\n    [code](secret.txt)\n    ~~~\n",
+        "  ~~~\n    ~~~\n[code](secret.txt)\n~~~\n",
     ],
 )
 def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
