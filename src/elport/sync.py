@@ -199,12 +199,14 @@ def _carried(saved: dict | None) -> dict:
     return {key: saved[key] for key in ("doc_links", "links") if saved.get(key)}
 
 
-def _confirm(what: str, names: str, question: str, assume_yes: bool) -> None:
+def _confirm(what: str, detail: str, question: str, assume_yes: bool) -> None:
     if assume_yes:
         return
     if not _can_prompt():
-        raise RuntimeError(f"{what} requires confirmation ({names}); re-run with --yes")
-    answer = input(f"{question} {names}? [y/N] ").strip().lower()
+        raise RuntimeError(
+            f"{what} requires confirmation ({detail}); re-run with --yes"
+        )
+    answer = input(f"{question} [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
         raise RuntimeError(f"{what} cancelled")
 
@@ -215,7 +217,7 @@ def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
         names = ", ".join(
             f"{path.name} ({path.stat().st_size} bytes)" for path in large
         )
-        _confirm("large upload", names, "Upload large file(s)", assume_yes)
+        _confirm("large upload", names, f"upload large file(s) {names}?", assume_yes)
 
 
 def _confirm_remote_linked_uploads(
@@ -234,10 +236,11 @@ def _confirm_remote_linked_uploads(
         }
     )
     if named:
+        names = ", ".join(named)
         _confirm(
-            "upload of a file linked from the remote body",
-            ", ".join(named),
-            "The remote body links local file(s); upload",
+            "remote-linked upload",
+            names,
+            f"upload {names} (linked from the remote body)?",
             assume_yes,
         )
 
@@ -396,19 +399,14 @@ def _confirm_permission_widening(
     widening = [
         change for change in changes if change[2] >= 40 and change[2] > change[3]
     ]
-    if not widening or assume_yes:
-        return
-    summary = ", ".join(
-        f"{field} → {keyword} ({PERMISSION_AUDIENCES[keyword]})"
-        for field, keyword, _, _ in widening
-    )
-    if not _can_prompt():
-        raise RuntimeError(
-            f"permission widening requires confirmation ({summary}); re-run with --yes"
+    if widening:
+        summary = ", ".join(
+            f"{field} → {keyword} ({PERMISSION_AUDIENCES[keyword]})"
+            for field, keyword, _, _ in widening
         )
-    answer = input(f"{summary}: leave the team? [y/N] ").strip().lower()
-    if answer not in ("y", "yes"):
-        raise RuntimeError("permission widening cancelled")
+        _confirm(
+            "permission widening", summary, f"{summary}: leave the team?", assume_yes
+        )
 
 
 def _has_individual_grants(remote_doc: dict, field: str) -> bool:
