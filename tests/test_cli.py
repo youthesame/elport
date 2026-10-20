@@ -724,7 +724,7 @@ def test_merge_without_git_is_reported_as_cli_error(tmp_path, monkeypatch, capsy
     document.write_text("local\n", encoding="utf-8")
     base.write_text("base\n", encoding="utf-8")
     remote.write_text("remote\n", encoding="utf-8")
-    monkeypatch.setattr(sync.shutil, "which", lambda command: None)
+    monkeypatch.setenv("PATH", "")
 
     assert cli.main(["merge", str(document)]) == 1
     error = capsys.readouterr().err

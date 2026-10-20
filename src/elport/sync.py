@@ -7,7 +7,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -761,6 +760,21 @@ def _promote_pending_remote(base_url: str | None, entity: str, eid: object) -> N
         state.save(base_url, entity, str(eid), updated)
 
 
+_GIT = "git.exe" if sys.platform == "win32" else "git"
+
+
+def _git_path() -> str | None:
+    """git's absolute path, searched over PATH's absolute entries only. A bare
+    "git" on Windows (and shutil.which there before Python 3.12) looks in the
+    current directory first, where pull may have placed an attachment git.exe."""
+    for directory in os.environ.get("PATH", "").split(os.pathsep):
+        candidate = Path(directory) / _GIT
+        absolute = candidate.is_absolute()
+        if absolute and candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return None
+
+
 def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
     base = _base_sidecar_path(path)
     remote = _sidecar_path(path)
@@ -794,7 +808,8 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
             "attachment conflicts remain: " + ", ".join(pending) + "; "
             "resolve and delete them, then run 'elport merge' again"
         )
-    if shutil.which("git") is None:
+    git = _git_path()
+    if git is None:
         raise RuntimeError(
             f"git is not installed; merge {base} and {remote} by hand, "
             "then run 'elport merge --resolved'"
@@ -805,7 +820,7 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
     for merge_input in (path, base, remote):
         frontmatter.atomic_write(merge_input, merge_input.read_text(encoding="utf-8"))
     result = subprocess.run(
-        ["git", "merge-file", "--", str(path), str(base), str(remote)],
+        [git, "merge-file", "--", str(path), str(base), str(remote)],
         capture_output=True,
         text=True,
         check=False,

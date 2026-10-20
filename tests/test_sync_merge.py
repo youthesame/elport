@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import shlex
 import shutil
 from pathlib import Path
@@ -138,7 +139,7 @@ def test_resolved_merge_without_git_promotes_pending_remote_and_allows_regular_p
         "save",
         lambda *args: stored_state.clear() or stored_state.update(args[3]),
     )
-    monkeypatch.setattr(sync.shutil, "which", lambda command: None)
+    monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(
         sync.subprocess,
         "run",
@@ -190,7 +191,7 @@ def test_resolved_merge_regular_push_reconflicts_if_remote_changed_again(
         "save",
         lambda *args: stored_state.clear() or stored_state.update(args[3]),
     )
-    monkeypatch.setattr(sync.shutil, "which", lambda command: None)
+    monkeypatch.setenv("PATH", "")
     monkeypatch.setattr(
         sync.subprocess,
         "run",
@@ -362,7 +363,7 @@ def test_merge_without_git_leaves_document_untouched(tmp_path, monkeypatch, caps
     doc.write_text("local\n", encoding="utf-8")
     base.write_text("base\n", encoding="utf-8")
     remote.write_text("remote\n", encoding="utf-8")
-    monkeypatch.setattr(shutil, "which", lambda command: None)
+    monkeypatch.setenv("PATH", "")
 
     with pytest.raises(
         RuntimeError,
@@ -387,7 +388,7 @@ def test_merge_reports_git_execution_errors(tmp_path, monkeypatch, returncode):
     doc.write_text("local\n", encoding="utf-8")
     base.write_text("base\n", encoding="utf-8")
     remote.write_text("remote\n", encoding="utf-8")
-    monkeypatch.setattr(shutil, "which", lambda command: "/usr/bin/git")
+    monkeypatch.setattr(sync, "_git_path", lambda: "/usr/bin/git")
     monkeypatch.setattr(
         sync.subprocess,
         "run",
@@ -631,3 +632,37 @@ def test_merge_refuses_while_remote_attachment_conflict_remains(
 
     assert "merged cleanly" in capsys.readouterr().out
     assert len(promoted) == 1
+
+
+def _fake_git(directory: Path) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    git = directory / sync._GIT
+    git.write_text("")
+    git.chmod(0o755)
+    return git
+
+
+def test_merge_runs_git_from_path_not_a_planted_one_in_the_current_directory(
+    tmp_path, monkeypatch
+):
+    # Windows searches the current directory before PATH, and pull can place an
+    # attachment named git.exe next to the document.
+    installed = _fake_git(tmp_path / "bin")
+    _fake_git(tmp_path / "doc")
+    monkeypatch.chdir(tmp_path / "doc")
+    monkeypatch.setenv("PATH", os.pathsep.join([".", "", str(tmp_path / "bin")]))
+    doc = tmp_path / "doc" / "report.md"
+    for name in ("report.md", "report.base.md", "report.remote.md"):
+        (tmp_path / "doc" / name).write_text("same\n", encoding="utf-8")
+    ran = []
+    monkeypatch.setattr(
+        sync.subprocess,
+        "run",
+        lambda args, **kwargs: (
+            ran.append(args[0]) or sync.subprocess.CompletedProcess(args, 0)
+        ),
+    )
+
+    sync.merge(doc, {})
+
+    assert ran == [str(installed)]
