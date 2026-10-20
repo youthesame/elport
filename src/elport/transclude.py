@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import filecmp
+import functools
 import html
 import os
 import re
@@ -317,6 +318,13 @@ def _fold(name: str) -> str:
     return unicodedata.normalize("NFC", name).casefold()
 
 
+@functools.cache
+def _listing(directory: Path) -> frozenset[str]:
+    # Cached for one plan(): a folder of thousands of files is listed once,
+    # not once per reference.
+    return frozenset(os.listdir(directory))
+
+
 def _on_disk(root: Path, relative: Path) -> str | None:
     """The spelling the filesystem stores for ``relative``. On case- or
     normalization-insensitive filesystems (APFS, NTFS) it can differ from the
@@ -324,7 +332,7 @@ def _on_disk(root: Path, relative: Path) -> str | None:
     current = root
     for part in relative.parts:
         try:
-            entries = os.listdir(current)
+            entries = _listing(current)
             if part not in entries:
                 part = next(
                     entry
@@ -439,6 +447,7 @@ def plan(
     text: str, doc_dir: Path, ignore: list[IgnoreLayer] | None = None
 ) -> list[Reference]:
     ignore = ignore or []
+    _listing.cache_clear()
     _warn_reference_definitions(text, doc_dir, ignore)
     refs = extract(text)
     names: dict[str, Path] = {}
@@ -470,6 +479,7 @@ def local_files(
     text: str, doc_dir: Path, ignore: list[IgnoreLayer] | None = None
 ) -> set[Path]:
     """The files plan() would upload for text, quietly: no warnings, no collisions."""
+    _listing.cache_clear()
     files = (_candidate(doc_dir, ref.path, ignore or [])[0] for ref in extract(text))
     return {file for file in files if file is not None}
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import re
 import shlex
 
@@ -153,7 +154,6 @@ def test_push_summary_omits_empty_sharelink(tmp_path, monkeypatch, configured, c
     client = FakeClient(
         gets=[
             {"body": "remote", "tags": ""},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2, "sharelink": ""},
         ]
     )
@@ -566,7 +566,6 @@ def test_push_normalizes_yaml_scalar_metadata_to_strings(
     client = FakeClient(
         gets=[
             {"body": "remote", "tags": ""},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
     )
@@ -587,7 +586,6 @@ def test_existing_tags_are_not_posted_again(tmp_path, monkeypatch, configured):
     client = FakeClient(
         gets=[
             {"body": "remote", "tags": "PCR, existing"},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
     )
@@ -608,7 +606,6 @@ def test_pipe_separated_existing_tags_are_not_posted_again(
     client = FakeClient(
         gets=[
             {"body": "remote", "tags": "PCR|existing"},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
     )
@@ -663,7 +660,6 @@ def test_verified_state_is_saved_before_tag_failure(tmp_path, monkeypatch, confi
     client = FailingTagClient(
         gets=[
             {"body": "remote", "tags": ""},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
     )
@@ -696,7 +692,6 @@ def test_category_name_is_resolved(tmp_path, monkeypatch, configured):
     client = FakeClient(
         gets=[
             {"body": "remote"},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
     )
@@ -716,7 +711,6 @@ def test_category_valid_numeric_id_is_validated_and_sent(
     write_doc(doc, "local", category=9)
     client = FakeClient(
         gets=[
-            {"body": "remote"},
             {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
@@ -751,7 +745,6 @@ def test_status_name_or_valid_numeric_id_is_resolved_and_sent(
     client = FakeClient(
         gets=[
             {"body": "remote"},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
     )
@@ -782,7 +775,6 @@ def test_push_without_status_does_not_send_status(tmp_path, monkeypatch, configu
     write_doc(doc, "local")
     client = FakeClient(
         gets=[
-            {"body": "remote"},
             {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
@@ -820,7 +812,6 @@ def test_push_without_referenced_files_skips_upload_listing(
     client = FakeClient(
         gets=[
             {"body": "remote"},
-            {"body": "remote"},
             {"body": "stored", "content_type": 2},
         ]
     )
@@ -829,7 +820,7 @@ def test_push_without_referenced_files_skips_upload_listing(
 
     sync.push(doc, client, {})
 
-    assert client.calls == ["me", "get", "get", "patch", "save"]
+    assert client.calls == ["me", "get", "patch", "save"]
 
 
 def test_remote_base_is_the_patch_response_not_a_later_get(
@@ -839,7 +830,6 @@ def test_remote_base_is_the_patch_response_not_a_later_get(
     write_doc(doc, "local")
     client = FakeClient(
         gets=[
-            {"body": "remote"},
             {"body": "remote"},
             {"body": "stored", "content_type": 2},
             {"body": "web edit after push", "content_type": 2},
@@ -945,7 +935,6 @@ def test_successful_push_preserves_unrelated_sidecar_named_documents(
     client = FakeClient(
         gets=[
             {"body": "R\n"},
-            {"body": "R\n"},
             {"body": "R\n", "content_type": 2},
         ]
     )
@@ -978,7 +967,7 @@ def test_push_stays_silent_on_unmatched_attachment_reference(
 def test_push_saves_metadata_base(tmp_path, monkeypatch, configured):
     doc = tmp_path / "report.md"
     write_doc(doc, "local", category=9, tags=["x"])
-    client = FakeClient(gets=[{"body": "remote"}, {"body": "remote"}])
+    client = FakeClient(gets=[{"body": "remote"}])
     stored_state = saved_state()
     monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
     monkeypatch.setattr(sync.state, "save", lambda *args: stored_state.update(args[-1]))
@@ -1119,7 +1108,9 @@ def test_resume_conflict_is_not_overwritten_by_the_next_push(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
-    write_doc(doc, "local")
+    # A new upload opens the window the recheck guards.
+    (tmp_path / "d.csv").write_text("d")
+    write_doc(doc, "[d](d.csv)")
     stored_state = {
         "remote_base": "",
         "local_base": "",
@@ -1517,3 +1508,168 @@ def test_force_push_asks_for_a_link_from_an_unmerged_conflicting_remote(
         sync.push(doc, client, {}, force=True)
 
     assert "upload" not in client.calls
+
+
+def test_push_without_attachments_skips_the_recheck(tmp_path, monkeypatch, configured):
+    # Nothing slow runs between the first read and the PATCH, so a second read
+    # would only cost a round trip.
+    doc = tmp_path / "report.md"
+    write_doc(doc, "edited")
+    client = FakeClient(
+        gets=[{"body": "remote"}, {"body": "stored", "content_type": 2}]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: client.calls.append("save"))
+
+    sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get", "patch", "save"]
+
+
+def test_push_of_an_unchanged_document_sends_no_patch(
+    tmp_path, monkeypatch, configured, capsys
+):
+    # A PATCH can add a revision on the server; an unchanged push sends none.
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(
+        remote_doc={"body": "remote", "title": "Test", "content_type": 2}
+    )
+    store = Store(monkeypatch, {"1": saved_state()})
+
+    assert sync.push(doc, client, {}) == "pushed (body unchanged)"
+
+    assert client.calls == ["me", "get"]
+    assert store.data["1"]["remote_base"] == "remote"
+    assert store.data["1"]["local_base"] == "local"
+    assert "body unchanged" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "remote_doc",
+    [
+        {"body": "remote", "title": "Old title", "content_type": 2},
+        {"body": "remote", "title": "Test", "content_type": 1},
+    ],
+)
+def test_push_of_an_unchanged_body_still_patches_changed_fields(
+    tmp_path, monkeypatch, configured, remote_doc
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(remote_doc=remote_doc)
+    Store(monkeypatch, {"1": saved_state()})
+
+    sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get", "patch"]
+    assert client.saved_payload["title"] == "Test"
+
+
+def test_push_with_unchanged_permissions_sends_no_patch(
+    tmp_path, monkeypatch, configured
+):
+    # pull writes read/write into the front matter; restating them is no change.
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="team", write="owner")
+    client = FakeClient(
+        remote_doc={
+            "body": "remote",
+            "title": "Test",
+            "content_type": 2,
+            "canread_base": frontmatter.PERMISSION_LEVELS["team"],
+            "canwrite_base": frontmatter.PERMISSION_LEVELS["owner"],
+        }
+    )
+    Store(monkeypatch, {"1": saved_state()})
+
+    sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get"]
+
+
+def test_push_rechecks_after_listing_and_hashing_reused_attachments(
+    tmp_path, monkeypatch, configured
+):
+    # Hashing a large local file leaves time for a Web edit before the PATCH.
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_bytes(b"same")
+    write_doc(doc, "[data](data.csv)")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "data.csv",
+        "storage": 1,
+        "hash": hashlib.sha256(b"same").hexdigest(),
+        "hash_algorithm": "sha256",
+    }
+    client = FakeClient(
+        gets=[{"body": "remote"}, {"body": "web edit"}], uploads=[upload]
+    )
+    Store(monkeypatch, {"1": saved_state()})
+
+    with pytest.raises(RuntimeError, match="remote changed"):
+        sync.push(doc, client, {})
+
+    assert "patch" not in client.calls
+
+
+def test_unchanged_push_patches_when_a_reused_upload_replaced_the_linked_one(
+    tmp_path, monkeypatch, configured
+):
+    # The Web side deleted the attachment and uploaded it again: the body still
+    # points at the deleted one, and only a PATCH sends the new URL.
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_bytes(b"same")
+    write_doc(doc, "[data](data.csv)")
+    old = {"id": 3, "long_name": "aa/deleted", "real_name": "data.csv", "storage": 1}
+    new = {
+        "id": 4,
+        "long_name": "bb/again",
+        "real_name": "data.csv",
+        "storage": 1,
+        "hash": hashlib.sha256(b"same").hexdigest(),
+        "hash_algorithm": "sha256",
+    }
+    remote_body = f"[data]({sync.download_url('https://e.example', old)})"
+    remote_doc = {"body": remote_body, "title": "Test", "content_type": 2}
+    client = FakeClient(remote_doc=remote_doc, uploads=[new])
+    Store(
+        monkeypatch,
+        {"1": saved_state(local="[data](data.csv)", remote=remote_body)},
+    )
+
+    sync.push(doc, client, {})
+
+    assert "patch" in client.calls
+    assert "bb%2Fagain" in client.saved_payload["body"]
+
+
+def test_unchanged_push_with_reused_attachments_reads_the_remote_once(
+    tmp_path, monkeypatch, configured
+):
+    # With no PATCH to come there is nothing to overwrite, so nothing to recheck.
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_bytes(b"same")
+    write_doc(doc, "[data](data.csv)")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "data.csv",
+        "storage": 1,
+        "hash": hashlib.sha256(b"same").hexdigest(),
+        "hash_algorithm": "sha256",
+    }
+    remote_body = f"[data]({sync.download_url('https://e.example', upload)})"
+    client = FakeClient(
+        remote_doc={"body": remote_body, "title": "Test", "content_type": 2},
+        uploads=[upload],
+    )
+    Store(
+        monkeypatch,
+        {"1": saved_state(local="[data](data.csv)", remote=remote_body)},
+    )
+
+    sync.push(doc, client, {})
+
+    assert client.calls == ["me", "get", "uploads"]

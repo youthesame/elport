@@ -1362,3 +1362,19 @@ def test_unlistable_directory_warns_instead_of_aborting(
 
     assert plan("[x](data.csv)", tmp_path)[0].file is None
     assert "data.csv" in capsys.readouterr().err
+
+
+def test_plan_lists_each_directory_once(tmp_path, monkeypatch):
+    # Listing a large folder once per reference made push quadratic.
+    for name in ("a.png", "b.png", "c.png"):
+        (tmp_path / name).write_bytes(b"x")
+    listed = []
+    real = os.listdir
+    monkeypatch.setattr(
+        transclude.os, "listdir", lambda path: listed.append(path) or real(path)
+    )
+
+    refs = transclude.plan("![](a.png) ![](b.png) ![](c.png)", tmp_path)
+
+    assert [ref.file.name for ref in refs] == ["a.png", "b.png", "c.png"]
+    assert len(listed) == 1

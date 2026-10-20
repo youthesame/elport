@@ -28,3 +28,5 @@ version changes.
 - Considered and rejected at the same time: skipping the pre-`PATCH` recheck when nothing was
   uploaded (the window still spans prompts and the permission-narrowing `PATCH`), and an "up-to-date"
   no-op push (base equality does not prove remote metadata, tags, or attachment URLs are current).
+- Superseded for the two rejections above by
+  [ADR-0005](0005-skip-the-recheck-and-patch-when-they-cannot-matter.md).

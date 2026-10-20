@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import getpass
 import io
 import os
@@ -280,7 +281,14 @@ def _parser() -> argparse.ArgumentParser:
 
 def _resolved_client(data: dict, profile: str | None, meta: dict) -> tuple[str, Client]:
     name, base_url, api_key, verify_ssl = config.resolve(data, profile, meta)
-    return name, Client(base_url, api_key, verify_ssl)
+    return name, _connect(base_url, api_key, verify_ssl)
+
+
+@functools.cache
+def _connect(base_url: str, api_key: str, verify_ssl: bool) -> Client:
+    # One client per server for the whole command, so a folder of documents
+    # shares its connection and identity. main() clears it per command.
+    return Client(base_url, api_key, verify_ssl)
 
 
 def _client(data: dict, profile: str | None, meta: dict) -> Client:
@@ -685,6 +693,7 @@ def _batch(args, paths: list[Path]) -> int:
 
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
+    _connect.cache_clear()
     try:
         if args.cmd == "login":
             base_url = input("base_url: ").strip()

@@ -42,6 +42,7 @@ class Client:
         # One connection for the whole command: each fresh TCP+TLS handshake costs
         # about as much as the request itself.
         self.session = requests.Session()
+        self._identity = None
 
     def request(self, method, path, **kwargs):
         headers = kwargs.pop("headers", {})
@@ -63,7 +64,10 @@ class Client:
         return r
 
     def me(self):
-        return self.request("GET", "/users/me").json()
+        # Fixed for the life of a command; a folder asks once per document.
+        if self._identity is None:
+            self._identity = self.request("GET", "/users/me").json()
+        return self._identity
 
     def info(self):
         return self.request("GET", "/info").json()
