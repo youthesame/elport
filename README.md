@@ -89,8 +89,9 @@ need not be a git repository.
 
 - `-n/--dry-run` rehearses a push without sending.
 - `-f/--force` pushes over a changed remote, losing the Web-side change.
-- `-y/--yes` skips the two confirmations: widening `read`/`write` beyond your team, and new uploads over 25 MiB.
-  A non-interactive run needs `-y` for either.
+- `-y/--yes` skips the three confirmations: widening `read`/`write` beyond your team, new uploads over 25 MiB,
+  and uploading a local file that a link written on the Web side (brought in by pull) points to.
+  A non-interactive run needs `-y` for any of them.
 - `--profile <name>` and `--entity {experiments,items}` pick the destination.
 
 ### pull and fetch

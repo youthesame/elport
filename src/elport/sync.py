@@ -20,6 +20,7 @@ from .client import NotFoundError
 from .transclude import (
     download_url,
     extract,
+    local_files,
     plan,
     relink,
     replace_spans,
@@ -198,18 +199,51 @@ def _carried(saved: dict | None) -> dict:
     return {key: saved[key] for key in ("doc_links", "links") if saved.get(key)}
 
 
-def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
-    large = [path for path in paths if path.stat().st_size > LARGE_UPLOAD_BYTES]
-    if not large or assume_yes:
+def _confirm(what: str, detail: str, question: str, assume_yes: bool) -> None:
+    if assume_yes:
         return
-    names = ", ".join(f"{path.name} ({path.stat().st_size} bytes)" for path in large)
     if not _can_prompt():
         raise RuntimeError(
-            f"large upload requires confirmation ({names}); re-run with --yes"
+            f"{what} requires confirmation ({detail}); re-run with --yes"
         )
-    answer = input(f"Upload large file(s) {names}? [y/N] ").strip().lower()
+    answer = input(f"{question} [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
-        raise RuntimeError("large upload cancelled")
+        raise RuntimeError(f"{what} cancelled")
+
+
+def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
+    large = [path for path in paths if path.stat().st_size > LARGE_UPLOAD_BYTES]
+    if large:
+        names = ", ".join(
+            f"{path.name} ({path.stat().st_size} bytes)" for path in large
+        )
+        _confirm("large upload", names, f"upload large file(s) {names}?", assume_yes)
+
+
+def _confirm_remote_linked_uploads(
+    path: Path,
+    ignore,
+    new_uploads: list[Path],
+    remote_bodies: list[str],
+    assume_yes: bool,
+) -> None:
+    """push rewrites every local file reference to its upload URL, so a bare
+    relative path in a remote body was written by someone else (and came in on
+    a pull or merge). Uploading the local file it names is theirs to ask for, not
+    ours to grant: the user says yes first. Links match by the file they resolve
+    to, so respelling one locally (./x, x#top) still asks."""
+    linked = set().union(
+        *(local_files(body, path.parent, ignore) for body in remote_bodies)
+    )
+    named = sorted(file.name for file in new_uploads if file in linked)
+    if named:
+        names = ", ".join(named)
+        _confirm(
+            "remote-linked upload",
+            names,
+            f"upload {names} (linked from the remote body)?",
+            assume_yes,
+        )
 
 
 def _resolve_catalog_id(entries, value, kind: str):
@@ -366,19 +400,14 @@ def _confirm_permission_widening(
     widening = [
         change for change in changes if change[2] >= 40 and change[2] > change[3]
     ]
-    if not widening or assume_yes:
-        return
-    summary = ", ".join(
-        f"{field} → {keyword} ({PERMISSION_AUDIENCES[keyword]})"
-        for field, keyword, _, _ in widening
-    )
-    if not _can_prompt():
-        raise RuntimeError(
-            f"permission widening requires confirmation ({summary}); re-run with --yes"
+    if widening:
+        summary = ", ".join(
+            f"{field} → {keyword} ({PERMISSION_AUDIENCES[keyword]})"
+            for field, keyword, _, _ in widening
         )
-    answer = input(f"{summary}: leave the team? [y/N] ").strip().lower()
-    if answer not in ("y", "yes"):
-        raise RuntimeError("permission widening cancelled")
+        _confirm(
+            "permission widening", summary, f"{summary}: leave the team?", assume_yes
+        )
 
 
 def _has_individual_grants(remote_doc: dict, field: str) -> bool:
@@ -608,6 +637,17 @@ def push(
                 print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
         return "dry run"
 
+    # Every remote body we have seen too (the last synced one and an unmerged
+    # conflicting one): a Web edit removing the link after we took it in must
+    # not turn the upload it asked for into ours.
+    seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
+    _confirm_remote_linked_uploads(
+        path,
+        config.get("ignore", []),
+        new_uploads,
+        [remote_doc.get("body", ""), *seen],
+        assume_yes,
+    )
     _confirm_large_uploads(new_uploads, assume_yes)
 
     pending_create = bool(saved and saved.get("pending_create"))
@@ -719,7 +759,8 @@ def push(
     new_count = len(new_uploads)
     print(f"pushed {entity}/{eid}: {title}")
     print(f"  body {'updated' if body_changed else 'unchanged'} (markdown)")
-    print(f"  uploads: {reused_count} reused, {new_count} new")
+    named = f" ({', '.join(path.name for path in new_uploads)})" if new_count else ""
+    print(f"  uploads: {reused_count} reused, {new_count} new{named}")
     if new_links:
         print(f"  links: {len(new_links)} new")
     if permission_changes:
@@ -1025,23 +1066,25 @@ def _coalesce_attachments(remote: Remote, uploads: list[dict]):
         if len(group) == 1:
             result.append((group[0], None))
             continue
-        candidates = []
+        # Only the first download is kept for placement; the others are hashed
+        # and dropped, so a large same-name group never piles up in memory.
+        digests = set()
+        kept = None
         for upload in group:
             digest = _remote_sha256(upload)
-            data = None
             if digest is None:
                 data = remote.download(upload["id"])
                 digest = hashlib.sha256(data).hexdigest()
-            candidates.append((upload, data, digest))
-        if any(item[2] != candidates[0][2] for item in candidates[1:]):
+                if kept is None:
+                    kept = (upload, data)
+                del data
+            digests.add(digest)
+        if len(digests) > 1:
             name = _upload_name(group[0])
             raise RuntimeError(
                 f"attachment basename collision with different content: {name}"
             )
-        upload, data, _ = next(
-            (item for item in candidates if item[1] is not None), candidates[0]
-        )
-        result.append((upload, data))
+        result.append(kept or (group[0], None))
     return result
 
 
