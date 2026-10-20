@@ -799,6 +799,9 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
             "then run 'elport merge --resolved'"
         )
 
+    # Windows editors save CRLF but the sidecars are LF, and git merge-file
+    # compares bytes: align the document or every line conflicts.
+    frontmatter.atomic_write(path, path.read_text(encoding="utf-8"))
     result = subprocess.run(
         ["git", "merge-file", "--", str(path), str(base), str(remote)],
         capture_output=True,
@@ -840,7 +843,9 @@ def _reject_existing_sidecars(writes: list[tuple[Path, str]]) -> None:
             raise RuntimeError(
                 f"refusing to overwrite symlink at sidecar path: {path.name}"
             )
-        if path.exists() and path.read_bytes() != content.encode("utf-8"):
+        # Fold CRLF so a sidecar a Windows editor re-saved still matches.
+        existing = path.read_bytes().replace(b"\r\n", b"\n") if path.exists() else None
+        if existing is not None and existing != content.encode("utf-8"):
             raise RuntimeError(
                 f"refusing to overwrite existing file at sidecar path: {path.name}"
             )

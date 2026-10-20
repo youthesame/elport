@@ -43,6 +43,19 @@ def test_merge_cleanly_updates_document_and_deletes_sidecars(tmp_path, capsys):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_merge_ignores_crlf_in_a_document_saved_by_a_windows_editor(tmp_path):
+    # elport writes the sidecars with LF; git merge-file compares bytes.
+    doc = tmp_path / "report.md"
+    doc.write_bytes(b"local first\r\nmiddle\r\nlast\r\n")
+    (tmp_path / "report.base.md").write_bytes(b"first\nmiddle\nlast\n")
+    (tmp_path / "report.remote.md").write_bytes(b"first\nmiddle\nremote last\n")
+
+    sync.merge(doc, {})
+
+    assert doc.read_bytes() == b"local first\nmiddle\nremote last\n"
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
 def test_clean_merge_promotes_pending_remote_and_allows_regular_push(
     tmp_path, monkeypatch, configured
 ):

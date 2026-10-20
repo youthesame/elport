@@ -513,12 +513,18 @@ def test_pull_dirty_refuses_to_clobber_unrelated_base_sidecar(
     assert not (tmp_path / "report.remote.md").exists()
 
 
-def test_pull_dirty_re_pull_allows_matching_sidecars(tmp_path, monkeypatch, configured):
+# "\r\n": a Windows editor re-saved the sidecars.
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_pull_dirty_re_pull_allows_matching_sidecars(
+    tmp_path, monkeypatch, configured, newline
+):
     doc = tmp_path / "report.md"
     write_doc(doc, "edited")
     meta = frontmatter.parse(doc.read_text())[0]
-    (tmp_path / "report.remote.md").write_text(frontmatter.render(meta, "remote"))
-    (tmp_path / "report.base.md").write_text(frontmatter.render(meta, "local"))
+    remote_sidecar = tmp_path / "report.remote.md"
+    remote_sidecar.write_text(frontmatter.render(meta, "remote"), newline=newline)
+    base_sidecar = tmp_path / "report.base.md"
+    base_sidecar.write_text(frontmatter.render(meta, "local"), newline=newline)
     client = FakeClient(gets=[{"body": "remote"}])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state(remote="base"))
 
