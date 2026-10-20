@@ -799,9 +799,10 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
             "then run 'elport merge --resolved'"
         )
 
-    # Windows editors save CRLF but the sidecars are LF, and git merge-file
-    # compares bytes: align the document or every line conflicts.
-    frontmatter.atomic_write(path, path.read_text(encoding="utf-8"))
+    # git merge-file compares bytes, so a file a Windows editor saved with CRLF
+    # would conflict on every line against LF ones: align all three to LF.
+    for merge_input in (path, base, remote):
+        frontmatter.atomic_write(merge_input, merge_input.read_text(encoding="utf-8"))
     result = subprocess.run(
         ["git", "merge-file", "--", str(path), str(base), str(remote)],
         capture_output=True,
@@ -903,9 +904,9 @@ def _raise_conflict(
     frontmatter.atomic_write(_base_sidecar_path(path), base_sidecar)
     print(
         "git merge-file -- "
-        f"{shlex.quote(path.as_posix())} "
-        f"{shlex.quote(_base_sidecar_path(path).as_posix())} "
-        f"{shlex.quote(_sidecar_path(path).as_posix())}",
+        f"{shlex.quote(str(path))} "
+        f"{shlex.quote(str(_base_sidecar_path(path)))} "
+        f"{shlex.quote(str(_sidecar_path(path)))}",
         file=sys.stderr,
     )
     state.save(

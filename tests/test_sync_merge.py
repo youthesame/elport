@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shlex
 import shutil
 from pathlib import Path
 
@@ -43,12 +44,20 @@ def test_merge_cleanly_updates_document_and_deletes_sidecars(tmp_path, capsys):
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
-def test_merge_ignores_crlf_in_a_document_saved_by_a_windows_editor(tmp_path):
-    # elport writes the sidecars with LF; git merge-file compares bytes.
+# Each merge input in turn was saved with CRLF by a Windows editor; elport
+# writes LF and git merge-file compares bytes.
+@pytest.mark.parametrize("crlf", ["report.md", "report.base.md", "report.remote.md"])
+def test_merge_ignores_crlf_in_a_file_saved_by_a_windows_editor(tmp_path, crlf):
     doc = tmp_path / "report.md"
-    doc.write_bytes(b"local first\r\nmiddle\r\nlast\r\n")
-    (tmp_path / "report.base.md").write_bytes(b"first\nmiddle\nlast\n")
-    (tmp_path / "report.remote.md").write_bytes(b"first\nmiddle\nremote last\n")
+    inputs = {
+        "report.md": b"local first\nmiddle\nlast\n",
+        "report.base.md": b"first\nmiddle\nlast\n",
+        "report.remote.md": b"first\nmiddle\nremote last\n",
+    }
+    for name, data in inputs.items():
+        (tmp_path / name).write_bytes(
+            data.replace(b"\n", b"\r\n") if name == crlf else data
+        )
 
     sync.merge(doc, {})
 
@@ -452,8 +461,11 @@ def test_merge_command_preserves_and_quotes_relative_document_path(
         sync.pull(doc, client, {})
 
     assert (
-        "git merge-file -- 'notes/my report.md' 'notes/my report.base.md' "
-        "'notes/my report.remote.md'"
+        "git merge-file -- "
+        + " ".join(
+            shlex.quote(str(Path("notes") / name))
+            for name in ("my report.md", "my report.base.md", "my report.remote.md")
+        )
     ) in capsys.readouterr().err
 
 
