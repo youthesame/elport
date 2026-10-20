@@ -142,7 +142,7 @@ def test_push_order_includes_post_upload_recheck(
     assert capsys.readouterr().out == (
         "pushed experiments/1: Test\n"
         "  body updated (markdown)\n"
-        "  uploads: 0 reused, 1 new\n"
+        "  uploads: 0 reused, 1 new (data.csv)\n"
         "  → https://e.example/experiments/1\n"
     )
 
@@ -1412,3 +1412,47 @@ def test_push_resolves_a_link_target_under_its_own_config(
     sync.push(doc, client, {})
 
     assert client.links == [("experiments", 13, "items", 5)]
+
+
+def _pulled_link_doc(tmp_path, monkeypatch):
+    """A Web-side editor linked a local file name; pull brought it into the note."""
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    (tmp_path / "private.txt").write_text("secret")
+    pulled = "see [x](private.txt)"
+    Store(monkeypatch, {"1": saved_state()})
+    sync.pull(doc, FakeClient(gets=[{"body": pulled}]), {})
+    return doc, pulled
+
+
+def test_push_asks_before_uploading_a_file_the_remote_body_linked(
+    tmp_path, monkeypatch, configured
+):
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
+    client = FakeClient(remote_doc={"body": pulled})
+
+    with pytest.raises(RuntimeError, match=r"private\.txt.*re-run with --yes"):
+        sync.push(doc, client, {})
+
+    assert "upload" not in client.calls
+
+
+def test_push_uploads_a_remote_linked_file_with_yes(tmp_path, monkeypatch, configured):
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
+    client = FakeClient(remote_doc={"body": pulled, "content_type": 2})
+
+    sync.push(doc, client, {}, assume_yes=True)
+
+    assert "upload" in client.calls
+
+
+def test_push_names_new_uploads(tmp_path, monkeypatch, configured, capsys):
+    doc = tmp_path / "report.md"
+    (tmp_path / "plot.png").write_bytes(b"png")
+    write_doc(doc, "![p](plot.png)")
+    client = FakeClient(remote_doc={"body": "remote", "content_type": 2})
+    Store(monkeypatch, {"1": saved_state()})
+
+    sync.push(doc, client, {})
+
+    assert "uploads: 0 reused, 1 new (plot.png)" in capsys.readouterr().out

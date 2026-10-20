@@ -221,3 +221,29 @@ def test_fetch_identical_conflict_copy_does_not_hide_a_differing_local_file(
 
     assert client.calls == ["uploads", "download"]
     assert "conflicts written to: raw_data.csv.remote" in capsys.readouterr().out
+
+
+def test_fetch_holds_at_most_one_hashless_duplicate_in_memory(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    live = []
+
+    class Blob(bytes):
+        def __del__(self):
+            live.remove(id(self))
+
+    class Client(FakeClient):
+        def download(self, entity, eid, upload_id):
+            # A whole same-name group must not pile up in memory.
+            assert len(live) <= 1
+            blob = Blob(b"data")
+            live.append(id(blob))
+            return blob
+
+    uploads = [
+        {k: v for k, v in _upload(uid, "raw_data.csv").items() if "hash" not in k}
+        for uid in (3, 4, 5, 6)
+    ]
+    sync.fetch(doc, Client(uploads=uploads), {})
+
+    assert (tmp_path / "raw_data.csv").read_bytes() == b"data"

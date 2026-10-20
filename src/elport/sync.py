@@ -3,6 +3,7 @@ from __future__ import annotations
 import difflib
 import errno
 import hashlib
+import html
 import json
 import os
 import re
@@ -198,18 +199,47 @@ def _carried(saved: dict | None) -> dict:
     return {key: saved[key] for key in ("doc_links", "links") if saved.get(key)}
 
 
+def _confirm(what: str, names: str, question: str, assume_yes: bool) -> None:
+    if assume_yes:
+        return
+    if not _can_prompt():
+        raise RuntimeError(f"{what} requires confirmation ({names}); re-run with --yes")
+    answer = input(f"{question} {names}? [y/N] ").strip().lower()
+    if answer not in ("y", "yes"):
+        raise RuntimeError(f"{what} cancelled")
+
+
 def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
     large = [path for path in paths if path.stat().st_size > LARGE_UPLOAD_BYTES]
-    if not large or assume_yes:
-        return
-    names = ", ".join(f"{path.name} ({path.stat().st_size} bytes)" for path in large)
-    if not _can_prompt():
-        raise RuntimeError(
-            f"large upload requires confirmation ({names}); re-run with --yes"
+    if large:
+        names = ", ".join(
+            f"{path.name} ({path.stat().st_size} bytes)" for path in large
         )
-    answer = input(f"Upload large file(s) {names}? [y/N] ").strip().lower()
-    if answer not in ("y", "yes"):
-        raise RuntimeError("large upload cancelled")
+        _confirm("large upload", names, "Upload large file(s)", assume_yes)
+
+
+def _confirm_remote_linked_uploads(
+    refs, new_uploads: list[Path], remote_body: str, assume_yes: bool
+) -> None:
+    """push rewrites every local file reference to its upload URL, so a bare
+    relative path in the remote body was written by someone else (and came in on
+    a pull or merge). Uploading the local file it names is theirs to ask for, not
+    ours to grant: the user says yes first."""
+    linked = {ref.path for ref in extract(html.unescape(remote_body))}
+    named = sorted(
+        {
+            ref.file.name
+            for ref in refs
+            if ref.file in new_uploads and ref.path in linked
+        }
+    )
+    if named:
+        _confirm(
+            "upload of a file linked from the remote body",
+            ", ".join(named),
+            "The remote body links local file(s); upload",
+            assume_yes,
+        )
 
 
 def _resolve_catalog_id(entries, value, kind: str):
@@ -608,6 +638,9 @@ def push(
                 print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
         return "dry run"
 
+    _confirm_remote_linked_uploads(
+        refs, new_uploads, remote_doc.get("body", ""), assume_yes
+    )
     _confirm_large_uploads(new_uploads, assume_yes)
 
     pending_create = bool(saved and saved.get("pending_create"))
@@ -719,7 +752,8 @@ def push(
     new_count = len(new_uploads)
     print(f"pushed {entity}/{eid}: {title}")
     print(f"  body {'updated' if body_changed else 'unchanged'} (markdown)")
-    print(f"  uploads: {reused_count} reused, {new_count} new")
+    named = f" ({', '.join(path.name for path in new_uploads)})" if new_count else ""
+    print(f"  uploads: {reused_count} reused, {new_count} new{named}")
     if new_links:
         print(f"  links: {len(new_links)} new")
     if permission_changes:
@@ -1025,23 +1059,25 @@ def _coalesce_attachments(remote: Remote, uploads: list[dict]):
         if len(group) == 1:
             result.append((group[0], None))
             continue
-        candidates = []
+        # Only the first download is kept for placement; the others are hashed
+        # and dropped, so a large same-name group never piles up in memory.
+        digests = set()
+        kept = None
         for upload in group:
             digest = _remote_sha256(upload)
-            data = None
             if digest is None:
                 data = remote.download(upload["id"])
                 digest = hashlib.sha256(data).hexdigest()
-            candidates.append((upload, data, digest))
-        if any(item[2] != candidates[0][2] for item in candidates[1:]):
+                if kept is None:
+                    kept = (upload, data)
+                del data
+            digests.add(digest)
+        if len(digests) > 1:
             name = _upload_name(group[0])
             raise RuntimeError(
                 f"attachment basename collision with different content: {name}"
             )
-        upload, data, _ = next(
-            (item for item in candidates if item[1] is not None), candidates[0]
-        )
-        result.append((upload, data))
+        result.append(kept or (group[0], None))
     return result
 
 
