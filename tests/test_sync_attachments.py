@@ -4,7 +4,7 @@ import hashlib
 
 from _sync_harness import FakeClient, saved_state, write_doc
 
-from elport import frontmatter, sync
+from elport import frontmatter, sync, transclude
 
 
 def test_identical_files_with_same_basename_share_one_upload(
@@ -135,6 +135,43 @@ def test_pull_then_push_reuses_upload_with_markdown_unsafe_name(
     assert frontmatter.parse(doc.read_text(encoding="utf-8"))[1] == (
         f"[file](<{real_name}>)"
     )
+    assert client.saved_payload is not None
+    assert client.saved_payload["body"] == f"[file]({url})"
+    assert "upload" not in client.calls
+
+
+def test_pull_then_push_reuses_upload_whose_name_windows_rewrote(
+    tmp_path, monkeypatch, configured
+):
+    monkeypatch.setattr(transclude, "_WINDOWS", True)
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": 'say "hi".png',
+        "storage": 1,
+        "filesize": 4,
+    }
+    url = sync.download_url("https://e.example", upload)
+    remote = {"body": f"[file]({url})", "tags": ""}
+    client = FakeClient(
+        gets=[remote, remote, remote, {**remote, "content_type": 2}],
+        uploads=[upload],
+    )
+    stored_state = saved_state()
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+
+    def save_state(*args):
+        stored_state.clear()
+        stored_state.update(args[-1])
+
+    monkeypatch.setattr(sync.state, "save", save_state)
+
+    sync.pull(doc, client, {})
+    sync.push(doc, client, {})
+
+    assert (tmp_path / "say _hi_.png").is_file()
     assert client.saved_payload is not None
     assert client.saved_payload["body"] == f"[file]({url})"
     assert "upload" not in client.calls

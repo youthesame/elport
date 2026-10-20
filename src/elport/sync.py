@@ -103,7 +103,8 @@ def _remote_sha256(upload: dict) -> str | None:
 
 
 def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
-    candidates = [u for u in uploads if u.get("real_name") == path.name]
+    # Compare as pull named the file: safe_name may have rewritten real_name.
+    candidates = [u for u in uploads if _upload_name(u) == path.name]
     local_hash = None
     for upload in candidates:
         remote_hash = _remote_sha256(upload)
@@ -934,7 +935,7 @@ def _write_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
     if nofollow is None or os.open not in os.supports_dir_fd:
         # Windows' exclusive create follows a symlink swapped in after validation;
         # linking a finished temp file into place never does.
-        fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=f".{target.name}.")
+        fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=".elport-")
         try:
             with os.fdopen(fd, "wb") as stream:
                 stream.write(data)
@@ -946,6 +947,11 @@ def _write_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
                         f"unsafe attachment destination: {target.name}"
                     ) from None
                 raise
+            except OSError:
+                # No hard links (FAT/exFAT): those have no symlinks either, so
+                # an exclusive create cannot be redirected there.
+                with target.open("xb") as stream:
+                    stream.write(data)
         finally:
             Path(temporary).unlink(missing_ok=True)
         return
@@ -976,7 +982,7 @@ def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None
     bytes an idempotent re-pull is fine; otherwise refuse. Document names are
     unrestricted, so the destination is not necessarily ours."""
     _validate_attachment_target(target, doc_dir)
-    fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=f".{target.name}.")
+    fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=".elport-")
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)
