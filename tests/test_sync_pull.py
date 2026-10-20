@@ -726,9 +726,13 @@ def test_pull_checks_attachment_destination_after_download(
     assert not outside.exists()
 
 
+# without_dir_fd: the fallback for platforms without O_NOFOLLOW/dir_fd (Windows).
+@pytest.mark.parametrize("without_dir_fd", [False, True])
 def test_attachment_write_does_not_follow_symlink_swapped_after_validation(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, without_dir_fd
 ):
+    if without_dir_fd:
+        monkeypatch.setattr(sync.os, "supports_dir_fd", set())
     target = tmp_path / "attachment.bin"
     outside = tmp_path.parent / f"{tmp_path.name}-outside.bin"
     validate = sync._validate_attachment_target

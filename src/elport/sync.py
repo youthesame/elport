@@ -931,15 +931,22 @@ def _write_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
     _validate_attachment_target(target, doc_dir)
     nofollow = getattr(os, "O_NOFOLLOW", None)
     if nofollow is None or os.open not in os.supports_dir_fd:
+        # Windows' exclusive create follows a symlink swapped in after validation;
+        # linking a finished temp file into place never does.
+        fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=f".{target.name}.")
         try:
-            with target.open("xb") as stream:
+            with os.fdopen(fd, "wb") as stream:
                 stream.write(data)
-        except FileExistsError:
-            if target.is_symlink():
-                raise RuntimeError(
-                    f"unsafe attachment destination: {target.name}"
-                ) from None
-            raise
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                if target.is_symlink():
+                    raise RuntimeError(
+                        f"unsafe attachment destination: {target.name}"
+                    ) from None
+                raise
+        finally:
+            Path(temporary).unlink(missing_ok=True)
         return
     directory_fd = os.open(
         doc_dir.resolve(), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
