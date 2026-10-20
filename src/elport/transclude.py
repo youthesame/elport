@@ -466,6 +466,14 @@ def plan(
     return refs
 
 
+def local_files(
+    text: str, doc_dir: Path, ignore: list[IgnoreLayer] | None = None
+) -> set[Path]:
+    """The files plan() would upload for text, quietly: no warnings, no collisions."""
+    files = (_candidate(doc_dir, ref.path, ignore or [])[0] for ref in extract(text))
+    return {file for file in files if file is not None}
+
+
 def replace_spans(text: str, refs: list[Reference], urls: dict[Path, str]) -> str:
     normalized = {p.resolve(): value for p, value in urls.items()}
     pieces: list[str] = []

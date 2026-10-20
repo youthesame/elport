@@ -1485,3 +1485,17 @@ def test_force_push_still_asks_after_the_web_side_removed_the_link(
         sync.push(doc, client, {}, force=True)
 
     assert "upload" not in client.calls
+
+
+@pytest.mark.parametrize("spelling", ["./private.txt", "private.txt#top"])
+def test_push_asks_when_a_remote_link_is_respelled_locally(
+    spelling, tmp_path, monkeypatch, configured
+):
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
+    write_doc(doc, f"see [x]({spelling})")
+    client = FakeClient(remote_doc={"body": pulled})
+
+    with pytest.raises(RuntimeError, match="re-run with --yes"):
+        sync.push(doc, client, {})
+
+    assert "upload" not in client.calls

@@ -20,6 +20,7 @@ from .client import NotFoundError
 from .transclude import (
     download_url,
     extract,
+    local_files,
     plan,
     relink,
     replace_spans,
@@ -220,21 +221,21 @@ def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
 
 
 def _confirm_remote_linked_uploads(
-    refs, new_uploads: list[Path], remote_bodies: list[str], assume_yes: bool
+    path: Path,
+    ignore,
+    new_uploads: list[Path],
+    remote_bodies: list[str],
+    assume_yes: bool,
 ) -> None:
     """push rewrites every local file reference to its upload URL, so a bare
     relative path in a remote body was written by someone else (and came in on
     a pull or merge). Uploading the local file it names is theirs to ask for, not
-    ours to grant: the user says yes first. The bodies are parsed exactly as the
-    pulled note is, so the same text yields the same references."""
-    linked = {ref.path for body in remote_bodies for ref in extract(body)}
-    named = sorted(
-        {
-            ref.file.name
-            for ref in refs
-            if ref.file in new_uploads and ref.path in linked
-        }
+    ours to grant: the user says yes first. Links match by the file they resolve
+    to, so respelling one locally (./x, x#top) still asks."""
+    linked = set().union(
+        *(local_files(body, path.parent, ignore) for body in remote_bodies)
     )
+    named = sorted(file.name for file in new_uploads if file in linked)
     if named:
         names = ", ".join(named)
         _confirm(
@@ -639,7 +640,8 @@ def push(
     # The last synced body too: a Web edit removing the link after our pull
     # must not turn the upload it asked for into ours.
     _confirm_remote_linked_uploads(
-        refs,
+        path,
+        config.get("ignore", []),
         new_uploads,
         [remote_doc.get("body", ""), (saved or {}).get("remote_base", "")],
         assume_yes,
