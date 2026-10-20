@@ -1499,3 +1499,21 @@ def test_push_asks_when_a_remote_link_is_respelled_locally(
         sync.push(doc, client, {})
 
     assert "upload" not in client.calls
+
+
+def test_force_push_asks_for_a_link_from_an_unmerged_conflicting_remote(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "private.txt").write_text("secret")
+    write_doc(doc, "local edit")
+    Store(monkeypatch, {"1": saved_state()})
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, FakeClient(gets=[{"body": "see [x](private.txt)"}]), {})
+    write_doc(doc, "local edit, merged: see [x](private.txt)")
+    client = FakeClient(remote_doc={"body": "the link is gone"})
+
+    with pytest.raises(RuntimeError, match="re-run with --yes"):
+        sync.push(doc, client, {}, force=True)
+
+    assert "upload" not in client.calls

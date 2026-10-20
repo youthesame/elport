@@ -637,13 +637,15 @@ def push(
                 print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
         return "dry run"
 
-    # The last synced body too: a Web edit removing the link after our pull
-    # must not turn the upload it asked for into ours.
+    # Every remote body we have seen too (the last synced one and an unmerged
+    # conflicting one): a Web edit removing the link after we took it in must
+    # not turn the upload it asked for into ours.
+    seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
     _confirm_remote_linked_uploads(
         path,
         config.get("ignore", []),
         new_uploads,
-        [remote_doc.get("body", ""), (saved or {}).get("remote_base", "")],
+        [remote_doc.get("body", ""), *seen],
         assume_yes,
     )
     _confirm_large_uploads(new_uploads, assume_yes)
