@@ -92,7 +92,6 @@ def test_clean_merge_promotes_pending_remote_and_allows_regular_push(
         gets=[
             {"body": remote_body},
             {"body": remote_body},
-            {"body": remote_body},
             {"body": "stored merged", "content_type": 2},
         ]
     )
@@ -147,7 +146,6 @@ def test_resolved_merge_without_git_promotes_pending_remote_and_allows_regular_p
     )
     client = FakeClient(
         gets=[
-            {"body": remote_body},
             {"body": remote_body},
             {"body": remote_body},
             {"body": "resolved", "content_type": 2},
@@ -240,7 +238,6 @@ def test_conflicted_merge_promotes_pending_remote_and_allows_regular_push(
     )
     client = FakeClient(
         gets=[
-            {"body": remote_body},
             {"body": remote_body},
             {"body": remote_body},
             {"body": "resolved", "content_type": 2},

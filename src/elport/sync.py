@@ -693,7 +693,26 @@ def push(
         if target != current:
             payload[f"can{field}_base"] = target
 
-    if saved and not force:
+    # A PATCH costs a round trip and can add a revision; skip one that changes nothing.
+    unchanged = (
+        saved
+        and not pending_create
+        and body == saved.get("local_base")
+        and remote_doc.get("body", "") == saved.get("remote_base")
+        and doc_links == saved.get("doc_links", {})
+        and not new_uploads
+        # A Web-side re-upload leaves the body pointing at a deleted attachment.
+        and not unmatched_download_urls(remote_doc.get("body", ""), uploads, base_url)
+        and all(
+            remote_doc.get(key) == value
+            for key, value in payload.items()
+            if key != "body"
+        )
+    )
+    # Listing, hashing, uploading and prompting leave time for a Web edit since
+    # the first read; with none of them, a second read only costs a round trip.
+    moved = any(target != current for _, _, target, current in permission_changes)
+    if saved and not force and not unchanged and (files or moved):
         # A resumed create has no stored base, so guard the window opened by this
         # run instead: the remote must still look like it did when we started.
         reference = (
@@ -712,7 +731,7 @@ def push(
 
     if pending_create:
         mark_created(base_url, entity, eid, identity.get("team"), body_sent=True)
-    stored = remote.patch(payload)
+    stored = remote_doc if unchanged else remote.patch(payload)
     if stored.get("content_type") != 2:
         raise RuntimeError("remote entity is not in markdown mode")
 

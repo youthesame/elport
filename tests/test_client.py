@@ -246,3 +246,19 @@ def test_client_refuses_to_send_the_key_without_https(url):
 
 def test_client_accepts_https_in_any_case():
     assert Client("HTTPS://e.example/", "key").base == "HTTPS://e.example/api/v2"
+
+
+def test_me_is_fetched_once_per_client(monkeypatch):
+    # A folder push asks for the identity once per document; it cannot change
+    # within one command.
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append(args) or _Response({"userid": 3}),
+    )
+
+    assert client.me() == {"userid": 3}
+    assert client.me() == {"userid": 3}
+    assert calls == [("GET", "/users/me")]

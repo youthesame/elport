@@ -1476,3 +1476,29 @@ def test_clone_all_removes_the_empty_directory_when_a_clone_fails(
 def test_clone_needs_exactly_one_of_id_and_all(argv, capsys):
     assert cli.main(argv) == 1
     assert "exactly one of <id> or --all" in capsys.readouterr().err
+
+
+def test_a_batch_shares_one_client_per_server(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("ELABFTW_BASE_URL", raising=False)
+    monkeypatch.delenv("ELABFTW_API_KEY", raising=False)
+    monkeypatch.setattr(
+        cli.config,
+        "load",
+        lambda *args: {
+            "default_profile": "test",
+            "profiles": {"test": {"base_url": "https://e.example"}},
+        },
+    )
+    monkeypatch.setattr(cli.config.keyring, "get_password", lambda *args: "secret")
+    elport_doc(tmp_path / "a.md", id=1)
+    elport_doc(tmp_path / "b.md", id=2)
+    sessions = []
+
+    def fake_push(path, client, data, profile, dry_run, force, yes):
+        sessions.append(client.session)
+        return "pushed (body unchanged)"
+
+    monkeypatch.setattr(cli, "push", fake_push)
+
+    assert cli.main(["push", str(tmp_path)]) == 0
+    assert len(sessions) == 2 and sessions[0] is sessions[1]
