@@ -1,3 +1,5 @@
+import os
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -1270,3 +1272,64 @@ def test_plan_knows_a_document_by_front_matter_not_by_name(tmp_path):
 
     assert doc_ref.doc == target.resolve() and doc_ref.file is None
     assert data_ref.doc is None and data_ref.file == (tmp_path / "data.bin").resolve()
+
+
+def _insensitive_alias(monkeypatch, real: Path, alias: str) -> None:
+    """Make ``alias`` open ``real`` without being listed, as on APFS or NTFS."""
+    try:
+        os.link(real, real.with_name(alias))
+    except FileExistsError:
+        pass  # this filesystem already folds the spelling
+    listdir = os.listdir
+    monkeypatch.setattr(
+        os, "listdir", lambda path=".": [e for e in listdir(path) if e != alias]
+    )
+
+
+@pytest.mark.parametrize(
+    ("on_disk", "reference", "pattern"),
+    [
+        ("secret.txt", "SECRET.txt", "secret.txt"),
+        ("README.md", "readme.md", "[!a-z]*"),
+        (unicodedata.normalize("NFC", "café.txt"), "café.txt", "café.txt"),
+    ],
+)
+def test_ignore_matches_the_on_disk_name_of_a_respelled_reference(
+    tmp_path: Path, monkeypatch, on_disk: str, reference: str, pattern: str
+):
+    real = tmp_path / on_disk
+    real.write_text("secret", encoding="utf-8")
+    _insensitive_alias(monkeypatch, real, reference)
+
+    assert plan(f"[x]({reference})", tmp_path, [IgnoreLayer([pattern])])[0].file is None
+
+
+@pytest.mark.parametrize(
+    ("on_disk", "reference"),
+    [
+        ("data.csv", "Data.csv"),
+        (unicodedata.normalize("NFD", "データ.csv"), "データ.csv"),
+    ],
+)
+def test_respelled_reference_that_is_not_ignored_still_uploads(
+    tmp_path: Path, monkeypatch, on_disk: str, reference: str
+):
+    real = tmp_path / on_disk
+    real.write_text("data", encoding="utf-8")
+    _insensitive_alias(monkeypatch, real, reference)
+
+    assert plan(f"[x]({reference})", tmp_path, [IgnoreLayer(["*.txt"])])[0].file
+
+
+def test_unlistable_directory_warns_instead_of_aborting(
+    tmp_path: Path, monkeypatch, capsys
+):
+    (tmp_path / "data.csv").write_text("data", encoding="utf-8")
+
+    def denied(path="."):
+        raise PermissionError(path)
+
+    monkeypatch.setattr(os, "listdir", denied)
+
+    assert plan("[x](data.csv)", tmp_path)[0].file is None
+    assert "data.csv" in capsys.readouterr().err
