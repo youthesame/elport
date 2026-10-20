@@ -103,7 +103,8 @@ def _remote_sha256(upload: dict) -> str | None:
 
 
 def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
-    candidates = [u for u in uploads if u.get("real_name") == path.name]
+    # Compare as pull named the file: safe_name may have rewritten real_name.
+    candidates = [u for u in uploads if _upload_name(u) == path.name]
     local_hash = None
     for upload in candidates:
         remote_hash = _remote_sha256(upload)
@@ -799,6 +800,10 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
             "then run 'elport merge --resolved'"
         )
 
+    # git merge-file compares bytes, so a file a Windows editor saved with CRLF
+    # would conflict on every line against LF ones: align all three to LF.
+    for merge_input in (path, base, remote):
+        frontmatter.atomic_write(merge_input, merge_input.read_text(encoding="utf-8"))
     result = subprocess.run(
         ["git", "merge-file", "--", str(path), str(base), str(remote)],
         capture_output=True,
@@ -840,7 +845,9 @@ def _reject_existing_sidecars(writes: list[tuple[Path, str]]) -> None:
             raise RuntimeError(
                 f"refusing to overwrite symlink at sidecar path: {path.name}"
             )
-        if path.exists() and path.read_bytes() != content.encode("utf-8"):
+        # Fold CRLF so a sidecar a Windows editor re-saved still matches.
+        existing = path.read_bytes().replace(b"\r\n", b"\n") if path.exists() else None
+        if existing is not None and existing != content.encode("utf-8"):
             raise RuntimeError(
                 f"refusing to overwrite existing file at sidecar path: {path.name}"
             )
@@ -926,15 +933,27 @@ def _write_attachment(target: Path, data: bytes, doc_dir: Path) -> None:
     _validate_attachment_target(target, doc_dir)
     nofollow = getattr(os, "O_NOFOLLOW", None)
     if nofollow is None or os.open not in os.supports_dir_fd:
+        # Windows' exclusive create follows a symlink swapped in after validation;
+        # linking a finished temp file into place never does.
+        fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=".elport-")
         try:
-            with target.open("xb") as stream:
+            with os.fdopen(fd, "wb") as stream:
                 stream.write(data)
-        except FileExistsError:
-            if target.is_symlink():
-                raise RuntimeError(
-                    f"unsafe attachment destination: {target.name}"
-                ) from None
-            raise
+            try:
+                os.link(temporary, target)
+            except FileExistsError:
+                if target.is_symlink():
+                    raise RuntimeError(
+                        f"unsafe attachment destination: {target.name}"
+                    ) from None
+                raise
+            except OSError:
+                # No hard links (FAT/exFAT): those have no symlinks either, so
+                # an exclusive create cannot be redirected there.
+                with target.open("xb") as stream:
+                    stream.write(data)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
         return
     directory_fd = os.open(
         doc_dir.resolve(), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
@@ -963,7 +982,7 @@ def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None
     bytes an idempotent re-pull is fine; otherwise refuse. Document names are
     unrestricted, so the destination is not necessarily ours."""
     _validate_attachment_target(target, doc_dir)
-    fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=f".{target.name}.")
+    fd, temporary = tempfile.mkstemp(dir=doc_dir, prefix=".elport-")
     try:
         with os.fdopen(fd, "wb") as stream:
             stream.write(data)

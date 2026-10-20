@@ -15,12 +15,9 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  # Lint and type checks do not depend on the OS or Python version: run them once.
+  lint:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -29,8 +26,6 @@ jobs:
       # setup-uv stopped publishing major tags at v8; pin the full version.
       # Caching defaults to `auto`, which is what we want here.
       - uses: astral-sh/setup-uv@v10.2.0
-        with:
-          python-version: ${{ matrix.python-version }}
 
       # --locked fails the build if uv.lock has drifted from pyproject.toml.
       - run: uv sync --locked --extra dev
@@ -44,5 +39,29 @@ jobs:
       - name: ty check
         run: uv run ty check src
 
-      - name: pytest
-        run: uv run pytest
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Every supported Python on Linux; macOS and Windows at the oldest and
+        # newest stable Python, which is where platform differences show up.
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14", "3.15"]
+        include:
+          - { os: macos-latest, python-version: "3.10" }
+          - { os: macos-latest, python-version: "3.14" }
+          - { os: windows-latest, python-version: "3.10" }
+          - { os: windows-latest, python-version: "3.14" }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # hatch-vcs derives the version from tags.
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - run: uv sync --locked --extra dev
+
+      - run: uv run pytest

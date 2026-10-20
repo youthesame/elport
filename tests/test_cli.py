@@ -335,6 +335,7 @@ def test_status_of_a_directory_without_documents_is_a_friendly_error(
     assert "Is a directory" not in error
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX file modes")
 def test_atomic_write_preserves_existing_permissions(tmp_path):
     path = tmp_path / "report.md"
     path.write_text("before", encoding="utf-8")

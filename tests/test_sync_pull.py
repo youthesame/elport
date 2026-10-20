@@ -513,12 +513,18 @@ def test_pull_dirty_refuses_to_clobber_unrelated_base_sidecar(
     assert not (tmp_path / "report.remote.md").exists()
 
 
-def test_pull_dirty_re_pull_allows_matching_sidecars(tmp_path, monkeypatch, configured):
+# "\r\n": a Windows editor re-saved the sidecars.
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+def test_pull_dirty_re_pull_allows_matching_sidecars(
+    tmp_path, monkeypatch, configured, newline
+):
     doc = tmp_path / "report.md"
     write_doc(doc, "edited")
     meta = frontmatter.parse(doc.read_text())[0]
-    (tmp_path / "report.remote.md").write_text(frontmatter.render(meta, "remote"))
-    (tmp_path / "report.base.md").write_text(frontmatter.render(meta, "local"))
+    remote_sidecar = tmp_path / "report.remote.md"
+    remote_sidecar.write_text(frontmatter.render(meta, "remote"), newline=newline)
+    base_sidecar = tmp_path / "report.base.md"
+    base_sidecar.write_text(frontmatter.render(meta, "local"), newline=newline)
     client = FakeClient(gets=[{"body": "remote"}])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state(remote="base"))
 
@@ -720,9 +726,13 @@ def test_pull_checks_attachment_destination_after_download(
     assert not outside.exists()
 
 
+# without_dir_fd: the fallback for platforms without O_NOFOLLOW/dir_fd (Windows).
+@pytest.mark.parametrize("without_dir_fd", [False, True])
 def test_attachment_write_does_not_follow_symlink_swapped_after_validation(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, without_dir_fd
 ):
+    if without_dir_fd:
+        monkeypatch.setattr(sync.os, "supports_dir_fd", set())
     target = tmp_path / "attachment.bin"
     outside = tmp_path.parent / f"{tmp_path.name}-outside.bin"
     validate = sync._validate_attachment_target
@@ -756,6 +766,42 @@ def test_attachment_write_works_without_dir_fd_support(tmp_path, monkeypatch):
     monkeypatch.setattr(sync.os, "supports_dir_fd", set())
 
     sync._write_attachment(target, b"data", tmp_path)
+
+    assert target.read_bytes() == b"data"
+
+
+def test_attachment_write_works_without_hard_links(tmp_path, monkeypatch):
+    # FAT/exFAT: no hard links (and no symlinks either).
+    def no_hard_links(*args):
+        raise PermissionError("hard links are not supported")
+
+    target = tmp_path / "attachment.bin"
+    monkeypatch.setattr(sync.os, "supports_dir_fd", set())
+    monkeypatch.setattr(sync.os, "link", no_hard_links)
+
+    sync._write_attachment(target, b"data", tmp_path)
+
+    assert target.read_bytes() == b"data"
+    assert [p.name for p in tmp_path.iterdir()] == ["attachment.bin"]
+
+
+@pytest.mark.parametrize("without_dir_fd", [False, True])
+def test_attachment_write_accepts_a_name_at_the_length_limit(
+    tmp_path, monkeypatch, without_dir_fd
+):
+    if without_dir_fd:
+        monkeypatch.setattr(sync.os, "supports_dir_fd", set())
+    target = tmp_path / ("a" * 251 + ".bin")
+
+    sync._write_attachment(target, b"data", tmp_path)
+
+    assert target.read_bytes() == b"data"
+
+
+def test_conflict_attachment_accepts_a_name_at_the_length_limit(tmp_path):
+    target = tmp_path / ("a" * 244 + ".bin.remote")
+
+    sync._place_conflict_attachment(target, b"data", tmp_path)
 
     assert target.read_bytes() == b"data"
 

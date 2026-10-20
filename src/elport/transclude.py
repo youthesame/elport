@@ -614,6 +614,18 @@ def unmatched_download_urls(text: str, uploads: list[dict], base_url: str) -> li
     return names
 
 
+_WINDOWS = sys.platform == "win32"
+_WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL"} | {
+    f"{port}{n}" for port in ("COM", "LPT") for n in range(1, 10)
+}
+
+
 def safe_name(name: str) -> str:
     cleaned = Path(name.replace("\\", "/")).name.lstrip("~")
+    if _WINDOWS:
+        # Characters Windows cannot store, a trailing dot or space it would drop,
+        # and device names that would open a device instead of a file.
+        cleaned = re.sub(r'[<>:"|?*\x00-\x1f]', "_", cleaned).rstrip(". ")
+        if cleaned.split(".")[0].upper() in _WINDOWS_RESERVED:
+            cleaned = "_" + cleaned
     return cleaned if cleaned not in ("", ".", "..") else "attachment"

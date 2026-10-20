@@ -1,4 +1,5 @@
 import os
+import sys
 
 import keyring.errors
 import pytest
@@ -238,6 +239,7 @@ def test_resolve_does_not_use_project_plaintext_key(tmp_path, monkeypatch):
         config.resolve(merged, "lab", {})
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX file modes")
 def test_login_saves_plaintext_key_when_keyring_is_unavailable(
     tmp_path, monkeypatch, capsys
 ):
@@ -268,6 +270,7 @@ def test_login_saves_plaintext_key_when_keyring_is_unavailable(
     assert "no OS keyring" in capsys.readouterr().err
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows has no POSIX file modes")
 def test_login_replaces_config_from_mode_0600_temporary_file(tmp_path, monkeypatch):
     user = tmp_path / "config.toml"
     monkeypatch.setattr(config, "config_path", lambda: user)

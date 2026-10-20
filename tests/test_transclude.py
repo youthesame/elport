@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from _sync_harness import elport_doc
 
-from elport import frontmatter
+from elport import frontmatter, transclude
 from elport.transclude import (
     IgnoreLayer,
     download_url,
@@ -1121,6 +1121,29 @@ def test_real_name_sanitization(unsafe: str, safe: str):
     assert safe_name(unsafe) == safe
 
 
+@pytest.mark.parametrize(
+    ("unsafe", "safe"),
+    [
+        ('say "hi".png', "say _hi_.png"),
+        ("a<b>c:d|e?f*.txt", "a_b_c_d_e_f_.txt"),
+        ("tab\there.txt", "tab_here.txt"),
+        ("trailing. ", "trailing"),
+        ("CON", "_CON"),
+        ("nul.txt", "_nul.txt"),
+        ("com1.tar.gz", "_com1.tar.gz"),
+        ("console.txt", "console.txt"),
+    ],
+)
+def test_real_name_sanitization_on_windows(monkeypatch, unsafe: str, safe: str):
+    monkeypatch.setattr(transclude, "_WINDOWS", True)
+    assert safe_name(unsafe) == safe
+
+
+def test_windows_only_characters_are_kept_elsewhere(monkeypatch):
+    monkeypatch.setattr(transclude, "_WINDOWS", False)
+    assert safe_name('say "hi".png') == 'say "hi".png'
+
+
 @pytest.mark.parametrize("unsafe", ["", ".", "..", "~.."])
 def test_dot_only_real_name_uses_attachment_fallback(unsafe: str):
     assert safe_name(unsafe) == "attachment"
@@ -1206,7 +1229,13 @@ def test_unindented_fence_after_list_item_fence_is_not_its_closer(tmp_path: Path
     [
         ("<img src={url}>", "figure 1.png"),
         ("<img src='{url}'>", "O'Brien.png"),
-        ('<img src="{url}">', 'say "hi".png'),
+        pytest.param(
+            '<img src="{url}">',
+            'say "hi".png',
+            marks=pytest.mark.skipif(
+                transclude._WINDOWS, reason="Windows cannot store a quote"
+            ),
+        ),
         ('<img src="{url}">', "a&copy;.png"),
         ('<img src="  {url}  ">', "figure 1.png"),
         ("<img src=' {url} '>", "figure 1.png"),

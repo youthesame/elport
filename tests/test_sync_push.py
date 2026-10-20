@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 import shlex
 
 import pytest
@@ -33,7 +34,9 @@ def test_push_rejects_unresolved_merge_markers_before_network(
     write_doc(doc, body)
     client = FakeClient()
 
-    with pytest.raises(RuntimeError, match=f"unresolved merge markers in {doc}"):
+    with pytest.raises(
+        RuntimeError, match=re.escape(f"unresolved merge markers in {doc}")
+    ):
         sync.push(doc, client, {})
 
     assert client.calls == []
