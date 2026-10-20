@@ -903,9 +903,9 @@ def _raise_conflict(
     frontmatter.atomic_write(_base_sidecar_path(path), base_sidecar)
     print(
         "git merge-file -- "
-        f"{shlex.quote(str(path))} "
-        f"{shlex.quote(str(_base_sidecar_path(path)))} "
-        f"{shlex.quote(str(_sidecar_path(path)))}",
+        f"{shlex.quote(path.as_posix())} "
+        f"{shlex.quote(_base_sidecar_path(path).as_posix())} "
+        f"{shlex.quote(_sidecar_path(path).as_posix())}",
         file=sys.stderr,
     )
     state.save(
