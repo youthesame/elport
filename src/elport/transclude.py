@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import filecmp
 import html
+import os
 import re
 import string
 import sys
+import unicodedata
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
@@ -311,6 +313,31 @@ def extract(text: str) -> list[Reference]:
     return sorted(out, key=lambda x: x.start)
 
 
+def _fold(name: str) -> str:
+    return unicodedata.normalize("NFC", name).casefold()
+
+
+def _on_disk(root: Path, relative: Path) -> str | None:
+    """The spelling the filesystem stores for ``relative``. On case- or
+    normalization-insensitive filesystems (APFS, NTFS) it can differ from the
+    reference, and ignore patterns must see it too."""
+    current = root
+    for part in relative.parts:
+        try:
+            entries = os.listdir(current)
+            if part not in entries:
+                part = next(
+                    entry
+                    for entry in entries
+                    if _fold(entry) == _fold(part)
+                    and os.path.samefile(current / entry, current / part)
+                )
+        except (OSError, StopIteration):
+            return None
+        current /= part
+    return current.relative_to(root).as_posix()
+
+
 def _candidate(
     doc_dir: Path, value: str, ignore: list[IgnoreLayer]
 ) -> tuple[Path | None, bool, str]:
@@ -349,7 +376,10 @@ def _candidate(
         return None, True, ""
     if any(part.startswith(".") for part in relative.parts):
         return None, True, ""
-    if _ignored(relative.as_posix(), ignore):
+    on_disk = _on_disk(root, relative)
+    if on_disk is None:
+        return None, True, ""
+    if _ignored(relative.as_posix(), ignore) or _ignored(on_disk, ignore):
         return None, False, ""
     return p, False, fragment
 
