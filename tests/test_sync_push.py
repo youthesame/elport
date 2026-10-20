@@ -1456,3 +1456,32 @@ def test_push_names_new_uploads(tmp_path, monkeypatch, configured, capsys):
     sync.push(doc, client, {})
 
     assert "uploads: 0 reused, 1 new (plot.png)" in capsys.readouterr().out
+
+
+def test_push_asks_for_a_remote_link_hidden_behind_an_escaped_comment(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    (tmp_path / "private.txt").write_text("secret")
+    pulled = "&lt;!-- [x](private.txt) --&gt;"
+    Store(monkeypatch, {"1": saved_state()})
+    sync.pull(doc, FakeClient(gets=[{"body": pulled}]), {})
+    client = FakeClient(remote_doc={"body": pulled})
+
+    with pytest.raises(RuntimeError, match="re-run with --yes"):
+        sync.push(doc, client, {})
+
+    assert "upload" not in client.calls
+
+
+def test_force_push_still_asks_after_the_web_side_removed_the_link(
+    tmp_path, monkeypatch, configured
+):
+    doc, _ = _pulled_link_doc(tmp_path, monkeypatch)
+    client = FakeClient(remote_doc={"body": "the link is gone"})
+
+    with pytest.raises(RuntimeError, match="re-run with --yes"):
+        sync.push(doc, client, {}, force=True)
+
+    assert "upload" not in client.calls

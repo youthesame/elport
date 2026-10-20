@@ -3,7 +3,6 @@ from __future__ import annotations
 import difflib
 import errno
 import hashlib
-import html
 import json
 import os
 import re
@@ -221,13 +220,14 @@ def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
 
 
 def _confirm_remote_linked_uploads(
-    refs, new_uploads: list[Path], remote_body: str, assume_yes: bool
+    refs, new_uploads: list[Path], remote_bodies: list[str], assume_yes: bool
 ) -> None:
     """push rewrites every local file reference to its upload URL, so a bare
-    relative path in the remote body was written by someone else (and came in on
+    relative path in a remote body was written by someone else (and came in on
     a pull or merge). Uploading the local file it names is theirs to ask for, not
-    ours to grant: the user says yes first."""
-    linked = {ref.path for ref in extract(html.unescape(remote_body))}
+    ours to grant: the user says yes first. The bodies are parsed exactly as the
+    pulled note is, so the same text yields the same references."""
+    linked = {ref.path for body in remote_bodies for ref in extract(body)}
     named = sorted(
         {
             ref.file.name
@@ -636,8 +636,13 @@ def push(
                 print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
         return "dry run"
 
+    # The last synced body too: a Web edit removing the link after our pull
+    # must not turn the upload it asked for into ours.
     _confirm_remote_linked_uploads(
-        refs, new_uploads, remote_doc.get("body", ""), assume_yes
+        refs,
+        new_uploads,
+        [remote_doc.get("body", ""), (saved or {}).get("remote_base", "")],
+        assume_yes,
     )
     _confirm_large_uploads(new_uploads, assume_yes)
 
