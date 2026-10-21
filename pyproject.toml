@@ -13,6 +13,8 @@ dependencies = [
   "tomli-w>=1.0",
   "tomli>=2.0; python_version < '3.11'",
   "pyyaml>=6.0",
+  # Not imported; requests uses its CA bundle. Floor drops the compromised eMudhra intermediates.
+  "certifi>=2026.10.19",
 ]
 
 [project.scripts]
