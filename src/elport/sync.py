@@ -20,6 +20,7 @@ from .client import NotFoundError
 from .transclude import (
     download_url,
     extract,
+    listed_files,
     local_files,
     plan,
     relink,
@@ -334,6 +335,13 @@ def _merge_meta(meta: dict, base: dict, remote_doc: dict) -> tuple[dict, dict]:
     return merged, new_base
 
 
+def _upload_files(refs, meta: dict, doc_dir: Path, ignore) -> list[Path]:
+    """Referenced files plus the ones front matter lists (ADR-0006)."""
+    referenced = {ref.file for ref in refs if ref.file}
+    listed = listed_files(meta.get("attachments", []), doc_dir, ignore, referenced)
+    return sorted(referenced | listed)
+
+
 def _document(path: Path, config: dict) -> tuple[dict, str, str, object]:
     meta, body = frontmatter.parse(path.read_text(encoding="utf-8"))
     entity = meta.get("entity", config.get("entity", "experiments"))
@@ -485,7 +493,7 @@ def push(
     resolved_profile, base_url, _, _ = config_module.resolve(config, profile, meta)
 
     refs = plan(body, path.parent, config.get("ignore", []))
-    files = sorted({ref.file for ref in refs if ref.file})
+    files = _upload_files(refs, meta, path.parent, config.get("ignore", []))
     link_urls, doc_links, link_targets = _document_links(refs, body)
 
     remote = Remote(client, entity, eid, base_url) if eid else None
@@ -1288,7 +1296,7 @@ def status(path: Path, client, config: dict, profile=None) -> str:
         saved = state.load(base_url, entity, str(eid))
         _check_working_copy(saved, path, entity, eid)
     refs = plan(body, path.parent, config.get("ignore", []))
-    files = sorted({ref.file for ref in refs if ref.file})
+    files = _upload_files(refs, meta, path.parent, config.get("ignore", []))
     summary = []
     if saved is None:
         print("local: base unavailable (comparison unavailable)")

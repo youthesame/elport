@@ -475,6 +475,31 @@ def plan(
     return refs
 
 
+def listed_files(
+    entries: list[str],
+    doc_dir: Path,
+    ignore: list[IgnoreLayer] | None = None,
+    referenced: set[Path] | frozenset[Path] = frozenset(),
+) -> set[Path]:
+    """The files front matter ``attachments:`` names (ADR-0006). Same path rules
+    as a reference, but an entry that would not upload is an error: it exists
+    only to be uploaded, so skipping it would be a silent miss."""
+    names = {file.name.casefold(): file for file in referenced}
+    files = set()
+    for entry in entries:
+        p, _, fragment = _candidate(doc_dir, entry, ignore or [])
+        if p is None or fragment:
+            raise ValueError(
+                f"attachments: cannot upload {entry} (must be a file under the "
+                "document directory, not hidden or ignored)"
+            )
+        previous = names.setdefault(p.name.casefold(), p)
+        if previous != p and not filecmp.cmp(previous, p, shallow=False):
+            raise ValueError(f"basename collision: {p.name}")
+        files.add(previous)
+    return files
+
+
 def local_files(
     text: str, doc_dir: Path, ignore: list[IgnoreLayer] | None = None
 ) -> set[Path]:

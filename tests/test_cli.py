@@ -228,6 +228,7 @@ status: 2
 profile: lab
 read: team
 write: owner
+attachments: [raw.csv]
 ---
 Body
 """
