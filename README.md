@@ -140,10 +140,7 @@ the union.
 `read`/`write` set the eLabFTW base visibility only, so individual Web-UI grants survive. Widening beyond your team
 asks for confirmation.
 
-`attachments` lists files that push uploads without a link in the body, such as raw data. Each entry is a file
-path under the document directory, checked like a body reference. Push fails on an entry that is missing, a
-directory, hidden, or ignored. Removing an entry does not delete the upload, and `pull` does not download listed
-files; use `fetch`.
+`attachments` lists files to upload without a body link. push fails on an entry it cannot upload.
 
 If the front matter and the CLI disagree on profile, entity, or id, elport **stops** rather than guessing.
 

@@ -16,7 +16,9 @@ files) to/from eLabFTW entities. **Local is the source of truth.**
   where they overlap; DESIGN is not edited to match, it only gains a pointer.
 - **Measured eLabFTW API facts = [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** (observation log of the external
   world; update only when the demo's version changes).
-- **User-facing usage = [README.md](README.md)** (commands, front matter, config).
+- **User-facing usage = [README.md](README.md)** (commands, front matter, config). Write each entry briefly
+  and in step with the text around it: what a user needs to use the feature, not its edge cases or rationale
+  (those belong to the tests and ADRs).
 - **Driving elport from an agent = [skills/elport/SKILL.md](skills/elport/SKILL.md)** (for the downstream operating
   context).
 
