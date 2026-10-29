@@ -1,5 +1,8 @@
 # Front matter `attachments:` uploads files the body does not reference
 
+> Superseded in part by [ADR-0007](0007-references-may-leave-the-document-directory.md):
+> entries may now leave the document directory.
+
 Until now the body was the manifest: push uploaded only files the body references, so a raw data
 file had to be linked in the body to reach the entity. Issue #3 rejected uploading every local file
 in the folder: it would push scratch files and `.env`, and without per-attachment state an

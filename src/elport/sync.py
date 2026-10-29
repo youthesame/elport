@@ -150,11 +150,9 @@ def entity_url(base_url: str, entity: str, eid: object) -> str:
     return f"{base_url.rstrip('/')}/{ENTITY_PAGES[entity]}?mode=view&id={eid}"
 
 
-def _document_links(refs, body: str):
-    """URLs for links to other documents, the record pull reverses them with
-    (sent URL → syntax family → destination as written), and each target's
-    (server, entity, id)."""
-    urls, record, targets = {}, {}, []
+def _document_links(refs):
+    """URLs for links to other documents, and each target's (server, entity, id)."""
+    urls, targets = {}, []
     for ref in refs:
         if ref.doc is None:
             continue
@@ -167,13 +165,24 @@ def _document_links(refs, body: str):
             raise ValueError(f"linked document has an invalid entity: {ref.path}")
         _, base_url, _ = config_module.base_target(own, None, meta)
         urls[ref.doc] = entity_url(base_url, entity, meta["id"])
+        targets.append((base_url.rstrip("/"), entity, meta["id"]))
+    return urls, targets
+
+
+def _written(refs, body: str, urls: dict[Path, str]) -> dict:
+    """The record pull reverses links and uploads with (sent URL → syntax family
+    → destination as written; ADR-0003, ADR-0007)."""
+    record: dict = {}
+    for ref in refs:
+        target = ref.file or ref.doc
+        if target is None:
+            continue
         # Keyed by syntax family: the same URL may have been written as an HTML
         # attribute and as a Markdown destination, which do not encode alike.
         family = "html" if ref.kind == "html" else "markdown"
-        sent = urls[ref.doc] + ref.fragment
+        sent = urls[target] + ref.fragment
         record.setdefault(sent, {})[family] = body[ref.start : ref.end]
-        targets.append((base_url.rstrip("/"), entity, meta["id"]))
-    return urls, record, targets
+    return record
 
 
 def _check_working_copy(saved: dict | None, path: Path, entity: str, eid) -> None:
@@ -221,30 +230,26 @@ def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
         _confirm("large upload", names, f"upload large file(s) {names}?", assume_yes)
 
 
-def _confirm_remote_linked_uploads(
-    path: Path,
-    ignore,
-    new_uploads: list[Path],
-    remote_bodies: list[str],
-    assume_yes: bool,
+def _skip_remote_linked(
+    path: Path, ignore, refs, listed: set[Path], remote_bodies: list[str]
 ) -> None:
     """push rewrites every local file reference to its upload URL, so a bare
-    relative path in a remote body was written by someone else (and came in on
-    a pull or merge). Uploading the local file it names is theirs to ask for, not
-    ours to grant: the user says yes first. Links match by the file they resolve
-    to, so respelling one locally (./x, x#top) still asks."""
+    path in a remote body was written by someone else (and came in on a pull or
+    merge). The file it names stays here unless the user lists it under
+    attachments:, which never comes from the server (ADR-0007). Links match by
+    the file they resolve to, so respelling one locally (./x, x#top) does not
+    count."""
     linked = set().union(
         *(local_files(body, path.parent, ignore) for body in remote_bodies)
     )
-    named = sorted(file.name for file in new_uploads if file in linked)
-    if named:
-        names = ", ".join(named)
-        _confirm(
-            "remote-linked upload",
-            names,
-            f"upload {names} (linked from the remote body)?",
-            assume_yes,
-        )
+    for ref in refs:
+        if ref.file in linked and ref.file not in listed:
+            print(
+                "warning: not uploaded, linked from the remote body "
+                f"(list it under attachments: to upload): {ref.path}",
+                file=sys.stderr,
+            )
+            ref.file = None
 
 
 def _resolve_catalog_id(entries, value, kind: str):
@@ -335,11 +340,14 @@ def _merge_meta(meta: dict, base: dict, remote_doc: dict) -> tuple[dict, dict]:
     return merged, new_base
 
 
-def _upload_files(refs, meta: dict, doc_dir: Path, ignore) -> list[Path]:
-    """Referenced files plus the ones front matter lists (ADR-0006)."""
+def _listed_files(refs, meta: dict, doc_dir: Path, ignore) -> set[Path]:
+    """The files front matter lists (ADR-0006)."""
     referenced = {ref.file for ref in refs if ref.file}
-    listed = listed_files(meta.get("attachments", []), doc_dir, ignore, referenced)
-    return sorted(referenced | listed)
+    return listed_files(meta.get("attachments", []), doc_dir, ignore, referenced)
+
+
+def _upload_files(refs, listed: set[Path]) -> list[Path]:
+    return sorted({ref.file for ref in refs if ref.file} | listed)
 
 
 def _document(path: Path, config: dict) -> tuple[dict, str, str, object]:
@@ -493,8 +501,8 @@ def push(
     resolved_profile, base_url, _, _ = config_module.resolve(config, profile, meta)
 
     refs = plan(body, path.parent, config.get("ignore", []))
-    files = _upload_files(refs, meta, path.parent, config.get("ignore", []))
-    link_urls, doc_links, link_targets = _document_links(refs, body)
+    listed = _listed_files(refs, meta, path.parent, config.get("ignore", []))
+    link_urls, link_targets = _document_links(refs)
 
     remote = Remote(client, entity, eid, base_url) if eid else None
     saved = state.load(base_url, entity, str(eid)) if eid else None
@@ -609,6 +617,18 @@ def push(
         if eid is not None:
             _warn_permission_narrowing(path, permission_changes, remote_doc)
 
+    # Every remote body we have seen too (the last synced one and an unmerged
+    # conflicting one): a Web edit removing the link after we took it in must
+    # not turn the upload it asked for into ours.
+    seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
+    _skip_remote_linked(
+        path,
+        config.get("ignore", []),
+        refs,
+        listed,
+        [remote_doc.get("body", ""), *seen],
+    )
+    files = _upload_files(refs, listed)
     uploads = remote.uploads() if remote is not None and files else []
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
@@ -645,17 +665,6 @@ def push(
                 print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
         return "dry run"
 
-    # Every remote body we have seen too (the last synced one and an unmerged
-    # conflicting one): a Web edit removing the link after we took it in must
-    # not turn the upload it asked for into ours.
-    seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
-    _confirm_remote_linked_uploads(
-        path,
-        config.get("ignore", []),
-        new_uploads,
-        [remote_doc.get("body", ""), *seen],
-        assume_yes,
-    )
     _confirm_large_uploads(new_uploads, assume_yes)
 
     pending_create = bool(saved and saved.get("pending_create"))
@@ -688,6 +697,7 @@ def push(
         for file_path in files
     }
     urls.update(link_urls)
+    doc_links = _written(refs, body, urls)
 
     sent = replace_spans(body, refs, urls)
     payload = {"body": sent, "content_type": 2}
@@ -956,10 +966,14 @@ def _raise_conflict(
 ) -> None:
     """Write git merge-file inputs (remote + base sidecars, attachments) and raise."""
     uploads = _reversible_uploads(uploads)
-    remote_source, remote_used = reverse(remote_body, uploads, remote.base_url)
-    remote_source = relink(remote_source, saved.get("doc_links", {}))
+    written = saved.get("doc_links", {})
+    remote_source, remote_used = reverse(
+        relink(remote_body, written), uploads, remote.base_url
+    )
     base_source = saved.get("local_base", "")
-    _, base_used = reverse(saved.get("remote_base", ""), uploads, remote.base_url)
+    _, base_used = reverse(
+        relink(saved.get("remote_base", ""), written), uploads, remote.base_url
+    )
     used = []
     for upload in remote_used + base_used:
         if upload not in used:
@@ -1184,12 +1198,13 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
                 f"{_upload_name(upload)}",
                 file=sys.stderr,
             )
+    # A URL push recorded comes back as written and is not downloaded: it names
+    # the upload made from that local file (ADR-0007).
     source, used = reverse(
-        remote_doc.get("body", ""),
+        relink(remote_doc.get("body", ""), (saved or {}).get("doc_links", {})),
         _reversible_uploads(uploads),
         remote.base_url,
     )
-    source = relink(source, (saved or {}).get("doc_links", {}))
 
     no_base_conflict = saved is None and bool(body.strip()) and body != source
     if local_dirty:
@@ -1295,8 +1310,10 @@ def status(path: Path, client, config: dict, profile=None) -> str:
         remote = Remote(client, entity, eid, base_url)
         saved = state.load(base_url, entity, str(eid))
         _check_working_copy(saved, path, entity, eid)
-    refs = plan(body, path.parent, config.get("ignore", []))
-    files = _upload_files(refs, meta, path.parent, config.get("ignore", []))
+    ignore = config.get("ignore", [])
+    refs = plan(body, path.parent, ignore)
+    listed = _listed_files(refs, meta, path.parent, ignore)
+    files = _upload_files(refs, listed)
     summary = []
     if saved is None:
         print("local: base unavailable (comparison unavailable)")
@@ -1327,6 +1344,9 @@ def status(path: Path, client, config: dict, profile=None) -> str:
         return "remote unavailable (offline?)"
 
     _warn_unmatched_attachments(body, uploads, remote.base_url)
+    seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
+    _skip_remote_linked(path, ignore, refs, listed, [remote_doc.get("body", ""), *seen])
+    files = _upload_files(refs, listed)
     reused = [path.name for path in files if _matching_upload(path, uploads)]
     new = [path.name for path in files if path.name not in reused]
     print("uploads new:", ", ".join(new) or "none")
@@ -1390,10 +1410,11 @@ def diff(path: Path, client, config: dict, profile=None, base_only=False) -> Non
         if remote is None:
             raise RuntimeError("id is required")
         remote_doc = remote.get()
-        other = reverse(remote_doc.get("body", ""), remote.uploads(), remote.base_url)[
-            0
-        ]
-        other = relink(other, (saved or {}).get("doc_links", {}))
+        other = reverse(
+            relink(remote_doc.get("body", ""), (saved or {}).get("doc_links", {})),
+            remote.uploads(),
+            remote.base_url,
+        )[0]
         other = _normalize_remote_diff(other)
         local = _normalize_remote_diff(body)
         fromfile = "remote"

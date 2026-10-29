@@ -38,15 +38,18 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
 - **Do not embed out-of-sync data (comments, steps, revision bodies) in the body.** Use a sidecar or terminal
   output (do not pollute the source).
 - A link to another elport document (front matter with `id` + `profile`) is sent as its entity URL and **never
-  uploaded**; it is the only link that may use `..`, and pull reverses only the URLs push recorded
-  ([ADR-0003](docs/adr/0003-folder-sync-and-document-links.md)). push refuses a locked entity even with `--force`
+  uploaded**, and pull reverses only the URLs push recorded
+  ([ADR-0003](docs/adr/0003-folder-sync-and-document-links.md)); recorded upload URLs come back as written and
+  are not downloaded ([ADR-0007](docs/adr/0007-references-may-leave-the-document-directory.md)). push refuses a locked entity even with `--force`
   ([ADR-0004](docs/adr/0004-refuse-pushing-to-locked-entities.md)).
-- Upload targets are **only files under the document directory.** Exclude schemed URLs, absolute paths, `..`
-  escapes, and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`)**. Front matter
-  `attachments:` entries obey the same rules and fail the push instead of warning
-  ([ADR-0006](docs/adr/0006-front-matter-attachments.md)). A pulled
-  remote body must not make the next push exfiltrate local secrets; **never parse inside code fences, inline code,
-  or HTML comments.**
+- Upload targets are **files the user wrote a path to, anywhere on disk** (`..` and absolute paths included).
+  Exclude schemed URLs and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`, as
+  written or as resolved below the directory shared with the document)**. Front matter `attachments:` entries obey
+  the same rules and fail the push instead of warning
+  ([ADR-0006](docs/adr/0006-front-matter-attachments.md)). A pulled remote body must not make the next push
+  exfiltrate local files: **a path that appears in a remote body is never uploaded unless listed in
+  `attachments:`** ([ADR-0007](docs/adr/0007-references-may-leave-the-document-directory.md)); pull never writes
+  outside the document directory; **never parse inside code fences, inline code, or HTML comments.**
 - Attachment identity uses the **server-returned hash first, else basename + size** (same-name entries can coexist,
   so check against all of them). **Never auto-delete attachments during push.**
 - **Keep secrets (API keys) out of the project tree.** OS keyring + home-dir config only. **Never log the key.**

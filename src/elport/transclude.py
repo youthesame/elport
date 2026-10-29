@@ -346,44 +346,70 @@ def _on_disk(root: Path, relative: Path) -> str | None:
     return current.relative_to(root).as_posix()
 
 
+_SCHEME = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*:")
+_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _has_scheme(value: str) -> bool:
+    return bool(_SCHEME.match(value)) and not _DRIVE.match(value)
+
+
+def _hidden(parts) -> bool:
+    return any(part.startswith(".") and part not in (".", "..") for part in parts)
+
+
+def _hidden_as_written(doc_dir: Path, raw: str) -> bool:
+    """Every component the user wrote, ``..`` not collapsed; an absolute path
+    only below its shared prefix with the document directory, as spelled or
+    resolved (they differ under a symlinked parent such as macOS /var)."""
+    if not os.path.isabs(raw):
+        return _hidden(re.split(r"[\\/]+", raw))
+    parts = Path(raw).parts
+
+    def below(base: Path) -> tuple[str, ...]:
+        shared = 0
+        for ours, theirs in zip(parts, base.parts):
+            if ours != theirs:
+                break
+            shared += 1
+        return parts[shared:]
+
+    return all(_hidden(below(base)) for base in (doc_dir.absolute(), doc_dir.resolve()))
+
+
+def _exposes_hidden(doc_dir: Path, raw: str, target: Path) -> bool:
+    """Hidden as written, or in the resolved file below the deepest directory it
+    shares with the document: a document under a hidden directory still reaches
+    its neighbours, a symlink into ~/.ssh does not."""
+    root = doc_dir.resolve()
+    try:
+        shared = Path(os.path.commonpath([root, target]))
+    except ValueError:  # another Windows drive
+        shared = Path(target.anchor)
+    return _hidden_as_written(doc_dir, raw) or _hidden(target.relative_to(shared).parts)
+
+
 def _candidate(
     doc_dir: Path, value: str, ignore: list[IgnoreLayer]
 ) -> tuple[Path | None, bool, str]:
-    if not value or value.startswith("#"):
+    if not value or value.startswith("#") or _has_scheme(value):
         return None, False, ""
-    if value.startswith(("/", "\\")) or re.match(r"^[A-Za-z]:[\\/]", value):
+    if "?" in value:
         return None, True, ""
-    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
-        return None, False, ""
     raw = value
-    if "?" in raw:
-        return None, True, ""
-    if not raw:
-        return None, False, ""
     p = (doc_dir / raw).resolve()
-    root = doc_dir.resolve()
-    try:
-        relative = p.relative_to(root)
-    except ValueError:
-        return None, True, ""
     fragment = ""
     if not p.is_file() and "#" in raw:
         raw, suffix = raw.split("#", 1)
         fragment = "#" + suffix
         p = (doc_dir / raw).resolve()
-        try:
-            relative = p.relative_to(root)
-        except ValueError:
-            return None, True, ""
-    if not p.is_file():
+    if not p.is_file() or _exposes_hidden(doc_dir, raw, p):
         return None, True, ""
-    if any(
-        part.startswith(".") and part not in (".", "..")
-        for part in re.split(r"[\\/]+", raw)
-    ):
-        return None, True, ""
-    if any(part.startswith(".") for part in relative.parts):
-        return None, True, ""
+    root = doc_dir.resolve()
+    if not p.is_relative_to(root):
+        # Ignore rules stay inside the document directory (ADR-0007).
+        return p, False, fragment
+    relative = p.relative_to(root)
     on_disk = _on_disk(root, relative)
     if on_disk is None:
         return None, True, ""
@@ -394,20 +420,12 @@ def _candidate(
 
 def _linked_document(doc_dir: Path, value: str) -> tuple[Path, str] | None:
     """A link to another elport document, which push sends as that entity's URL.
-    Only its front matter is read, so ``..`` may leave the document directory
-    here (never for an attachment); hidden paths stay excluded."""
-    if not value or value.startswith(("#", "/", "\\")) or "?" in value:
-        return None
-    if re.match(r"^[A-Za-z][A-Za-z0-9+.-]*:", value):
+    Only its front matter is read; hidden paths stay excluded."""
+    if not value or value.startswith("#") or "?" in value or _has_scheme(value):
         return None
     raw, _, fragment = value.partition("#")
-    if any(
-        part.startswith(".") and part not in (".", "..")
-        for part in re.split(r"[\\/]+", raw)
-    ):
-        return None
     target = (doc_dir / raw).resolve()
-    if not target.is_file():
+    if not target.is_file() or _exposes_hidden(doc_dir, raw, target):
         return None
     # A document is known by its front matter, whatever its name; peek first so
     # a large data file is never read whole.
@@ -490,8 +508,8 @@ def listed_files(
         p, _, fragment = _candidate(doc_dir, entry, ignore or [])
         if p is None or fragment:
             raise ValueError(
-                f"attachments: cannot upload {entry} (must be a file under the "
-                "document directory, not hidden or ignored)"
+                f"attachments: cannot upload {entry} "
+                "(must be a file, not hidden or ignored)"
             )
         previous = names.setdefault(p.name.casefold(), p)
         if previous != p and not filecmp.cmp(previous, p, shallow=False):
