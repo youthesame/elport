@@ -87,7 +87,9 @@ similar, **consult it and pull in only what is needed** when a missing feature b
 
 - An in-tool merge engine (merge is **delegated to git**).
 - Automatic bidirectional sync / automatic conflict resolution.
-- Folder conventions like `attachments_dir` (unnecessary under the reference-based approach).
+- Folder conventions like `attachments_dir` (unnecessary under the reference-based approach). (Explicitly
+  listed files are uploaded via front matter `attachments:`; see
+  [ADR-0006](adr/0006-front-matter-attachments.md).)
 - GUI / TUI.
 - **Cross-entity attachment resolution.** A `download.php` URL that points at another entity's upload stays an
   opaque URL, and the tool never localizes it. Its query carries no entity or upload id, and `download.php` needs cookie

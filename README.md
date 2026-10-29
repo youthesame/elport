@@ -105,7 +105,7 @@ Neither command is a superset of the other.
 - `pull` only downloads files the body links to. Attachments that sit on the entity without being embedded, like
   raw data or spectra, stay on the server.
 - `fetch` brings those down. It never parses the body, touches the base, or feeds the push manifest, so a fetched
-  file is not uploaded again unless you link it in the body yourself.
+  file is not uploaded again unless you link it in the body or list it under `attachments` yourself.
 - If a local file differs, `fetch` leaves it in place and writes the remote copy beside it as `<name>.remote`.
 
 ## Document format (front matter)
@@ -123,6 +123,7 @@ status: Running               # optional; ID or existing status name (elport nev
 profile: labA                 # optional; destination profile
 read: team                    # optional; owner | owner+admin | team | account | public
 write: owner                  # optional; same scale
+attachments: [data/raw.csv]   # optional; files uploaded without a body link
 ---
 
 # Body. Markdown, inline HTML allowed ...
@@ -138,6 +139,11 @@ the union.
 
 `read`/`write` set the eLabFTW base visibility only, so individual Web-UI grants survive. Widening beyond your team
 asks for confirmation.
+
+`attachments` lists files that push uploads without a link in the body, such as raw data. Each entry is a file
+path under the document directory, checked like a body reference. Push fails on an entry that is missing, a
+directory, hidden, or ignored. Removing an entry does not delete the upload, and `pull` does not download listed
+files; use `fetch`.
 
 If the front matter and the CLI disagree on profile, entity, or id, elport **stops** rather than guessing.
 

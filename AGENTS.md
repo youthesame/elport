@@ -40,7 +40,9 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
   ([ADR-0003](docs/adr/0003-folder-sync-and-document-links.md)). push refuses a locked entity even with `--force`
   ([ADR-0004](docs/adr/0004-refuse-pushing-to-locked-entities.md)).
 - Upload targets are **only files under the document directory.** Exclude schemed URLs, absolute paths, `..`
-  escapes, and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`)**. A pulled
+  escapes, and **hidden files/dirs (any dot-prefixed path component, e.g. `.env`, `.git/config`)**. Front matter
+  `attachments:` entries obey the same rules and fail the push instead of warning
+  ([ADR-0006](docs/adr/0006-front-matter-attachments.md)). A pulled
   remote body must not make the next push exfiltrate local secrets; **never parse inside code fences, inline code,
   or HTML comments.**
 - Attachment identity uses the **server-returned hash first, else basename + size** (same-name entries can coexist,

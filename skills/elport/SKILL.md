@@ -57,7 +57,9 @@ The loop is **`status` → (`diff`) → `push`**, mirroring git. Do not push bli
   Per-command detail: `elport <cmd> --help`.
 - **Attachments**: reference a **local path** to attach-and-upload; reference a full **eLabFTW
   http URL** to only link another entity (not uploaded). elport skips schemed URLs, absolute
-  paths, `..` escapes, and code-fence/inline-code content.
+  paths, `..` escapes, and code-fence/inline-code content. To upload a file **without** linking it in the
+  body (raw data, spectra), list it in frontmatter `attachments: [data/raw.csv]` (files only; push fails on
+  a missing, hidden, ignored, or directory entry; never deleted, not pulled; `fetch` brings it down).
 - **Metadata**: pull writes `title`/`category`/`status`/`read`/`write` back from the server, keeping any key you
   edited locally since the last sync; `tags` become the union (add-only on both sides). push still sends only the
   keys present, so a push right after a pull changes nothing.

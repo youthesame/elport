@@ -27,6 +27,7 @@ ALLOWED = {
     "profile",
     "read",
     "write",
+    "attachments",
 }
 
 
@@ -102,6 +103,18 @@ def parse(text: str) -> tuple[dict, str]:
             if isinstance(tags, (dict, set)):
                 raise ValueError("tags must be a list or scalar")
             data["tags"] = [tags]
+    if "attachments" in data:
+        entries = data["attachments"]
+        if entries is None:
+            entries = []
+        elif not isinstance(entries, list):
+            entries = [entries]
+        if not all(
+            isinstance(entry, (str, int)) and not isinstance(entry, bool)
+            for entry in entries
+        ):
+            raise ValueError("attachments must be a list of paths")
+        data["attachments"] = [str(entry) for entry in entries]
     body = text[closer.end() :]
     if body.startswith("\r\n"):
         body = body[2:]
