@@ -1405,36 +1405,78 @@ def test_push_resolves_a_link_target_under_its_own_config(
     assert client.links == [("experiments", 13, "items", 5)]
 
 
-def _pulled_link_doc(tmp_path, monkeypatch):
-    """A Web-side editor linked a local file name; pull brought it into the note."""
-    doc = tmp_path / "report.md"
+def _pulled_link_doc(tmp_path, monkeypatch, link="private.txt"):
+    """A Web-side editor linked a local file; pull brought it into the note."""
+    doc = tmp_path / "notes" / "report.md"
+    doc.parent.mkdir()
     write_doc(doc, "local")
+    (doc.parent / "private.txt").write_text("secret")
     (tmp_path / "private.txt").write_text("secret")
-    pulled = "see [x](private.txt)"
+    pulled = f"see [x]({link})"
     Store(monkeypatch, {"1": saved_state()})
     sync.pull(doc, FakeClient(gets=[{"body": pulled}]), {})
     return doc, pulled
 
 
-def test_push_asks_before_uploading_a_file_the_remote_body_linked(
+REMOTE_LINKED = "linked from the remote body"
+
+
+@pytest.mark.parametrize("assume_yes", [False, True])
+@pytest.mark.parametrize(
+    "link", ["private.txt", "../private.txt", "{root}/private.txt"]
+)
+def test_push_never_uploads_a_file_the_remote_body_linked(
+    tmp_path, monkeypatch, configured, capsys, link, assume_yes
+):
+    link = link.format(root=tmp_path)
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch, link)
+    write_doc(doc, f"{pulled}\n\nmy edit")
+    client = FakeClient(remote_doc={"body": pulled, "content_type": 2})
+
+    sync.push(doc, client, {}, assume_yes=assume_yes)
+
+    assert "upload" not in client.calls
+    assert f"[x]({link})" in client.saved_payload["body"]
+    assert REMOTE_LINKED in capsys.readouterr().err
+
+
+def test_push_uploads_a_remote_linked_file_listed_under_attachments(
     tmp_path, monkeypatch, configured
+):
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
+    write_doc(doc, pulled, attachments=["private.txt"])
+    client = FakeClient(remote_doc={"body": pulled, "content_type": 2})
+
+    sync.push(doc, client, {})
+
+    assert "upload" in client.calls
+    assert "download.php" in client.saved_payload["body"]
+
+
+def test_status_does_not_count_a_remote_linked_file_as_an_upload(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
+    client = FakeClient(remote_doc={"body": pulled, "content_type": 2})
+
+    sync.status(doc, client, {})
+
+    out, err = capsys.readouterr()
+    assert "uploads new: none" in out
+    assert REMOTE_LINKED in err
+
+
+def test_dry_run_reports_a_remote_linked_file_as_not_uploaded(
+    tmp_path, monkeypatch, configured, capsys
 ):
     doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
     client = FakeClient(remote_doc={"body": pulled})
 
-    with pytest.raises(RuntimeError, match=r"private\.txt.*re-run with --yes"):
-        sync.push(doc, client, {})
+    sync.push(doc, client, {}, dry_run=True)
 
-    assert "upload" not in client.calls
-
-
-def test_push_uploads_a_remote_linked_file_with_yes(tmp_path, monkeypatch, configured):
-    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
-    client = FakeClient(remote_doc={"body": pulled, "content_type": 2})
-
-    sync.push(doc, client, {}, assume_yes=True)
-
-    assert "upload" in client.calls
+    out, err = capsys.readouterr()
+    assert REMOTE_LINKED in err
+    assert "private.txt ->" not in out
 
 
 def test_push_names_new_uploads(tmp_path, monkeypatch, configured, capsys):
@@ -1449,50 +1491,45 @@ def test_push_names_new_uploads(tmp_path, monkeypatch, configured, capsys):
     assert "uploads: 0 reused, 1 new (plot.png)" in capsys.readouterr().out
 
 
-def test_push_asks_for_a_remote_link_hidden_behind_an_escaped_comment(
+def test_push_skips_a_remote_link_hidden_behind_an_escaped_comment(
     tmp_path, monkeypatch, configured
 ):
-    doc = tmp_path / "report.md"
-    write_doc(doc, "local")
-    (tmp_path / "private.txt").write_text("secret")
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch, "x")
     pulled = "&lt;!-- [x](private.txt) --&gt;"
-    Store(monkeypatch, {"1": saved_state()})
     sync.pull(doc, FakeClient(gets=[{"body": pulled}]), {})
-    client = FakeClient(remote_doc={"body": pulled})
+    client = FakeClient(remote_doc={"body": pulled, "content_type": 2})
 
-    with pytest.raises(RuntimeError, match="re-run with --yes"):
-        sync.push(doc, client, {})
+    sync.push(doc, client, {})
 
     assert "upload" not in client.calls
 
 
-def test_force_push_still_asks_after_the_web_side_removed_the_link(
+def test_force_push_still_skips_after_the_web_side_removed_the_link(
     tmp_path, monkeypatch, configured
 ):
     doc, _ = _pulled_link_doc(tmp_path, monkeypatch)
-    client = FakeClient(remote_doc={"body": "the link is gone"})
+    client = FakeClient(remote_doc={"body": "the link is gone", "content_type": 2})
 
-    with pytest.raises(RuntimeError, match="re-run with --yes"):
-        sync.push(doc, client, {}, force=True)
+    sync.push(doc, client, {}, force=True)
 
     assert "upload" not in client.calls
 
 
 @pytest.mark.parametrize("spelling", ["./private.txt", "private.txt#top"])
-def test_push_asks_when_a_remote_link_is_respelled_locally(
+def test_push_skips_a_remote_link_respelled_locally(
     spelling, tmp_path, monkeypatch, configured
 ):
     doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
     write_doc(doc, f"see [x]({spelling})")
-    client = FakeClient(remote_doc={"body": pulled})
+    client = FakeClient(remote_doc={"body": pulled, "content_type": 2})
 
-    with pytest.raises(RuntimeError, match="re-run with --yes"):
-        sync.push(doc, client, {})
+    sync.push(doc, client, {})
 
     assert "upload" not in client.calls
+    assert client.saved_payload["body"] == f"see [x]({spelling})"
 
 
-def test_force_push_asks_for_a_link_from_an_unmerged_conflicting_remote(
+def test_force_push_skips_a_link_from_an_unmerged_conflicting_remote(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
@@ -1502,12 +1539,46 @@ def test_force_push_asks_for_a_link_from_an_unmerged_conflicting_remote(
     with pytest.raises(RuntimeError, match="local changes conflict"):
         sync.pull(doc, FakeClient(gets=[{"body": "see [x](private.txt)"}]), {})
     write_doc(doc, "local edit, merged: see [x](private.txt)")
-    client = FakeClient(remote_doc={"body": "the link is gone"})
+    client = FakeClient(remote_doc={"body": "the link is gone", "content_type": 2})
 
-    with pytest.raises(RuntimeError, match="re-run with --yes"):
-        sync.push(doc, client, {}, force=True)
+    sync.push(doc, client, {}, force=True)
 
     assert "upload" not in client.calls
+
+
+def test_push_uploads_a_file_outside_the_document_directory(
+    tmp_path, monkeypatch, configured
+):
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / "raw.csv").write_bytes(b"raw")
+    doc = tmp_path / "notes" / "report.md"
+    doc.parent.mkdir()
+    (doc.parent / "assets").mkdir()
+    (doc.parent / "assets" / "fig.png").write_bytes(b"png")
+    body = '![f](assets/fig.png) [r](../shared/raw.csv) <img src="assets/fig.png">'
+    write_doc(doc, body)
+    store = Store(monkeypatch, {"1": saved_state()})
+    client = FakeClient(
+        gets=[{"body": "remote"}, {"body": "remote"}, {"body": "s", "content_type": 2}]
+    )
+
+    sync.push(doc, client, {})
+
+    assert client.calls.count("upload") == 2
+    sent = client.saved_payload["body"]
+    assert "../shared/raw.csv" not in sent and "assets/fig.png" not in sent
+    # pull puts each one back as written (ADR-0007).
+    links = store.data["1"]["doc_links"]
+    assert sorted(
+        (family, written)
+        for entry in links.values()
+        for family, written in entry.items()
+    ) == [
+        ("html", "assets/fig.png"),
+        ("markdown", "../shared/raw.csv"),
+        ("markdown", "assets/fig.png"),
+    ]
+    assert sync.relink(sent, links) == body
 
 
 def test_push_without_attachments_skips_the_recheck(tmp_path, monkeypatch, configured):
@@ -1665,9 +1736,15 @@ def test_unchanged_push_with_reused_attachments_reads_the_remote_once(
         remote_doc={"body": remote_body, "title": "Test", "content_type": 2},
         uploads=[upload],
     )
+    url = sync.download_url("https://e.example", upload)
     Store(
         monkeypatch,
-        {"1": saved_state(local="[data](data.csv)", remote=remote_body)},
+        {
+            "1": {
+                **saved_state(local="[data](data.csv)", remote=remote_body),
+                "doc_links": {url: {"markdown": "data.csv"}},
+            }
+        },
     )
 
     sync.push(doc, client, {})

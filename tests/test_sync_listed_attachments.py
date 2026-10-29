@@ -51,6 +51,23 @@ def test_push_uploads_listed_file_without_touching_the_body(
     assert frontmatter.parse(doc.read_text())[0]["attachments"] == ["data/raw.csv"]
 
 
+@pytest.mark.parametrize("entry", ["../shared/raw.csv", "{root}/shared/raw.csv"])
+def test_push_uploads_a_listed_file_outside_the_document_directory(
+    tmp_path, monkeypatch, configured, entry
+):
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / "raw.csv").write_bytes(b"raw")
+    doc = tmp_path / "notes" / "report.md"
+    doc.parent.mkdir()
+    write_doc(doc, "local", attachments=[entry.format(root=tmp_path)])
+    client = FakeClient(gets=[{"body": "remote"}, {"body": "remote"}, STORED])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.push(doc, client, {})
+
+    assert client.calls.count("upload") == 1
+
+
 def test_push_reuses_listed_file_and_skips_the_patch(tmp_path, monkeypatch, configured):
     doc = tmp_path / "report.md"
     (tmp_path / "raw.csv").write_bytes(b"raw")
@@ -87,8 +104,7 @@ def test_push_reuses_listed_file_and_skips_the_patch(tmp_path, monkeypatch, conf
         "data/.secret",
         "scratch.csv",  # ignored
         "alias.csv",  # a symlink to an ignored file
-        "../outside.csv",
-        "/etc/passwd",
+        "../.env",
         "https://example.com/raw.csv",
         "raw.csv#top",
         "raw.csv?x=1",
@@ -104,7 +120,7 @@ def test_push_fails_on_listed_entry_that_would_not_upload(
     (root / "scratch.csv").write_bytes(b"scratch")
     (root / "raw.csv").write_bytes(b"raw")
     (root / "alias.csv").symlink_to("scratch.csv")
-    (tmp_path / "outside.csv").write_bytes(b"outside")
+    (tmp_path / ".env").write_bytes(b"KEY=1")
     doc = root / "report.md"
     write_doc(doc, "local", attachments=[entry])
     client = FakeClient(gets=[{"body": "remote"}])

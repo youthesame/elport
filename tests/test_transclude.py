@@ -831,27 +831,76 @@ def test_multiline_inline_code_is_masked(tmp_path: Path, ticks: str):
     assert references == []
 
 
-def test_absolute_parent_and_symlink_escapes_are_rejected(tmp_path: Path):
+def test_absolute_parent_and_symlinked_files_outside_the_directory_are_planned(
+    tmp_path: Path,
+):
     outside = tmp_path.parent / f"{tmp_path.name}-outside"
-    outside.write_text("secret")
+    outside.write_text("data")
     link = tmp_path / "link"
     link.symlink_to(outside)
-    text = f"[absolute]({outside}) [parent](../{outside.name}) [link](link)"
-    assert all(reference.file is None for reference in plan(text, tmp_path))
+    text = f"[absolute]({outside}) [parent](../{outside.name}) [link](link#part)"
+
+    references = plan(text, tmp_path)
+
+    assert [reference.file for reference in references] == [outside.resolve()] * 3
+    assert references[2].fragment == "#part"
 
 
-def test_fragment_symlink_escape_warns_and_is_rejected(tmp_path: Path, capsys):
+@pytest.mark.parametrize(
+    "written",
+    [
+        "../.secrets/key",
+        "{root}/.secrets/key",
+        "link",
+        "../shared/.env",
+        "../shared/.secrets/../plain.txt",
+    ],
+)
+def test_a_hidden_component_outside_the_directory_warns_and_is_rejected(
+    tmp_path: Path, capsys, written
+):
     document_dir = tmp_path / "doc"
     document_dir.mkdir()
-    outside = tmp_path / "outside.txt"
-    outside.write_text("secret", encoding="utf-8")
-    link = document_dir / "link.txt"
-    link.symlink_to(outside)
+    (tmp_path / ".secrets").mkdir()
+    (tmp_path / ".secrets" / "key").write_text("secret")
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / ".env").write_text("KEY=1")
+    (tmp_path / "shared" / ".secrets").mkdir()
+    (tmp_path / "shared" / "plain.txt").write_text("x")
+    (document_dir / "link").symlink_to(tmp_path / ".secrets" / "key")
+    written = written.format(root=tmp_path)
 
-    reference = plan("[link](link.txt#part)", document_dir)[0]
+    (reference,) = plan(f"[x]({written})", document_dir)
 
     assert reference.file is None
-    assert "link.txt#part" in capsys.readouterr().err
+    assert written in capsys.readouterr().err
+
+
+def test_a_document_under_a_hidden_directory_reaches_its_neighbours(tmp_path: Path):
+    # Only components below the directory the file shares with the document count.
+    lab = tmp_path / ".lab"
+    (lab / "notes").mkdir(parents=True)
+    (lab / "data").mkdir()
+    raw = lab / "data" / "raw.csv"
+    raw.write_text("1,2")
+
+    references = plan(f"[a](../data/raw.csv) [b]({raw})", lab / "notes")
+
+    assert [reference.file for reference in references] == [raw.resolve()] * 2
+
+
+def test_ignore_rules_stay_inside_the_document_directory(tmp_path: Path):
+    document_dir = tmp_path / "doc"
+    document_dir.mkdir()
+    (document_dir / "here.csv").write_text("1")
+    (tmp_path / "there.csv").write_text("2")
+
+    here, there = plan(
+        "[a](here.csv) [b](../there.csv)", document_dir, [IgnoreLayer(["*.csv"])]
+    )
+
+    assert here.file is None
+    assert there.file == (tmp_path / "there.csv").resolve()
 
 
 def test_invalid_local_references_warn_but_intentional_exclusions_do_not(
@@ -876,8 +925,10 @@ def test_invalid_local_references_warn_but_intentional_exclusions_do_not(
     plan(text, document_dir, [IgnoreLayer(["ignored.bin"])])
 
     warning = capsys.readouterr().err
-    for path in ("missing.txt", "/tmp/absolute.txt", "../outside.txt", "link.txt"):
+    for path in ("missing.txt", "/tmp/absolute.txt"):
         assert path in warning
+    assert "../outside.txt" not in warning
+    assert "link.txt" not in warning
     assert "https://example.test/x" not in warning
     assert "http://example.test/x" not in warning
     assert "mailto:user@example.test" not in warning
@@ -1267,6 +1318,14 @@ def test_plan_marks_a_link_to_an_elport_document_outside_the_directory(tmp_path)
     assert ref.doc == target.resolve()
     assert ref.file is None
     assert ref.fragment == "#method"
+
+
+def test_plan_marks_a_link_to_an_elport_document_by_absolute_path(tmp_path):
+    target = elport_doc(tmp_path / "exp12" / "report.md", id=12)
+
+    (ref,) = plan(f"[prev]({target})", tmp_path / "exp12")
+
+    assert ref.doc == target.resolve()
 
 
 def test_plan_uploads_plain_markdown_as_an_attachment(tmp_path):

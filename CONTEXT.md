@@ -18,6 +18,11 @@ A local path written in the document body, in any notation, that push uploads an
 the attachment's URL.
 _Avoid_: embed, link (when the target is a file)
 
+**Remote-linked path**:
+A reference that appears in a remote body. Push never uploads the file it names unless it is a listed
+attachment.
+_Avoid_: foreign link
+
 **Document link**:
 A reference to another document, sent as that entity's URL and never uploaded.
 

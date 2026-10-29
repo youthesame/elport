@@ -1199,6 +1199,91 @@ def test_pull_turns_recorded_entity_urls_back_into_paths(
     assert saved["path"] == str(doc.resolve())
 
 
+FIG = {"id": 3, "long_name": "aa/fig", "real_name": "fig.png", "storage": 1}
+RAW = {"id": 4, "long_name": "bb/raw", "real_name": "raw.csv", "storage": 1}
+FIG_URL = "https://e.example/app/download.php?f=aa%2Ffig&name=fig.png&storage=1"
+RAW_URL = "https://e.example/app/download.php?f=bb%2Fraw&name=raw.csv&storage=1"
+WRITTEN = {
+    FIG_URL: {"markdown": "assets/fig.png", "html": "assets/fig.png"},
+    RAW_URL: {"markdown": "../shared/raw.csv"},
+}
+
+
+def test_pull_puts_back_recorded_attachment_paths_without_downloading(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "notes" / "report.md"
+    doc.parent.mkdir()
+    write_doc(doc, "old")
+    Store(monkeypatch, {"1": {**saved_state(local="old"), "doc_links": WRITTEN}})
+    remote = (
+        f"edited ![f]({FIG_URL}) [r]({RAW_URL}) "
+        f'<img src="{FIG_URL.replace("&", "&amp;")}">'
+    )
+    client = FakeClient(gets=[{"body": remote}], uploads=[FIG, RAW])
+
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[1] == (
+        'edited ![f](assets/fig.png) [r](../shared/raw.csv) <img src="assets/fig.png">'
+    )
+    assert "download" not in client.calls
+    assert sorted(path.name for path in doc.parent.iterdir()) == ["report.md"]
+    assert not (tmp_path / "shared").exists()
+
+
+def test_pull_still_localizes_an_unrecorded_attachment_by_name(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "old")
+    Store(monkeypatch, {"1": {**saved_state(local="old"), "doc_links": WRITTEN}})
+    web = {**FIG, "long_name": "cc/web"}  # re-uploaded in the Web UI
+    web_url = FIG_URL.replace("aa%2Ffig", "cc%2Fweb")
+    client = FakeClient(
+        gets=[{"body": f"[r]({RAW_URL}) ![w]({web_url})"}], uploads=[RAW, web]
+    )
+
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[1] == (
+        "[r](../shared/raw.csv) ![w](fig.png)"
+    )
+    assert client.calls.count("download") == 1
+    assert (tmp_path / "fig.png").read_bytes() == b"data"
+
+
+def test_conflict_sidecar_uses_the_recorded_attachment_paths(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "notes" / "report.md"
+    doc.parent.mkdir()
+    write_doc(doc, "local edit")
+    Store(monkeypatch, {"1": {**saved_state(), "doc_links": WRITTEN}})
+    client = FakeClient(gets=[{"body": f"[r]({RAW_URL})"}], uploads=[RAW])
+
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, client, {})
+
+    sidecar = doc.with_name("report.remote.md")
+    assert frontmatter.parse(sidecar.read_text())[1] == "[r](../shared/raw.csv)"
+    assert "download" not in client.calls
+
+
+def test_diff_compares_against_the_attachment_paths_push_wrote(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "notes" / "report.md"
+    doc.parent.mkdir()
+    write_doc(doc, "[r](../shared/raw.csv)\n")
+    Store(monkeypatch, {"1": {**saved_state(), "doc_links": WRITTEN}})
+    client = FakeClient(gets=[{"body": f"[r]({RAW_URL})\n"}], uploads=[RAW])
+
+    sync.diff(doc, client, {})
+
+    assert capsys.readouterr().out == ""
+
+
 def test_pull_reports_up_to_date_when_the_remote_is_unchanged(
     tmp_path, monkeypatch, configured
 ):

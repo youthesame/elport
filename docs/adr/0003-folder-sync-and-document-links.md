@@ -1,5 +1,8 @@
 # Folder sync: many documents, links between them, and `clone --all` as the mirror
 
+> Superseded in part by [ADR-0007](0007-references-may-leave-the-document-directory.md):
+> any reference may now leave the document directory.
+
 `push`, `pull`, `status`, `fetch`, and `diff` take any number of paths, and a directory expands to
 every **elport document** under it. A link from one document to another becomes the target's entity
 URL. A backup of the whole account is `clone --all <root>` followed by `pull <root>`. That makes a

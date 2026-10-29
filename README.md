@@ -23,8 +23,9 @@ pip install elport        # upgrade: pip install -U elport
 
 One local file maps to one eLabFTW entry: Markdown with a YAML front matter block, inline HTML allowed.
 
-On `push`, elport uploads every real local file the body references, in any notation, and swaps each path for its
-real eLabFTW URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry
+On `push`, elport uploads every real local file the body references, in any notation and anywhere on disk
+(`../data/raw.csv` and absolute paths work; hidden files never go up), and swaps each path for its real eLabFTW
+URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry
 instead of uploading, write its eLabFTW URL or its local document's path. Code fences, inline code, and HTML comments are never parsed.
 
 ## Quick start
@@ -89,17 +90,18 @@ need not be a git repository.
 
 - `-n/--dry-run` rehearses a push without sending.
 - `-f/--force` pushes over a changed remote, losing the Web-side change.
-- `-y/--yes` skips the three confirmations: widening `read`/`write` beyond your team, new uploads over 25 MiB,
-  and uploading a local file that a link written on the Web side (brought in by pull) points to.
-  A non-interactive run needs `-y` for any of them.
+- `-y/--yes` skips the two confirmations: widening `read`/`write` beyond your team, and new uploads over 25 MiB.
+  A non-interactive run needs `-y` for either.
 - `--profile <name>` and `--entity {experiments,items}` pick the destination.
 
 ### pull and fetch
 
 Neither command is a superset of the other.
 
-- `pull` writes referenced files back by **basename only**. A subdirectory path like `assets/fig.png` lands as
-  `fig.png`.
+- `pull` puts back each path your push wrote, as written, and leaves those files alone. An attachment added in the
+  Web UI comes down by **basename only** into the document directory.
+- A local path that a remote body links (written on the Web side, brought in by pull) is never uploaded; push
+  warns. List the file under `attachments` to upload it.
 - Neither command writes a hidden (dot-prefixed) attachment such as `.envrc`; push never uploads one, so it can only
   have been planted on the server.
 - `pull` only downloads files the body links to. Attachments that sit on the entity without being embedded, like
@@ -199,7 +201,8 @@ note's front matter to pin that one file.
 
 ### .elportignore
 
-`.elportignore` excludes referenced files, `.gitignore`-style, so they are never uploaded. It is additive across
+`.elportignore` excludes referenced files inside the document directory, `.gitignore`-style, so they are never
+uploaded. It is additive across
 the same layers as profiles, plus every `.elportignore` from the project root down to the document directory. Each
 pattern is anchored at its own directory.
 
