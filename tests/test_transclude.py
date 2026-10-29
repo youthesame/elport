@@ -884,7 +884,7 @@ def test_a_document_under_a_hidden_directory_reaches_its_neighbours(tmp_path: Pa
     raw = lab / "data" / "raw.csv"
     raw.write_text("1,2")
 
-    references = plan(f"[a](../data/raw.csv) [b]({raw})", lab / "notes")
+    references = plan(f"[a](../data/raw.csv) [b]({raw.as_posix()})", lab / "notes")
 
     assert [reference.file for reference in references] == [raw.resolve()] * 2
 
