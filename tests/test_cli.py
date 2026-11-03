@@ -1,3 +1,4 @@
+import datetime
 import io
 import stat
 import sys
@@ -1503,3 +1504,32 @@ def test_a_batch_shares_one_client_per_server(tmp_path, monkeypatch, capsys):
 
     assert cli.main(["push", str(tmp_path)]) == 0
     assert len(sessions) == 2 and sessions[0] is sessions[1]
+
+
+class ActivityClient:
+    def __init__(self, rows):
+        self.rows = rows
+        self.searches = []
+
+    def search(self, entity, params):
+        self.searches.append((entity, dict(params)))
+        return self.rows if params["offset"] == 0 else []
+
+
+@pytest.mark.parametrize(("flags", "scope"), [([], 1), (["--team"], 2)])
+def test_cli_activity_reads_own_or_team_entities(monkeypatch, capsys, flags, scope):
+    # Created today, so the row is inside the grid whatever the date and width.
+    today = datetime.datetime.now().astimezone().date()
+    client = ActivityClient(
+        [{"created_at": f"{today} 10:00:00", "fullname": "Yasmin Heller"}]
+    )
+    monkeypatch.setattr(cli.config, "load", lambda *args: {})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("demo", client))
+
+    assert cli.main(["activity", *flags]) == 0
+
+    assert client.searches[0] == (
+        "experiments",
+        {"scope": scope, "limit": cli.SEARCH_PAGE, "offset": 0},
+    )
+    assert "Yasmin Heller" in capsys.readouterr().out
