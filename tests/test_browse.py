@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 
 import pytest
@@ -240,3 +241,184 @@ def test_list_accepts_a_zero_offset():
     browse.entities(client, "experiments", offset=0)
 
     assert client.searches[0][1]["offset"] == 0
+
+
+# A Tuesday: the last column holds Mon 11-02 and Tue 11-03, the rest is future.
+TODAY = dt.date(2026, 11, 3)
+
+
+def row(created, userid=29, fullname="Yasmin Heller"):
+    return {"created_at": created, "userid": userid, "fullname": fullname}
+
+
+def grid(text: str) -> dict[str, str]:
+    """Weekday label -> that row's cells, for the first author's grid."""
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Mon "))
+    labels = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+    return {
+        label: lines[start + i][4::2].ljust(browse.WEEKS)
+        for i, label in enumerate(labels)
+    }
+
+
+def test_each_day_counts_the_entities_created_on_it():
+    rows = [
+        row("2026-11-02 09:00:00"),
+        row("2026-11-02 17:30:00"),
+        row("2026-11-03 08:00:00"),
+    ]
+
+    cells = grid(browse.activity(rows, "experiments", TODAY))
+
+    assert cells["Mon"][-1] == "▒"
+    assert cells["Tue"][-1] == "░"
+    assert cells["Wed"][-1] == " "
+
+
+def test_a_day_without_entities_is_a_dot():
+    cells = grid(browse.activity([row("2026-11-03 08:00:00")], "experiments", TODAY))
+
+    assert cells["Mon"][-1] == "·"
+    assert cells["Sun"][0] == "·"
+
+
+@pytest.mark.parametrize(
+    ("count", "glyph"), [(1, "░"), (2, "▒"), (3, "▓"), (4, "█"), (9, "█")]
+)
+def test_the_glyph_darkens_with_the_count_and_caps_at_four(count, glyph):
+    rows = [row("2026-11-02 10:00:00")] * count
+
+    assert grid(browse.activity(rows, "experiments", TODAY))["Mon"][-1] == glyph
+
+
+def test_the_grid_spans_53_weeks_starting_on_a_monday():
+    rows = [row("2025-11-03 10:00:00"), row("2025-11-02 10:00:00")]
+
+    text = browse.activity(rows, "experiments", TODAY)
+
+    # 2025-11-03 is the Monday 52 weeks before this week's: the first cell.
+    assert grid(text)["Mon"][0] == "░"
+    assert "1 experiment " in text
+    assert "2025-11-03 → 2026-11-03" in text
+
+
+def test_month_labels_sit_above_the_week_holding_the_first():
+    text = browse.activity([row("2026-11-03 08:00:00")], "experiments", TODAY)
+
+    months = next(line for line in text.splitlines() if "Dec" in line)
+    # 2025-12-01 is a Monday, four weeks after the first column.
+    assert months.index("Dec") == 4 + 2 * 4
+    # 2026-11-01 is a Sunday, so November labels the second-to-last column.
+    assert months.index("Nov", 5) == 4 + 2 * (browse.WEEKS - 2)
+
+
+def test_the_first_week_is_labelled_with_its_month():
+    text = browse.activity([row("2026-11-03 08:00:00")], "experiments", TODAY)
+
+    months = next(line for line in text.splitlines() if "Dec" in line)
+    assert months.index("Nov") == 4
+
+
+def test_the_first_weeks_month_gives_way_to_a_label_it_would_overlap():
+    # The grid starts on Mon 2025-09-22; October begins in the second column.
+    today = dt.date(2026, 9, 21)
+
+    text = browse.activity([row("2026-09-21 08:00:00")], "experiments", today)
+
+    months = next(line for line in text.splitlines() if "Nov" in line)
+    assert months.startswith("      Oct")
+
+
+def test_every_other_weekday_is_labelled_monday_to_sunday():
+    text = browse.activity([row("2026-11-03 08:00:00")], "experiments", TODAY)
+
+    lines = text.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith("Mon "))
+    labels = [line[:4] for line in lines[start : start + 7]]
+    assert labels == ["Mon ", "    ", "Wed ", "    ", "Fri ", "    ", "Sun "]
+
+
+def test_each_author_gets_a_grid_busiest_first():
+    rows = [
+        row("2026-11-02 10:00:00", 28, "Janiya Cole"),
+        row("2026-11-02 10:00:00", 35, "Reynold Turcotte"),
+        row("2026-11-03 10:00:00", 35, "Reynold Turcotte"),
+    ]
+
+    text = browse.activity(rows, "experiments", TODAY)
+
+    assert text.index("Reynold Turcotte  2 experiments · 2 active days") < text.index(
+        "Janiya Cole  1 experiment · 1 active day"
+    )
+    assert text.count("Mon ") == 2
+
+
+def test_an_author_without_a_name_is_shown_by_user_id():
+    text = browse.activity([row("2026-11-02 10:00:00", 12, None)], "experiments", TODAY)
+
+    assert "user 12  1 experiment" in text
+
+
+def test_authors_sharing_a_name_keep_separate_grids():
+    rows = [
+        row("2026-11-02 10:00:00", 28, "Alex Kim"),
+        row("2026-11-02 10:00:00", 41, "Alex Kim"),
+    ]
+
+    text = browse.activity(rows, "experiments", TODAY)
+
+    assert text.count("Alex Kim  1 experiment · 1 active day") == 2
+
+
+def test_rows_without_a_creation_date_are_skipped():
+    rows = [row("2026-11-02 10:00:00"), row(None), row("")]
+
+    assert "1 experiment " in browse.activity(rows, "experiments", TODAY)
+
+
+def test_nothing_in_the_window_prints_a_notice():
+    text = browse.activity([row("2024-01-01 10:00:00")], "items", TODAY)
+
+    assert text == "no items created since 2025-11-03\n"
+
+
+def test_plain_output_has_no_escape_codes():
+    text = browse.activity([row("2026-11-02 10:00:00")], "experiments", TODAY)
+
+    assert "\033" not in text
+    assert "· 0  ░ 1  ▒ 2  ▓ 3  █ 4+" in text
+
+
+def test_color_output_paints_each_cell_green():
+    text = browse.activity(
+        [row("2026-11-02 10:00:00")], "experiments", TODAY, color=True
+    )
+
+    assert f"\033[38;5;{browse.PALETTE[1]}m░\033[0m" in text
+    assert f"\033[38;5;{browse.PALETTE[0]}m·\033[0m" in text
+
+
+def test_cells_are_spaced_one_column_apart():
+    text = browse.activity([row("2026-11-02 08:00:00")], "experiments", TODAY)
+
+    sunday = next(line for line in text.splitlines() if line.startswith("Sun "))
+    assert sunday[4:9] == "· · ·"
+
+
+def test_a_narrow_terminal_keeps_the_most_recent_weeks_that_fit():
+    rows = [row("2026-02-23 08:00:00"), row("2026-02-22 08:00:00")]
+
+    text = browse.activity(rows, "experiments", TODAY, width=80)
+
+    # 37 weeks of two columns, plus the label and room for the last month name.
+    assert "2026-02-23 → 2026-11-03" in text
+    assert "1 experiment " in text
+    assert grid(text)["Mon"][0] == "░"
+    assert max(len(line) for line in text.splitlines()) <= 80
+
+
+def test_a_tiny_terminal_still_shows_the_current_week():
+    text = browse.activity([row("2026-11-02 08:00:00")], "experiments", TODAY, width=5)
+
+    assert grid(text)["Mon"][0] == "░"

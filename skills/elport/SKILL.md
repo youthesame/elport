@@ -34,6 +34,7 @@ elport list --scope team -q blot # widen to the team / search title+body+elabid;
 elport list --json               # raw API rows; pipe to jq to drive clone/view
 #   default --limit is 50; a full page warns on stderr, so raise --limit rather than assume it is all
 elport view 357                  # print one remote body to stdout, as stored (read-only, writes nothing)
+elport activity [--team]         # heatmap of entities created per day, up to a year (read-only)
 elport whoami                    # auth check: user, team+role, API-key read/write, server version, scopes
 elport profile [use <name>]      # list profiles (default marked), or switch the default
 elport login [profile]           # store base_url (config) + api_key (OS keyring); prompts, no echo

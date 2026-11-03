@@ -70,6 +70,7 @@ need not be a git repository.
 | `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. |
 | `list` | List remote entities as `id  date  title`. Read-only. |
 | `view <id>` | Print one remote body to stdout, exactly as stored. |
+| `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
 | `comments` | Print the remote comment thread. |
 | `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
 
@@ -224,7 +225,7 @@ pattern is anchored at its own directory.
 | `state.py` | The stored base and its hashes |
 | `config.py` | Profiles and credential resolution |
 | `frontmatter.py` | The YAML block |
-| `browse.py` | list and view |
+| `browse.py` | list, view and activity |
 
 **The tests are the authoritative behavioral contract, so change tests first.** You can check live API behavior
 against <https://demo.elabftw.net>.

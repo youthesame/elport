@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import datetime as dt
 import json
 import sys
+from collections import Counter, defaultdict
 
 from .frontmatter import validate_id
 
@@ -52,3 +54,81 @@ def view(client, entity: str, eid: object) -> None:
     # Write, not print: the body goes to stdout byte for byte, so redirecting it
     # to a file reproduces what the server stores.
     sys.stdout.write(client.get(entity, validate_id(eid)).get("body") or "")
+
+
+WEEKS = 53
+GLYPHS = "·░▒▓█"
+# xterm-256 greys and greens close to GitHub's dark theme; 256 colours work in
+# every terminal elport targets, unlike 24-bit colour (macOS Terminal.app).
+PALETTE = (240, 22, 28, 34, 40)
+MONTHS = (
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+)  # fmt: skip
+LABELS = ("Mon", "", "Wed", "", "Fri", "", "Sun")
+
+
+def activity(
+    rows, entity: str, today: dt.date, color: bool = False, width: int = 2 * WEEKS + 5
+) -> str:
+    # Two columns a week after the 4-column label, and room for a month name
+    # over the last one; a narrow terminal drops the oldest weeks.
+    weeks = max(1, min(WEEKS, (width - 5) // 2))
+    start = today - dt.timedelta(days=today.weekday(), weeks=weeks - 1)
+    # Keyed by user id as well as name: two members may share a name.
+    days: defaultdict[tuple[str, object], Counter[dt.date]] = defaultdict(Counter)
+    for row in rows:
+        created = (row.get("created_at") or "")[:10]
+        if not created:
+            continue
+        day = dt.date.fromisoformat(created)
+        if start <= day <= today:
+            userid = row.get("userid")
+            days[row.get("fullname") or f"user {userid}", userid][day] += 1
+    if not days:
+        return f"no {entity} created since {start}\n"
+
+    noun = entity.rstrip("s")
+    lines = [f"{entity} created per day · {start} → {today}"]
+    by_total = sorted(days.items(), key=lambda a: (-a[1].total(), a[0][0]))
+    for (author, _), counts in by_total:
+        total, active = counts.total(), len(counts)
+        heading = (
+            f"{author}  {total} {noun}{'s' * (total != 1)}"
+            f" · {active} active day{'s' * (active != 1)}"
+        )
+        lines += ["", heading, _months(start, weeks)]
+        for weekday, label in enumerate(LABELS):
+            cells = []
+            for week in range(weeks):
+                day = start + dt.timedelta(weeks=week, days=weekday)
+                cells.append(" " if day > today else _cell(counts[day], color))
+            lines.append(f"{label:<4}{' '.join(cells)}".rstrip())
+    legend = "  ".join(
+        f"{_cell(level, color)} {level}{'+' * (level == 4)}" for level in range(5)
+    )
+    lines += ["", f"    {legend}"]
+    return "\n".join(lines) + "\n"
+
+
+def _cell(count: int, color: bool) -> str:
+    level = min(count, 4)
+    glyph = GLYPHS[level]
+    return f"\033[38;5;{PALETTE[level]}m{glyph}\033[0m" if color else glyph
+
+
+def _months(start: dt.date, weeks: int) -> str:
+    """Each month's name above the week that holds its first day, and the first
+    week's month unless the next name starts too close to fit beside it."""
+    labels = [(0, start.month)]
+    for week in range(weeks):
+        for weekday in range(7):
+            day = start + dt.timedelta(weeks=week, days=weekday)
+            if day.day == 1:
+                labels.append((week, day.month))
+    if len(labels) > 1 and labels[1][0] < 2:
+        labels.pop(0)
+    line = [" "] * (2 * weeks + 1)
+    for week, month in labels:
+        line[2 * week : 2 * week + 3] = MONTHS[month - 1]
+    return ("    " + "".join(line)).rstrip()

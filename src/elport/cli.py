@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import functools
 import getpass
 import io
 import os
 import re
+import shutil
 import sys
 import unicodedata
 from collections import Counter
@@ -40,6 +42,7 @@ examples:
   elport new "Cell viability assay"  create a remote entity and report.md
   elport clone 357                  start report.md from an existing entity
   elport list                        list your own entities on the server
+  elport activity                    heatmap of the experiments you created this year
   elport view 357                    print a remote body without cloning it
   elport push                        upload report.md (add -n to preview first)
   elport status                      show local/remote sync state
@@ -210,6 +213,19 @@ def _parser() -> argparse.ArgumentParser:
         "--json", action="store_true", help="emit the raw API rows as JSON"
     )
     list_parser.add_argument("--profile", help="config profile to use")
+
+    activity_parser = commands.add_parser(
+        "activity", help="heatmap of entities created per day, up to a year (read-only)"
+    )
+    activity_parser.add_argument(
+        "--team", action="store_true", help="one heatmap per author in your team"
+    )
+    activity_parser.add_argument(
+        "--entity",
+        choices=ENTITIES,
+        help="entity type to count (default: experiments)",
+    )
+    activity_parser.add_argument("--profile", help="config profile to use")
 
     view_parser = commands.add_parser(
         "view", help="print a remote body to stdout (read-only)"
@@ -453,10 +469,12 @@ def _clone_to(eid, entity: str, path: Path, profile: str | None) -> str:
     return "cloned"
 
 
+def _colors() -> bool:
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
 def _color(text: str, code: int) -> str:
-    if sys.stdout.isatty() and os.environ.get("NO_COLOR") is None:
-        return f"\033[{code}m{text}\033[0m"
-    return text
+    return f"\033[{code}m{text}\033[0m" if _colors() else text
 
 
 def _browse_target(args) -> tuple[str, Client]:
@@ -726,6 +744,13 @@ def main(argv=None) -> int:
                 query=args.query,
                 as_json=args.json,
             )
+            return 0
+        if args.cmd == "activity":
+            entity, client = _browse_target(args)
+            rows = _every(client, entity, "team" if args.team else "self")
+            today = datetime.datetime.now().astimezone().date()
+            width = shutil.get_terminal_size().columns
+            print(browse.activity(rows, entity, today, _colors(), width), end="")
             return 0
         if args.cmd == "view":
             entity, client = _browse_target(args)

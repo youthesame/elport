@@ -32,6 +32,10 @@
   - **Returns the stored entity** (measured demo 6.0.5, 2026-10-02: identical, body and all keys, to an
     immediate `GET`, including normalized bodies and metadata/permission changes; empty body comes back `null`).
 - User: `GET /api/v2/users/me` (`team` = active team ID, `teams`).
+- List: `GET /api/v2/{entity}?scope=&limit=&offset=` (`scope` 1 = own, 2 = team, 3 = everything). Each row
+  carries `created_at` (`"2026-11-02 14:55:13"`, server time), the editable experiment `date`, and the owner as
+  `userid` / `fullname` (measured demo 6.0.9, 2026-11-03: `scope=1` returned only the key owner's rows,
+  `scope=2` every author in the active team).
 
 ## Body normalization (the fact most directly tied to conflict detection)
 
