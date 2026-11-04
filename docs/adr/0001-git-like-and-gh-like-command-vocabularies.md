@@ -1,5 +1,8 @@
 # Two command vocabularies: git-like for the sync loop, gh-like for remote browsing
 
+> Amended by [ADR-0008](0008-view-writes-a-snapshot-into-a-directory-the-caller-names.md):
+> `view -o` writes a snapshot into a local directory.
+
 elport's commands draw on two distinct vocabularies, and this is deliberate rather than an
 inconsistency to be cleaned up:
 
