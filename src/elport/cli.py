@@ -427,8 +427,7 @@ def _clone_all(args) -> int:
                 continue
             saved = state.load(client.root, entity, str(eid))
             if saved is not None:
-                where = saved.get("path") or "an unrecorded path"
-                report.line("·", f"{entity}/{eid}  working copy at {where}")
+                report.line("·", f"{entity}/{eid}  working copy at {_where(saved)}")
                 continue
             directory = root / entity / _directory_name(eid, row.get("title") or "")
             path = directory / "report.md"
@@ -446,6 +445,10 @@ def _clone_all(args) -> int:
     return report.finish(0)
 
 
+def _where(saved: dict) -> str:
+    return saved.get("path") or "an unrecorded path"
+
+
 def _clone_to(eid, entity: str, path: Path, profile: str | None) -> str:
     eid = frontmatter.validate_id(eid)
     if path.exists():
@@ -460,9 +463,10 @@ def _clone_to(eid, entity: str, path: Path, profile: str | None) -> str:
     # base of whatever working copy already holds it, so refuse instead.
     base = state.path(client.root, entity, str(eid))
     if base.exists():
+        saved = state.load(client.root, entity, str(eid)) or {}
         raise RuntimeError(
-            f"{entity}/{eid} already has a working copy; pull there instead "
-            f"(to start over, delete its base: {base})"
+            f"{entity}/{eid} already has a working copy at {_where(saved)}; "
+            f"pull there instead (to start over, delete its base: {base})"
         )
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
     try:

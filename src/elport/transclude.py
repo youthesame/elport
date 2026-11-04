@@ -391,11 +391,13 @@ def _exposes_hidden(doc_dir: Path, raw: str, target: Path) -> bool:
 
 def _candidate(
     doc_dir: Path, value: str, ignore: list[IgnoreLayer]
-) -> tuple[Path | None, bool, str]:
+) -> tuple[Path | None, str, str]:
+    """The file a reference names, why it is not uploaded when that deserves a
+    warning ("" otherwise), and its #fragment."""
     if not value or value.startswith("#") or _has_scheme(value):
-        return None, False, ""
+        return None, "", ""
     if "?" in value:
-        return None, True, ""
+        return None, "has a query string", ""
     raw = value
     p = (doc_dir / raw).resolve()
     fragment = ""
@@ -403,19 +405,21 @@ def _candidate(
         raw, suffix = raw.split("#", 1)
         fragment = "#" + suffix
         p = (doc_dir / raw).resolve()
-    if not p.is_file() or _exposes_hidden(doc_dir, raw, p):
-        return None, True, ""
+    if not p.is_file():
+        return None, "no such file", ""
+    if _exposes_hidden(doc_dir, raw, p):
+        return None, "hidden path", ""
     root = doc_dir.resolve()
     if not p.is_relative_to(root):
         # Ignore rules stay inside the document directory (ADR-0007).
-        return p, False, fragment
+        return p, "", fragment
     relative = p.relative_to(root)
     on_disk = _on_disk(root, relative)
     if on_disk is None:
-        return None, True, ""
+        return None, "cannot be read", ""
     if _ignored(relative.as_posix(), ignore) or _ignored(on_disk, ignore):
-        return None, False, ""
-    return p, False, fragment
+        return None, "", ""
+    return p, "", fragment
 
 
 def _linked_document(doc_dir: Path, value: str) -> tuple[Path, str] | None:
@@ -474,10 +478,10 @@ def plan(
         if linked is not None:
             ref.doc, ref.fragment = linked
             continue
-        p, warn, fragment = _candidate(doc_dir, ref.path, ignore)
-        if warn:
+        p, why, fragment = _candidate(doc_dir, ref.path, ignore)
+        if why:
             print(
-                f"warning: local reference not uploaded: {ref.path}",
+                f"warning: local reference not uploaded ({why}): {ref.path}",
                 file=sys.stderr,
             )
         if p is not None:
