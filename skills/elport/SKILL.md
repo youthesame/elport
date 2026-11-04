@@ -88,6 +88,7 @@ A push overwrites the shared server body; discarding remote changes with `--forc
   it would skip. If push stops with `re-run with --yes`, ask rather than add `-y` on your own.
 - **Keep secrets out of the note and repo.** API keys live in the OS keyring via `elport login`;
   base_url in `~/.config/elport/`. Never print, echo, or write a key into a file, note, or log.
+  The sync base (one file per entity) lives in `~/.config/elport/state/`, never in the project.
 - **`list` and `view` never write remotely.** They need no local document and touch no base, so they
   are safe to run before anything is set up. Use them to find an entity instead of guessing an `id`.
   `view` prints the body exactly as stored, so a note written in the Web UI comes out as HTML.
