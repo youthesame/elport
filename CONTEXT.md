@@ -38,3 +38,12 @@ _Avoid_: unlinked attachment, extra file
 **Base**:
 What a document and its entity looked like at the last sync, kept in two forms (remote-base and
 local-base) so each side is compared only against its own form.
+
+**Working copy**:
+The one document that holds an entity's base on this machine.
+_Avoid_: checkout, clone (as a noun)
+
+**Snapshot**:
+A copy of an entity's body and the attachments it shows, made only to be read. It has no front
+matter and no base, so it is never a document.
+_Avoid_: export, archive
