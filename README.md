@@ -72,7 +72,7 @@ need not be a git repository.
 | `view <id>` | Print one remote body to stdout, exactly as stored. |
 | `view <id> -o <dir>` | Write the body and the files it shows into a new or empty `<dir>`, to read them. Not a working copy. |
 | `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
-| `comments` | Print the remote comment thread. |
+| `comments [<id>]` | Print the remote comment thread. With an `<id>`, no local document is needed. |
 | `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
 
 `new` and `clone` write to `report.md` unless you pass `-o <doc>`. `list` defaults to your own entities

@@ -360,6 +360,10 @@ def comments(path: Path, client, config: dict, profile=None) -> None:
     _, _, entity, eid = _document(path, config)
     if not eid:
         raise RuntimeError("id is required")
+    show_comments(client, entity, eid)
+
+
+def show_comments(client, entity: str, eid) -> None:
     thread = client.comments(entity, eid)
     if not thread:
         print("no comments")

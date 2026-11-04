@@ -128,7 +128,7 @@ def _parser() -> argparse.ArgumentParser:
         "doc",
         nargs="?",
         default="report.md",
-        help="local document (default: report.md)",
+        help="local document, or the id of a remote entity (default: report.md)",
     )
     _add_target_options(comments_parser)
 
@@ -779,6 +779,10 @@ def main(argv=None) -> int:
             merge(path, data, args.profile, args.resolved)
             return 0
 
+        if args.cmd == "comments" and args.doc.isdigit():
+            entity, client = _browse_target(args)
+            sync.show_comments(client, entity, frontmatter.validate_id(int(args.doc)))
+            return 0
         if args.cmd in ("comments", "comment"):
             path = Path(args.doc)
             data, client = _target(path, args.profile, args.entity)
