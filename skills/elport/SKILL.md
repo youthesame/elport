@@ -24,7 +24,7 @@ elport push notes/ a.md          # push/pull/fetch/status/diff take several path
 elport pull                      # fetch body + metadata, reverse-transclude URLs → local paths, download files
 elport fetch                     # download every attachment, incl. non-embedded ones (read-only, no base/manifest)
 elport merge                     # after a conflict: git merge-file .base.md/.remote.md → doc (local)
-elport comments                  # print the remote comment thread (read-only, terminal only)
+elport comments [357]            # print the remote comment thread to the terminal (read-only); pass an id to read it without a local document
 elport comment "text"            # post one comment (no edit/delete)
 elport new "title" --entity experiments -o report.md   # create entity + scaffold frontmatter
 elport clone 357 --entity experiments -o report.md    # start from an existing entity: scaffold + pull

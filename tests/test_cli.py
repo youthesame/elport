@@ -620,6 +620,29 @@ def test_comments_defaults_to_report_and_dispatches_through_target(monkeypatch):
     assert comment_calls == [(Path("report.md"), client, {"entity": "items"}, "lab")]
 
 
+def test_comments_takes_an_entity_id_without_a_local_document(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+
+    class Client:
+        def comments(self, entity, eid):
+            calls.append((entity, eid))
+            return []
+
+    monkeypatch.setattr(config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", Client())
+    )
+
+    assert cli.main(["comments", "357", "--entity", "items"]) == 0
+
+    assert calls == [("items", 357)]
+    assert capsys.readouterr().out == "no comments\n"
+    assert list(tmp_path.iterdir()) == []
+
+
 @pytest.mark.parametrize(
     ("argv", "expected_path"),
     [

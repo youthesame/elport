@@ -62,6 +62,15 @@ def test_comments_requires_id(tmp_path, configured):
     assert client.calls == []
 
 
+def test_show_comments_reads_the_thread_by_entity_and_id(capsys):
+    client = FakeClient()
+
+    sync.show_comments(client, "items", 17)
+
+    assert client.calls == ["comments"]
+    assert capsys.readouterr().out == "no comments\n"
+
+
 def test_comment_posts_to_document_target(tmp_path, configured, capsys):
     doc = tmp_path / "report.md"
     write_doc(doc, "Local body\n", id=17, entity="items")
