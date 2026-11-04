@@ -1301,6 +1301,29 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
     return f"fetched {len(names)} attachment(s)"
 
 
+def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> None:
+    """Write the remote body and the uploads it shows into an empty directory,
+    to be read. No front matter and no base: it is never a working copy."""
+    eid = frontmatter.validate_id(eid)
+    if directory.is_dir() and any(directory.iterdir()):
+        raise RuntimeError(f"output directory is not empty: {directory}")
+    remote = Remote(client, entity, eid, base_url)
+    body = remote.get().get("body") or ""
+    source, used = reverse(body, _reversible_uploads(remote.uploads()), base_url)
+    path = directory / "report.md"
+    if any(_upload_name(upload).casefold() == path.name for upload in used):
+        raise RuntimeError(f"an attachment is named {path.name}, like the body")
+    if frontmatter.text_meta(source) is not None:
+        # Directory-wide push would take it for a working copy.
+        raise RuntimeError("the remote body starts with elport front matter")
+    directory.mkdir(parents=True, exist_ok=True)
+    frontmatter.atomic_write(path, source)
+    _place_attachments(path, remote, used)
+    print(path)
+    for name in sorted({_upload_name(upload) for upload in used}):
+        print(directory / name)
+
+
 def status(path: Path, client, config: dict, profile=None) -> str:
     meta, body, entity, eid = _document(path, config)
     saved = None

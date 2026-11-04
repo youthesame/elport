@@ -236,6 +236,13 @@ def _parser() -> argparse.ArgumentParser:
         choices=ENTITIES,
         help="entity type to view (default: experiments)",
     )
+    view_parser.add_argument(
+        "-o",
+        "--output",
+        metavar="DIR",
+        help="write the body and the files it shows into DIR (new or empty) "
+        "instead of printing it",
+    )
     view_parser.add_argument("--profile", help="config profile to use")
 
     clone_parser = commands.add_parser(
@@ -754,7 +761,10 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "view":
             entity, client = _browse_target(args)
-            browse.view(client, entity, args.id)
+            if args.output:
+                sync.snapshot(client, entity, args.id, Path(args.output), client.root)
+            else:
+                browse.view(client, entity, args.id)
             return 0
         if args.cmd == "whoami":
             _whoami(args.profile)

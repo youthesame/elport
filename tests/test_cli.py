@@ -1052,6 +1052,9 @@ class BrowseClient:
     def get(self, entity, eid):
         return {"body": self.body}
 
+    def uploads(self, entity, eid):
+        return []
+
 
 def test_list_command_defaults_to_self_scoped_experiments(monkeypatch, capsys):
     client = BrowseClient(rows=[{"id": 4, "date": "2026-09-18", "title": "Note"}])
@@ -1109,6 +1112,27 @@ def test_view_command_prints_the_remote_body(monkeypatch, capsys):
     assert cli.main(["view", "42"]) == 0
 
     assert capsys.readouterr().out == "remote text\n"
+
+
+def test_view_command_writes_into_the_output_directory(tmp_path, monkeypatch, capsys):
+    client = BrowseClient(body="remote text\n")
+    _stub_browse_client(monkeypatch, client)
+    out = tmp_path / "out"
+
+    assert cli.main(["view", "42", "-o", str(out)]) == 0
+
+    assert (out / "report.md").read_text() == "remote text\n"
+    assert capsys.readouterr().out == f"{out / 'report.md'}\n"
+
+
+def test_view_command_reports_a_non_empty_output_directory(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "keep.txt").write_text("mine")
+    _stub_browse_client(monkeypatch, BrowseClient(body="text\n"))
+
+    assert cli.main(["view", "42", "-o", str(tmp_path)]) == 1
+    assert "not empty" in capsys.readouterr().err
 
 
 def test_view_command_reports_an_invalid_id_as_a_cli_error(monkeypatch, capsys):
