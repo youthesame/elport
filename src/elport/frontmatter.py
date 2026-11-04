@@ -127,8 +127,16 @@ def document_meta(path: Path) -> dict | None:
     """Front matter of an elport document (one holding ``id`` and ``profile``,
     which elport writes itself), or None for any other Markdown."""
     try:
-        meta = parse(path.read_text(encoding="utf-8"))[0]
-    except (OSError, UnicodeDecodeError, ValueError):
+        return text_meta(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def text_meta(text: str) -> dict | None:
+    """``document_meta`` for text not yet on disk."""
+    try:
+        meta = parse(text)[0]
+    except ValueError:
         return None
     return meta if "id" in meta and meta.get("profile") else None
 

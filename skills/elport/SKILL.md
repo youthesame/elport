@@ -34,6 +34,7 @@ elport list --scope team -q blot # widen to the team / search title+body+elabid;
 elport list --json               # raw API rows; pipe to jq to drive clone/view
 #   default --limit is 50; a full page warns on stderr, so raise --limit rather than assume it is all
 elport view 357                  # print one remote body to stdout, as stored (read-only, writes nothing)
+elport view 357 -o DIR           # body + the images it shows into a new/empty DIR (no base); open them from there
 elport activity [--team]         # heatmap of entities created per day, up to a year (read-only)
 elport whoami                    # auth check: user, team+role, API-key read/write, server version, scopes
 elport profile [use <name>]      # list profiles (default marked), or switch the default
@@ -87,9 +88,11 @@ A push overwrites the shared server body; discarding remote changes with `--forc
   it would skip. If push stops with `re-run with --yes`, ask rather than add `-y` on your own.
 - **Keep secrets out of the note and repo.** API keys live in the OS keyring via `elport login`;
   base_url in `~/.config/elport/`. Never print, echo, or write a key into a file, note, or log.
-- **`list` and `view` never write.** They need no local document and touch no base, so they are
-  safe to run before anything is set up. Use them to find an entity instead of guessing an `id`.
+- **`list` and `view` never write remotely.** They need no local document and touch no base, so they
+  are safe to run before anything is set up. Use them to find an entity instead of guessing an `id`.
   `view` prints the body exactly as stored, so a note written in the Web UI comes out as HTML.
+  To see its figures, `view <id> -o DIR` into a scratch directory outside the project; the copy is
+  not a working copy, so edit through `clone` instead.
 - **Link another note by its local path** (`[prev](../exp12/report.md)`): push sends its URL,
   never the file. A target without `id` stops the push: push the target first.
 - **A locked entity cannot be pushed**, even with `--force`. Tell the user to unlock it in the Web

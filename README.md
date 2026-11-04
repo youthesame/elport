@@ -70,6 +70,7 @@ need not be a git repository.
 | `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. |
 | `list` | List remote entities as `id  date  title`. Read-only. |
 | `view <id>` | Print one remote body to stdout, exactly as stored. |
+| `view <id> -o <dir>` | Write the body and the files it shows into a new or empty `<dir>`, to read them. Not a working copy. |
 | `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
 | `comments` | Print the remote comment thread. |
 | `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
