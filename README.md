@@ -133,8 +133,9 @@ attachments: [data/raw.csv]   # optional; files uploaded without a body link
 # Body. Markdown, inline HTML allowed ...
 ```
 
-The block holds only `id`, human metadata, and an optional `profile`. The base and the hashes live in state. elport
-strips the front matter before sending the body.
+The block holds only `id`, human metadata, and an optional `profile`. The base and the hashes live in state, one
+file per entity under `~/.config/elport/state/`, never in the project. elport strips the front matter before sending
+the body.
 
 `title`, `category`, `status`, `read`, and `write` are reflected **only when present**. Omit a key and elport leaves
 that remote value untouched. `pull` writes them back from the server, so a key you never wrote may appear after a
