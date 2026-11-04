@@ -329,7 +329,19 @@ def test_query_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
     reference = plan("[manual](manual.pdf?download=1)", tmp_path)[0]
 
     assert reference.file is None
-    assert "manual.pdf?download=1" in capsys.readouterr().err
+    assert (
+        "not uploaded (has a query string): manual.pdf?download=1"
+        in capsys.readouterr().err
+    )
+
+
+def test_missing_file_reference_warns_that_there_is_no_such_file(
+    tmp_path: Path, capsys
+):
+    reference = plan("![fig](figs/missing.png)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "not uploaded (no such file): figs/missing.png" in capsys.readouterr().err
 
 
 def test_dotfile_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
@@ -338,7 +350,7 @@ def test_dotfile_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
     reference = plan("[x](.env)", tmp_path)[0]
 
     assert reference.file is None
-    assert "local reference not uploaded" in capsys.readouterr().err
+    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
 
 
 def test_file_in_hidden_directory_is_not_uploaded_and_warns(tmp_path: Path, capsys):
@@ -348,7 +360,7 @@ def test_file_in_hidden_directory_is_not_uploaded_and_warns(tmp_path: Path, caps
     reference = plan("[x](.git/config)", tmp_path)[0]
 
     assert reference.file is None
-    assert "local reference not uploaded" in capsys.readouterr().err
+    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
 
 
 def test_file_through_hidden_symlink_is_not_uploaded_and_warns(tmp_path: Path, capsys):
@@ -359,7 +371,7 @@ def test_file_through_hidden_symlink_is_not_uploaded_and_warns(tmp_path: Path, c
     reference = plan("[x](.aws/credentials)", tmp_path)[0]
 
     assert reference.file is None
-    assert "local reference not uploaded" in capsys.readouterr().err
+    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
 
 
 def test_regular_file_reference_is_still_uploaded(tmp_path: Path):

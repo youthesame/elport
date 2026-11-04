@@ -964,13 +964,19 @@ def test_clone_refuses_when_the_entity_already_has_a_working_copy(
 ):
     output = tmp_path / "second.md"
     _clone_env(monkeypatch, tmp_path, CloneClient())
-    saved = {"remote_base": "remote body\n", "local_base": "old local\n", "team": 7}
+    saved = {
+        "remote_base": "remote body\n",
+        "local_base": "old local\n",
+        "team": 7,
+        "path": "/notes/exp357/report.md",
+    }
     sync.state.save("https://e.example", "experiments", "357", saved)
 
     assert cli.main(["clone", "357", "-o", str(output)]) == 1
 
     assert not output.exists()
-    assert "already has a working copy" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "already has a working copy at /notes/exp357/report.md" in err
     assert sync.state.load("https://e.example", "experiments", "357") == saved
 
 
