@@ -40,6 +40,25 @@ elport status                           # what would sync? (read-only)
 elport push                             # upload references + push the body
 ```
 
+## Writing a note
+
+```markdown
+---
+id: 42                    # written by elport new or the first push
+title: CRISPR titration
+tags: [CRISPR]
+---
+
+# Result
+
+![titration curve](fig1.png)
+
+Raw data: [raw.csv](data/raw.csv)
+```
+
+`elport new` writes the front matter for you. Write the body as usual and reference local files by their path, and
+push uploads them. `elport help documents` lists every front matter key and reference rule.
+
 ## Commands
 
 Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works. Sync commands

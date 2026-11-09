@@ -43,6 +43,25 @@ elport status                           # 同期予定の内容を確認（読�
 elport push                             # 参照ファイルをアップロードし、本文を push
 ```
 
+## ノートの書き方
+
+```markdown
+---
+id: 42                    # elport new か最初の push が書き込む
+title: CRISPR titration
+tags: [CRISPR]
+---
+
+# Result
+
+![titration curve](fig1.png)
+
+Raw data: [raw.csv](data/raw.csv)
+```
+
+フロントマターは `elport new` が書きます。本文はふつうに書き、ローカルのファイルをパスで参照すれば push がアップロードします。
+フロントマターのすべてのキーと参照のルールは `elport help documents` で確認できます。
+
 ## コマンド一覧
 
 ローカルドキュメントを対象とするコマンドは、省略可能な `[<doc>]` を取ります。デフォルトは `report.md`
