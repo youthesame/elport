@@ -440,21 +440,19 @@ def _clone_all(args) -> int:
             path = directory / "report.md"
 
             def work(eid=eid, entity=entity, directory=directory, path=path):
-                directory.mkdir(parents=True, exist_ok=True)
+                # New by construction: a directory named by this id was skipped.
+                directory.mkdir(parents=True)
                 try:
                     try:
                         return _clone_to(eid, entity, path, profile_name)
                     except sync.HtmlEntityError:
-                        try:
-                            sync.snapshot(client, entity, eid, directory, client.root)
-                        except BaseException:
-                            # A partial snapshot would count as present on re-runs.
-                            shutil.rmtree(directory)
-                            raise
+                        sync.snapshot(client, entity, eid, directory, client.root)
                         return "snapshot (HTML entity, read-only)"
                 except BaseException:
-                    if not any(directory.iterdir()):
-                        directory.rmdir()
+                    # Without a base nothing here is a working copy, only a partial
+                    # download whose directory would count as present on re-runs.
+                    if not state.path(client.root, entity, str(eid)).exists():
+                        shutil.rmtree(directory)
                     raise
 
             report.run(str(path), f"{entity}/{eid}", work)

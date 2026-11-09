@@ -1680,3 +1680,22 @@ def test_clone_all_removes_a_snapshot_whose_download_fails(
 
     # Left in place, a partial snapshot would count as present on every re-run.
     assert not (root / "experiments" / "5-Web").exists()
+    assert "connection reset" in capsys.readouterr().out
+
+
+def test_clone_all_removes_what_a_failed_clone_downloaded(
+    tmp_path, monkeypatch, capsys, mirror_env
+):
+    def clone_then_fail(eid, entity, path, profile):
+        (path.parent / "fig.png").write_bytes(b"half")
+        raise OSError("connection reset")
+
+    client = MirrorClient({"experiments": [{"id": 4, "title": "x"}]})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+    monkeypatch.setattr(cli, "_clone_to", clone_then_fail)
+
+    argv = ["clone", "--all", str(tmp_path / "b"), "--entity", "experiments"]
+    assert cli.main(argv) == 1
+
+    assert not (tmp_path / "b" / "experiments" / "4-x").exists()
+    assert "connection reset" in capsys.readouterr().out
