@@ -316,7 +316,7 @@ def test_pull_dirty_remote_unchanged_is_noop(tmp_path, monkeypatch, configured, 
     doc = tmp_path / "report.md"
     write_doc(doc, "edited")
     original = doc.read_bytes()
-    client = FakeClient(gets=[{"body": "remote"}])
+    client = FakeClient(gets=[{"body": "remote", "comments": [{"id": 1}]}])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
     monkeypatch.setattr(
         sync.state,
@@ -327,12 +327,14 @@ def test_pull_dirty_remote_unchanged_is_noop(tmp_path, monkeypatch, configured, 
     sync.pull(doc, client, {})
 
     assert doc.read_bytes() == original
-    assert client.calls == ["me", "get"]
+    assert client.calls == ["me", "get", "uploads"]
     assert not (tmp_path / "report.remote.md").exists()
     assert not (tmp_path / "report.base.md").exists()
-    assert capsys.readouterr().out == (
-        "remote: unchanged (local differs from the last sync; nothing to pull)\n"
+    out, err = capsys.readouterr()
+    assert (
+        out == "remote: unchanged (local differs from the last sync; nothing to pull)\n"
     )
+    assert "not shown in the body: 1 comment(s)" in err
 
 
 def test_pull_dirty_hidden_file_urls_remain_in_three_way_sidecars(
@@ -1339,3 +1341,30 @@ def test_pull_takes_an_empty_html_entity(tmp_path, monkeypatch, configured):
     client = FakeClient(gets=[{"body": "", "content_type": 1}])
 
     sync.pull(doc, client, {})
+
+
+def test_pull_names_what_the_body_does_not_show(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    drawing = {
+        "id": 3,
+        "long_name": "aa/0f1e",
+        "real_name": "drawing.png",
+        "storage": 1,
+    }
+    client = FakeClient(
+        gets=[{"body": "remote", "steps": [{"id": 1}], "compounds_links": []}],
+        uploads=[drawing],
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.pull(doc, client, {})
+
+    assert not (tmp_path / "drawing.png").exists()
+    assert capsys.readouterr().err == (
+        "not shown in the body: 1 attachment(s) (drawing.png), 1 step(s); "
+        "see https://e.example/experiments.php?mode=view&id=1\n"
+    )

@@ -188,3 +188,49 @@ def test_view_rejects_an_invalid_id_before_any_request():
         sync.view(client, "experiments", 0, BASE)
 
     assert client.calls == []
+
+
+# What the entity holds outside its body is named on stderr, never written (#64).
+
+ASIDE = {
+    "compounds_links": [{"id": 7, "name": "Benzene", "smiles": "c1ccccc1"}],
+    "steps": [{"id": 1}, {"id": 2}],
+    "comments": [{"id": 1}, {"id": 2}, {"id": 3}],
+}
+ASIDE_LINE = (
+    "not shown in the body: 1 attachment(s) (raw.csv), 1 compound(s), 2 step(s), "
+    f"3 comment(s); see {BASE}/experiments.php?mode=view&id=42\n"
+)
+
+
+def test_view_names_what_the_body_does_not_show(capsys):
+    client = FakeClient(
+        remote_doc={"body": HTML_BODY, "content_type": 1, **ASIDE}, uploads=[FIG, RAW]
+    )
+
+    sync.view(client, "experiments", 42, BASE)
+
+    out, err = capsys.readouterr()
+    assert out == HTML_READABLE
+    assert ASIDE_LINE in err
+
+
+def test_snapshot_names_what_it_leaves_on_the_server(tmp_path, capsys):
+    out = tmp_path / "out"
+    client = FakeClient(
+        remote_doc={"body": f"![figure]({FIG_URL})\n", **ASIDE}, uploads=[FIG, RAW]
+    )
+
+    sync.view(client, "experiments", 42, BASE, out)
+
+    assert sorted(p.name for p in out.iterdir()) == ["fig.png", "report.md"]
+    assert capsys.readouterr().err == ASIDE_LINE
+
+
+def test_view_names_an_attachment_by_its_link_in_any_form(capsys):
+    body = f'<img src="app/download.php?f=aa/fig">\n[raw]({BASE}/app/download.php?f=bb%2Fraw)\n'
+    client = FakeClient(remote_doc={"body": body}, uploads=[FIG, RAW])
+
+    sync.view(client, "experiments", 42, BASE)
+
+    assert "not shown in the body" not in capsys.readouterr().err

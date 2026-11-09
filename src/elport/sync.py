@@ -1216,6 +1216,8 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     )
     base_meta = (saved or {}).get("meta_base", {})
     local_dirty = saved is not None and body != saved.get("local_base", "")
+    uploads = remote.uploads()
+    _name_what_is_aside(remote, remote_doc, uploads)
     if local_dirty and remote_doc.get("body", "") == saved.get("remote_base", ""):
         merged, new_base = _merge_meta(meta, base_meta, remote_doc)
         print("remote: unchanged (local differs from the last sync; nothing to pull)")
@@ -1227,7 +1229,6 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
         state.save(base_url, entity, str(eid), {**saved, "meta_base": new_base})
         return UP_TO_DATE
 
-    uploads = remote.uploads()
     for upload in uploads:
         if _is_hidden_upload(upload):
             print(
@@ -1338,13 +1339,42 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
     return f"fetched {len(names)} attachment(s)"
 
 
+def _name_what_is_aside(remote: Remote, remote_doc: dict, uploads: list[dict]) -> None:
+    """Tell the reader what the entity holds outside its body, which elport
+    never brings into it. Every download URL form carries the stored name."""
+    body = remote_doc.get("body") or ""
+    names = sorted(
+        {
+            _upload_name(upload)
+            for upload in uploads
+            if upload.get("long_name", "").rsplit("/", 1)[-1] not in body
+        }
+    )
+    parts = [f"{len(names)} attachment(s) ({', '.join(names)})"] if names else []
+    for key, word in (
+        ("compounds_links", "compound"),
+        ("steps", "step"),
+        ("comments", "comment"),
+    ):
+        if remote_doc.get(key):
+            parts.append(f"{len(remote_doc[key])} {word}(s)")
+    if parts:
+        print(
+            f"not shown in the body: {', '.join(parts)}; "
+            f"see {entity_url(remote.base_url, remote.entity, remote.eid)}",
+            file=sys.stderr,
+        )
+
+
 def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict]]:
     """The body as a reader wants it (ADR-0009), and the uploads it shows."""
     body = remote_doc.get("body") or ""
     if _is_html(remote_doc):
         body = readable_html(body)
     body = absolute_links(body, remote.base_url)
-    return reverse(body, _reversible_uploads(remote.uploads()), remote.base_url)
+    uploads = remote.uploads()
+    _name_what_is_aside(remote, remote_doc, uploads)
+    return reverse(body, _reversible_uploads(uploads), remote.base_url)
 
 
 def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> list[Path]:
