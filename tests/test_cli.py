@@ -3,6 +3,7 @@ import io
 import stat
 import sys
 from contextlib import redirect_stdout
+from importlib import resources
 from pathlib import Path
 
 import keyring.errors
@@ -1713,3 +1714,54 @@ def test_clone_all_does_not_count_a_file_named_by_the_id(
     assert cli.main(["clone", "--all", str(root), "--entity", "experiments"]) == 0
 
     assert [eid for _, eid, _ in mirror_env] == [5]
+
+
+def test_top_level_help_lists_the_help_topics(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    out = capsys.readouterr().out
+    for topic in cli.HELP_TOPICS:
+        assert f"elport help {topic}" in out
+
+
+@pytest.mark.parametrize("topic", list(cli.HELP_TOPICS))
+def test_help_prints_the_topic_file(topic, capsys):
+    text = (resources.files("elport") / "help" / f"{topic}.md").read_text("utf-8")
+
+    assert cli.main(["help", topic]) == 0
+
+    assert capsys.readouterr().out == text
+    assert text.startswith("# ")
+
+
+def test_help_topics_match_the_files_that_ship():
+    shipped = {
+        entry.name.removesuffix(".md")
+        for entry in (resources.files("elport") / "help").iterdir()
+        if entry.name.endswith(".md")
+    }
+
+    assert shipped == set(cli.HELP_TOPICS)
+
+
+def test_help_without_a_topic_lists_them(capsys):
+    assert cli.main(["help"]) == 0
+
+    out = capsys.readouterr().out
+    for topic, summary in cli.HELP_TOPICS.items():
+        assert f"elport help {topic}" in out and summary in out
+
+
+def test_help_rejects_an_unknown_topic(capsys):
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["help", "nope"])
+
+    assert exit_info.value.code == 2
+
+
+def test_agents_topic_names_what_needs_the_users_approval():
+    text = (resources.files("elport") / "help" / "agents.md").read_text("utf-8")
+
+    for flag in ("--force", "--yes", "attachments:"):
+        assert flag in text

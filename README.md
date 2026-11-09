@@ -40,6 +40,25 @@ elport status                           # what would sync? (read-only)
 elport push                             # upload references + push the body
 ```
 
+## Writing a note
+
+```markdown
+---
+id: 42                    # written by elport new or the first push
+title: CRISPR titration
+tags: [CRISPR]
+---
+
+# Result
+
+![titration curve](fig1.png)
+
+Raw data: [raw.csv](data/raw.csv)
+```
+
+`elport new` writes the front matter for you. Write the body as usual and reference local files by their path, and
+push uploads them. `elport help documents` lists every front matter key and reference rule.
+
 ## Commands
 
 Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works. Sync commands
@@ -99,73 +118,13 @@ refuse it, and `view -o` is the way to read it with its figures.
   A non-interactive run needs `-y` for either.
 - `--profile <name>` and `--entity {experiments,items}` pick the destination.
 
-### pull and fetch
+## Documents, sync, and conflicts
 
-Neither command is a superset of the other.
+The details ship with the CLI, so they match the version you installed:
 
-- `pull` puts back each path your push wrote, as written, and leaves those files alone. An attachment added in the
-  Web UI comes down by **basename only** into the document directory.
-- A local path that a remote body links (written on the Web side, brought in by pull) is never uploaded; push
-  warns. List the file under `attachments` to upload it.
-- Neither command writes a hidden (dot-prefixed) attachment such as `.envrc`; push never uploads one, so it can only
-  have been planted on the server.
-- `pull` only downloads files the body links to. Attachments that sit on the entity without being embedded, like
-  raw data or spectra, stay on the server.
-- `fetch` brings those down. It never parses the body, touches the base, or feeds the push manifest, so a fetched
-  file is not uploaded again unless you link it in the body or list it under `attachments` yourself.
-- If a local file differs, `fetch` leaves it in place and writes the remote copy beside it as `<name>.remote`.
-
-## Document format (front matter)
-
-A YAML block at the top, generated or completed on push if absent:
-
-```markdown
----
-id: 42                        # entity ID (auto-filled on creation)
-entity: experiments           # experiments | items (default experiments)
-title: "experiment title"     # optional; defaults to the file name on creation
-tags: [CRISPR, PCR]           # optional; add-only (remove tags in the Web UI)
-category: Molecular Biology   # optional; ID or existing category name (elport never creates categories)
-status: Running               # optional; ID or existing status name (elport never creates statuses)
-profile: labA                 # optional; destination profile
-read: team                    # optional; owner | owner+admin | team | account | public
-write: owner                  # optional; same scale
-attachments: [data/raw.csv]   # optional; files uploaded without a body link
----
-
-# Body. Markdown, inline HTML allowed ...
-```
-
-The block holds only `id`, human metadata, and an optional `profile`. The base and the hashes live in state, one
-file per entity under `~/.config/elport/state/`, never in the project. elport strips the front matter before sending
-the body.
-
-`title`, `category`, `status`, `read`, and `write` are reflected **only when present**. Omit a key and elport leaves
-that remote value untouched. `pull` writes them back from the server, so a key you never wrote may appear after a
-pull, while a key you edited locally but have not pushed is kept. `tags` are add-only on both sides, so pull keeps
-the union.
-
-`read`/`write` set the eLabFTW base visibility only, so individual Web-UI grants survive. Widening beyond your team
-asks for confirmation.
-
-`attachments` lists files to upload without a body link. push fails on an entry it cannot upload.
-
-If the front matter and the CLI disagree on profile, entity, or id, elport **stops** rather than guessing.
-
-## Conflicts
-
-Since you may also edit the body in the Web UI, `push` compares the current remote against the stored base first.
-
-- **unchanged** proceeds.
-- **changed** aborts. elport writes `<name>.base.md` (the ancestor) and `<name>.remote.md`. Run `elport merge` to
-  3-way them into your file, resolve any `<<<<<<<`/`>>>>>>>` markers, then push. A body that still has markers is
-  refused.
-- **locked** aborts, even with `--force`. Unlock it in the Web UI.
-- **no base on this machine** aborts. Run `elport pull` first, or `--force` to overwrite blind.
-
-`--force` discards the Web-side change, so use it deliberately. eLabFTW keeps server-side history recoverable from
-the Web UI as a safety net, but elport keeps no local history of its own. Want per-edit history? `git init` your
-notes folder, since the files are plain Markdown.
+- `elport help documents`: front matter, references, attachments, links between notes ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/documents.md))
+- `elport help workflow`: the status, diff, push loop, conflicts, pull and fetch ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/workflow.md))
+- `elport help agents`: what an AI agent asks its user before acting ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/agents.md))
 
 ## Configuration & auth
 
@@ -217,7 +176,7 @@ pattern is anchored at its own directory.
 - **Why it works this way** → [docs/DESIGN.md](https://github.com/youthesame/elport/blob/main/docs/DESIGN.md)
 - **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](https://github.com/youthesame/elport/blob/main/docs/ELABFTW-API.md)
 - **The behavioral contract** → the test suite (`tests/`) is authoritative
-- **Driving elport from an AI agent** → [skills/elport/SKILL.md](https://github.com/youthesame/elport/blob/main/skills/elport/SKILL.md)
+- **Driving elport from an AI agent** → `elport help agents`. The skill in [skills/elport/SKILL.md](https://github.com/youthesame/elport/blob/main/skills/elport/SKILL.md) only points there.
 
 ## Development
 
@@ -231,6 +190,7 @@ pattern is anchored at its own directory.
 | `config.py` | Profiles and credential resolution |
 | `frontmatter.py` | The YAML block |
 | `browse.py` | list and activity |
+| `help/*.md` | Topics printed by `elport help` |
 
 **The tests are the authoritative behavioral contract, so change tests first.** You can check live API behavior
 against <https://demo.elabftw.net>.

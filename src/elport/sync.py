@@ -234,7 +234,8 @@ def _confirm(what: str, detail: str, question: str, assume_yes: bool) -> None:
         return
     if not _can_prompt():
         raise RuntimeError(
-            f"{what} requires confirmation ({detail}); re-run with --yes"
+            f"{what} requires confirmation ({detail}); "
+            "re-run with --yes only if that is intended"
         )
     answer = input(f"{question} [y/N] ").strip().lower()
     if answer not in ("y", "yes"):
@@ -265,8 +266,9 @@ def _skip_remote_linked(
     for ref in refs:
         if ref.file in linked and ref.file not in listed:
             print(
-                "warning: not uploaded, linked from the remote body "
-                f"(list it under attachments: to upload): {ref.path}",
+                "warning: not uploaded, linked from the remote body (a path "
+                "written on the server side; list it under attachments: only "
+                f"to upload it on purpose): {ref.path}",
                 file=sys.stderr,
             )
             ref.file = None
@@ -586,7 +588,10 @@ def push(
                 "use 'team' or ask an admin"
             )
     if eid and saved is None and not force:
-        raise RuntimeError("base unavailable; run pull first or use --force")
+        raise RuntimeError(
+            "base unavailable on this machine; run elport pull first. "
+            "--force overwrites the remote without comparing"
+        )
     # A base left after an interrupted creation that already sent a body describes
     # no stored form, so it cannot be compared against the remote.
     # An unresolved conflict (pending_remote) ends the resume: that remote body is
@@ -604,7 +609,10 @@ def push(
         and remote_doc.get("body", "") != saved.get("remote_base", "")
         and not force
     ):
-        message = "remote changed; use pull or --force"
+        message = (
+            "remote changed (edited in the Web UI?); run elport pull, then "
+            "elport merge. --force discards the remote edit"
+        )
         if dry_run:
             raise RuntimeError(message)
         _raise_conflict(
@@ -776,7 +784,10 @@ def push(
         mark_created(base_url, entity, eid, identity.get("team"), body_sent=True)
     stored = remote_doc if unchanged else remote.patch(payload)
     if stored.get("content_type") != 2:
-        raise RuntimeError("remote entity is not in markdown mode")
+        raise RuntimeError(
+            "the server kept this entity out of markdown mode "
+            "(eLabFTW 5.3.11 to 5.5.2 ignore content_type); upgrade eLabFTW"
+        )
 
     registered = [list(link) for link in (saved or {}).get("links", [])]
     record = {

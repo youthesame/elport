@@ -43,6 +43,25 @@ elport status                           # 同期予定の内容を確認（読�
 elport push                             # 参照ファイルをアップロードし、本文を push
 ```
 
+## ノートの書き方
+
+```markdown
+---
+id: 42                    # elport new か最初の push が書き込む
+title: CRISPR titration
+tags: [CRISPR]
+---
+
+# Result
+
+![titration curve](fig1.png)
+
+Raw data: [raw.csv](data/raw.csv)
+```
+
+フロントマターは `elport new` が書きます。本文はふつうに書き、ローカルのファイルをパスで参照すれば push がアップロードします。
+フロントマターのすべてのキーと参照のルールは `elport help documents` で確認できます。
+
 ## コマンド一覧
 
 ローカルドキュメントを対象とするコマンドは、省略可能な `[<doc>]` を取ります。デフォルトは `report.md`
@@ -103,78 +122,13 @@ Web UI のリッチテキストエディタで書いたノートは、本文が 
   を超えるファイルを新規アップロードする場合です。非対話シェル環境ではどちらも `-y` が必須です。
 - `--profile <name>` と `--entity {experiments,items}` で送信先を指定します。
 
-### pull と fetch の違い
+## ドキュメント、同期、競合
 
-この 2 つはダウンロードする対象が異なり、どちらか一方で用が足りるわけではありません。
+詳しい説明は CLI に同梱しているので、インストールした版と必ず一致します（英語）。
 
-- `pull` は自分の push が書いたパスを書いたとおりに戻し、そのファイルには触れません。Web UI で追加された添付は
-  **ファイル名のみ**でドキュメントのディレクトリにダウンロードされます。
-- リモートの本文がリンクしているローカルパス（Web 側で書かれ、pull で取り込んだもの）はアップロードされず、push
-  は警告を出します。アップロードするには `attachments` に並べてください。
-- どちらのコマンドも `.envrc` のような隠しファイル（ドット始まり）の添付は書き込みません。push
-  は隠しファイルをアップロードしないため、それはサーバー側で置かれたものに限られます。
-- `pull` がダウンロードするのは本文からリンクされているファイルだけです。生データやスペクトルのように、
-  本文に埋め込まれずノートへ直接添付されているファイルはサーバー上に残ります。
-- `fetch` はそれらを取得します。本文の解析、同期ベースの更新、push
-  マニフェストへの登録は一切行わないため、自分で本文にリンクするか `attachments` に並べない限り再アップロードされることはありません。
-- ローカルに同名で内容の異なるファイルがある場合、`fetch` は既存ファイルをそのまま残し、
-  リモート側を `<ファイル名>.remote` として横に書き出します。
-
-## ドキュメント形式（フロントマター）
-
-ファイルの先頭に YAML ブロックを記述します（存在しない場合は push 時に自動生成・補完されます）:
-
-```markdown
----
-id: 42                        # ノート ID（新規作成時に自動補完）
-entity: experiments           # experiments | items（デフォルト: experiments）
-title: "experiment title"     # 任意。未指定時は作成時にファイル名が設定される
-tags: [CRISPR, PCR]           # 任意。追加専用（タグの削除は Web UI で実行）
-category: Molecular Biology   # 任意。ID または既存のカテゴリ名（elport は新規カテゴリを作成しません）
-status: Running               # 任意。ID または既存のステータス名（elport は新規ステータスを作成しません）
-profile: labA                 # 任意。送信先プロファイル
-read: team                    # 任意。owner | owner+admin | team | account | public
-write: owner                  # 任意。上記と同じ権限レベル
-attachments: [data/raw.csv]   # 任意。本文にリンクせずアップロードするファイル
----
-
-# 本文。Markdown で記述し、インライン HTML も使用可能 ...
-```
-
-フロントマターが保持するのは `id`、人間が読むメタデータ、任意の `profile` **のみ**です。
-同期ベースやハッシュ情報は別管理の state（エンティティごとに 1 ファイル、`~/.config/elport/state/`）に保存され、プロジェクト内には置かれません。本文の送信前に、フロントマターは自動的に除去されます。
-
-`title` / `category` / `status` / `read` / `write` は**明示的に指定された場合のみ**リモートに反映されます。
-キーを省略した場合、elport はリモート側の既存値を変更しません。pull はこれらをサーバーの値で書き戻すため、
-自分で書いていないキーが pull 後に現れることがあります。ローカルで変更してまだ push
-していないキーはそのまま残ります。`tags` は双方向で追加のみのため、pull では和集合になります。
-
-`read`/`write` は eLabFTW の基本公開範囲のみを設定するため、Web UI
-側で個別に付与された共有設定は維持されます。公開範囲を自チーム外へ広げる場合は確認を求められます。
-
-`attachments` には本文にリンクせずアップロードするファイルを並べます。アップロードできないエントリがあると push は失敗します。
-
-フロントマターの記述と CLI の引数（profile / entity / id）に不一致がある場合、elport
-は推測せずに処理を**停止**します。
-
-## 競合の解決
-
-本文は eLabFTW の Web UI 側でも直接編集される可能性があるため、`push`
-実行時にはまず現在のリモート内容がローカルに保存されているベース（前回同期時点のスナップショット）と比較されます。
-
-- **変更なし** → そのまま push を続行します。
-- **変更あり** → push を中断します。elport は競合解決用に `<ファイル名>.base.md`（共通の祖先）と
-  `<ファイル名>.remote.md`（リモート側の最新）を書き出します。`elport merge` で 3 方向マージを行い、
-  発生した競合マーカー（`<<<<<<<` / `>>>>>>>`）を手動で解消してから再度 push
-  してください。競合マーカーが残った本文は push が拒否されます。
-- **ロック済み** → `--force` でも push を中断します。Web UI で解除してください。
-- **このマシンにベースが存在しない** → push を中断します。先に `elport pull` を実行するか、
-  リモートの変更を破棄して上書きする場合は `--force` を指定してください。
-
-`--force` は Web UI 側の変更を破棄するため、意図して使用してください。安全網として eLabFTW
-のサーバー側にはリビジョン履歴が保持されており、Web UI から過去のバージョンを復元できます。ただし elport
-自身はローカルに独自の履歴を持ちません。編集単位のバージョン管理を行いたい場合は、ファイルがプレーンな Markdown
-である利点を活かし、ノートのディレクトリで `git init` してください。
+- `elport help documents`: フロントマター、参照、添付、ノート間のリンク（[GitHub で読む](https://github.com/youthesame/elport/blob/main/src/elport/help/documents.md)）
+- `elport help workflow`: status、diff、push の流れ、競合、pull と fetch（[GitHub で読む](https://github.com/youthesame/elport/blob/main/src/elport/help/workflow.md)）
+- `elport help agents`: AI エージェントが実行前にユーザーへ確認すべきこと（[GitHub で読む](https://github.com/youthesame/elport/blob/main/src/elport/help/agents.md)）
 
 ## 設定と認証
 
@@ -225,7 +179,7 @@ elport は次の 3 つを順に確認し、最初に見つかったものを使�
 - **設計思想・なぜこの仕様なのか** → [docs/DESIGN.md](docs/DESIGN.md)
 - **eLabFTW API の実際の挙動と留意点** → [docs/ELABFTW-API.md](docs/ELABFTW-API.md)
 - **動作仕様の正式な契約** → テストスイート（`tests/`）が唯一の正式な仕様です
-- **AI エージェントから elport を操作する** → [skills/elport/SKILL.md](skills/elport/SKILL.md)
+- **AI エージェントから elport を操作する** → `elport help agents`。[skills/elport/SKILL.md](skills/elport/SKILL.md) の skill はそこを案内するだけです
 
 ## 開発
 
@@ -239,6 +193,7 @@ elport は次の 3 つを順に確認し、最初に見つかったものを使�
 | `config.py` | プロファイルと認証情報の解決 |
 | `frontmatter.py` | YAML ブロックの処理 |
 | `browse.py` | list、activity |
+| `help/*.md` | `elport help` が表示するトピック |
 
 **テストが動作仕様の唯一の権威であるため、仕様を変更する際は必ずテストから先に更新してください。** 実際の API
 挙動は公開デモ環境 <https://demo.elabftw.net> で確認できます。

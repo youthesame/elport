@@ -13,6 +13,7 @@ import unicodedata
 from collections import Counter
 from collections.abc import Callable
 from contextlib import redirect_stderr, redirect_stdout
+from importlib import resources
 from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
@@ -35,6 +36,15 @@ SEARCH_PAGE = 100
 SIDECARS = (".remote.md", ".base.md")
 TITLE_LIMIT = 50
 _WORDS = {"✓": "done", "·": sync.UP_TO_DATE, "*": "to sync", "✗": "failed"}
+
+HELP_TOPICS = {
+    "agents": "read this first when you are an agent acting for a user",
+    "workflow": "the status, diff, push loop; conflicts; pull and fetch",
+    "documents": "front matter, references, attachments, links between notes",
+}
+_TOPICS = "help topics:\n" + "".join(
+    f"  elport help {topic:<10} {summary}\n" for topic, summary in HELP_TOPICS.items()
+)
 
 _EXAMPLES = """\
 examples:
@@ -74,13 +84,16 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="elport",
         description="git-like sync CLI for eLabFTW (local is authoritative)",
-        epilog=_EXAMPLES,
+        epilog=_TOPICS + "\n" + _EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {_pkg_version('elport')}"
     )
     commands = parser.add_subparsers(dest="cmd", required=True)
+
+    help_parser = commands.add_parser("help", help="print a help topic")
+    help_parser.add_argument("topic", nargs="?", choices=HELP_TOPICS)
 
     push_parser = commands.add_parser(
         "push", help="upload the local document (full-body overwrite)"
@@ -741,6 +754,13 @@ def _batch(args, paths: list[Path]) -> int:
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     _connect.cache_clear()
+    if args.cmd == "help":
+        if args.topic is None:
+            print(_TOPICS, end="")
+        else:
+            topic = resources.files("elport") / "help" / f"{args.topic}.md"
+            sys.stdout.write(topic.read_text("utf-8"))
+        return 0
     try:
         if args.cmd == "login":
             base_url = input("base_url: ").strip()

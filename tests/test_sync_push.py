@@ -229,7 +229,11 @@ def test_push_stops_on_initial_conflict_with_merge_inputs(
         ),
     )
 
-    with pytest.raises(RuntimeError, match="remote changed"):
+    message = (
+        "remote changed (edited in the Web UI?); run elport pull, then elport merge."
+        " --force discards the remote edit"
+    )
+    with pytest.raises(RuntimeError, match=re.escape(message)):
         sync.push(doc, client, {})
 
     assert client.calls == ["me", "get", "uploads", "download"]
@@ -358,7 +362,11 @@ def test_push_without_base_stops_before_upload_listing(
     client = FakeClient(gets=[{"body": "web edit"}])
     monkeypatch.setattr(sync.state, "load", lambda *args: None)
 
-    with pytest.raises(RuntimeError, match="base unavailable"):
+    message = (
+        "base unavailable on this machine; run elport pull first."
+        " --force overwrites the remote without comparing"
+    )
+    with pytest.raises(RuntimeError, match=re.escape(message)):
         sync.push(doc, client, {})
 
     assert client.calls == ["me", "get"]
@@ -853,7 +861,7 @@ def test_content_type_must_be_exactly_markdown(tmp_path, monkeypatch, configured
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
     monkeypatch.setattr(sync.state, "save", lambda *args: pytest.fail("state changed"))
 
-    with pytest.raises(RuntimeError, match="not in markdown mode"):
+    with pytest.raises(RuntimeError, match=r"kept this entity out of markdown mode"):
         sync.push(doc, client, {})
 
 
@@ -866,7 +874,9 @@ def test_large_upload_non_tty_stops_before_mutation(tmp_path, monkeypatch, confi
     client = FakeClient(gets=[{"body": "remote"}])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
 
-    with pytest.raises(RuntimeError, match="re-run with --yes"):
+    with pytest.raises(
+        RuntimeError, match="re-run with --yes only if that is intended"
+    ):
         sync.push(doc, client, {})
 
     assert client.calls == ["me", "get", "uploads"]
@@ -1437,7 +1447,9 @@ def test_push_never_uploads_a_file_the_remote_body_linked(
 
     assert "upload" not in client.calls
     assert f"[x]({link})" in client.saved_payload["body"]
-    assert REMOTE_LINKED in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert REMOTE_LINKED in err
+    assert "written on the server side" in err and "on purpose" in err
 
 
 def test_push_uploads_a_remote_linked_file_listed_under_attachments(
