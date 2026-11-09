@@ -1314,3 +1314,28 @@ def test_diff_compares_against_the_paths_push_wrote(
     sync.diff(doc, client, {})
 
     assert capsys.readouterr().out == ""
+
+
+def test_pull_refuses_an_html_entity_and_writes_nothing(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    before = doc.read_text()
+    Store(monkeypatch, {"1": saved_state()})
+    client = FakeClient(gets=[{"body": "<p>web UI</p>", "content_type": 1}])
+
+    with pytest.raises(sync.HtmlEntityError, match="view 1 -o"):
+        sync.pull(doc, client, {})
+
+    assert doc.read_text() == before
+    assert "download" not in client.calls
+
+
+def test_pull_takes_an_empty_html_entity(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "")
+    Store(monkeypatch)
+    client = FakeClient(gets=[{"body": "", "content_type": 1}])
+
+    sync.pull(doc, client, {})

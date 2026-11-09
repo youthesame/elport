@@ -44,6 +44,7 @@ examples:
   elport list                        list your own entities on the server
   elport activity                    heatmap of the experiments you created this year
   elport view 357                    print a remote body without cloning it
+  elport view 357 -o e357/           write the body and the images it shows into a new dir
   elport push                        upload report.md (add -n to preview first)
   elport status                      show local/remote sync state
   elport pull                        download the remote body and attachments
@@ -228,7 +229,7 @@ def _parser() -> argparse.ArgumentParser:
     activity_parser.add_argument("--profile", help="config profile to use")
 
     view_parser = commands.add_parser(
-        "view", help="print a remote body to stdout (read-only)"
+        "view", help="print a remote body to stdout, made readable (read-only)"
     )
     view_parser.add_argument("id", type=int, help="id of the remote entity")
     view_parser.add_argument(
@@ -420,9 +421,15 @@ def _clone_all(args) -> int:
         )
     report = _Report()
     for entity in [args.entity] if args.entity else ENTITIES:
+        # A snapshot has no front matter, so its directory is what marks it as
+        # present (ADR-0010); the name starts with the id, whatever the title.
+        folder = root / entity
+        taken = {p.name for p in folder.iterdir()} if folder.is_dir() else set()
         for row in _every(client, entity, args.scope):
             eid = frontmatter.parse_server_id(row.get("id"))
-            if (profile_name, entity, eid) in present:
+            if (profile_name, entity, eid) in present or any(
+                name == str(eid) or name.startswith(f"{eid}-") for name in taken
+            ):
                 report.counts["·"] += 1
                 continue
             saved = state.load(client.root, entity, str(eid))
@@ -435,7 +442,11 @@ def _clone_all(args) -> int:
             def work(eid=eid, entity=entity, directory=directory, path=path):
                 directory.mkdir(parents=True, exist_ok=True)
                 try:
-                    return _clone_to(eid, entity, path, profile_name)
+                    try:
+                        return _clone_to(eid, entity, path, profile_name)
+                    except sync.HtmlEntityError:
+                        sync.snapshot(client, entity, eid, directory, client.root)
+                        return "snapshot (HTML entity, read-only)"
                 except BaseException:
                     if not any(directory.iterdir()):
                         directory.rmdir()
@@ -765,10 +776,8 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "view":
             entity, client = _browse_target(args)
-            if args.output:
-                sync.snapshot(client, entity, args.id, Path(args.output), client.root)
-            else:
-                browse.view(client, entity, args.id)
+            output = Path(args.output) if args.output else None
+            sync.view(client, entity, args.id, client.root, output)
             return 0
         if args.cmd == "whoami":
             _whoami(args.profile)

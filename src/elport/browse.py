@@ -5,8 +5,6 @@ import json
 import sys
 from collections import Counter, defaultdict
 
-from .frontmatter import validate_id
-
 SCOPES = {"self": 1, "team": 2, "all": 3}
 DEFAULT_LIMIT = 50
 
@@ -48,12 +46,6 @@ def entities(
             f"showing {limit}; raise --limit or page with --offset for more",
             file=sys.stderr,
         )
-
-
-def view(client, entity: str, eid: object) -> None:
-    # Write, not print: the body goes to stdout byte for byte, so redirecting it
-    # to a file reproduces what the server stores.
-    sys.stdout.write(client.get(entity, validate_id(eid)).get("body") or "")
 
 
 WEEKS = 53

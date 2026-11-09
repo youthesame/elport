@@ -149,65 +149,6 @@ def test_list_tolerates_rows_missing_a_date_or_title(capsys):
     assert capsys.readouterr().out == "3\n"
 
 
-def test_view_prints_the_remote_body_verbatim(capsys):
-    client = FakeSearchClient(entity_doc={"body": "# Title\n\nBody text\n"})
-
-    browse.view(client, "experiments", 42)
-
-    assert capsys.readouterr().out == "# Title\n\nBody text\n"
-    assert client.gets == [("experiments", 42)]
-
-
-def test_view_does_not_write_a_base_or_touch_the_working_tree(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
-    client = FakeSearchClient(entity_doc={"body": "text\n"})
-
-    browse.view(client, "experiments", 42)
-
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_view_prints_an_html_body_without_conversion(capsys):
-    client = FakeSearchClient(entity_doc={"body": "<p>written in the web UI</p>"})
-
-    browse.view(client, "experiments", 1)
-
-    assert capsys.readouterr().out == "<p>written in the web UI</p>"
-
-
-def test_view_does_not_add_a_trailing_newline_the_body_lacks(capsys):
-    client = FakeSearchClient(entity_doc={"body": "no final newline"})
-
-    browse.view(client, "experiments", 1)
-
-    assert capsys.readouterr().out == "no final newline"
-
-
-def test_view_keeps_the_trailing_newlines_the_body_has(capsys):
-    client = FakeSearchClient(entity_doc={"body": "text\n\n\n"})
-
-    browse.view(client, "experiments", 1)
-
-    assert capsys.readouterr().out == "text\n\n\n"
-
-
-def test_view_prints_nothing_for_an_empty_body(capsys):
-    client = FakeSearchClient(entity_doc={"body": ""})
-
-    browse.view(client, "experiments", 1)
-
-    assert capsys.readouterr().out == ""
-
-
-def test_view_rejects_an_invalid_id_before_any_request():
-    client = FakeSearchClient()
-
-    with pytest.raises(ValueError):
-        browse.view(client, "experiments", 0)
-
-    assert client.gets == []
-
-
 def test_list_warns_on_stderr_in_json_mode_too(capsys):
     client = FakeSearchClient(rows=ROWS)
 

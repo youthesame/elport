@@ -8,9 +8,10 @@ reading them, and a person cannot use them. `view` now prints what `view -o` wri
 copy of the body.
 
 - **An HTML entity loses its attributes.** elport keeps `href`, `src`, `colspan`, and `rowspan`,
-  unwraps `<span>`, turns a coloured span into `<strong>`, and collapses blank lines. Markdown allows
-  inline HTML, so the result is still `report.md`. On a Word-pasted body measured on demo 6.0.9 it
-  kept 36% of the characters.
+  unwraps `<span>`, drops comments, and collapses blank lines outside `<pre>`. Colour goes too.
+  Turning a coloured span into `<strong>` would make most of a Word paste bold, because Word often
+  sets `color: black` on every run. Markdown allows inline HTML, so the result is still `report.md`.
+  On a Word-pasted body measured on demo 6.0.9 it kept 36% of the characters.
 - **Upload URLs become file names** in either kind of body. elport matches a `download.php` URL to
   an attachment by `f` alone, relative or absolute, because the Web UI writes both shapes
   (ELABFTW-API, "Bodies written in the Web UI"). Links to other entities become absolute URLs.

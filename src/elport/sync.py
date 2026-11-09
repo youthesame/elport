@@ -18,11 +18,13 @@ from . import config as config_module
 from . import frontmatter, state
 from .client import NotFoundError
 from .transclude import (
+    absolute_links,
     download_url,
     extract,
     listed_files,
     local_files,
     plan,
+    readable_html,
     relink,
     replace_spans,
     reverse,
@@ -77,6 +79,24 @@ def _is_hidden_upload(upload: dict) -> bool:
 
 def _reversible_uploads(uploads: list[dict]) -> list[dict]:
     return [upload for upload in uploads if not _is_hidden_upload(upload)]
+
+
+class HtmlEntityError(RuntimeError):
+    """The entity's body is HTML, which elport reads and never syncs (ADR-0010)."""
+
+
+def _is_html(remote_doc: dict) -> bool:
+    return remote_doc.get("content_type") == 1
+
+
+def _refuse_html(remote_doc: dict, entity: str, eid) -> None:
+    # eLabFTW lets anyone switch an empty entry, so only a written one is refused.
+    if _is_html(remote_doc) and (remote_doc.get("body") or "").strip():
+        option = " --entity items" if entity == "items" else ""
+        raise HtmlEntityError(
+            f"{entity}/{eid} is an HTML entity (written in the rich text editor); "
+            f"elport only reads those: elport view {eid}{option} -o DIR"
+        )
 
 
 def _warn_unmatched_attachments(body: str, uploads: list[dict], base_url: str) -> None:
@@ -520,6 +540,7 @@ def push(
         client, entity, identity.get("team"), meta.get("status")
     )
     remote_doc = remote.get() if remote is not None else {}
+    _refuse_html(remote_doc, entity, eid)
     if remote_doc.get("locked"):
         # eLabFTW lets the owner keep writing to a locked entity (ADR-0004).
         raise RuntimeError(
@@ -1178,6 +1199,7 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     identity = client.me()
     _check_team_match(saved, identity)
     remote_doc = remote.get()
+    _refuse_html(remote_doc, entity, eid)
     up_to_date = saved is not None and remote_doc.get("body", "") == saved.get(
         "remote_base", ""
     )
@@ -1305,15 +1327,24 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
     return f"fetched {len(names)} attachment(s)"
 
 
-def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> None:
-    """Write the remote body and the uploads it shows into an empty directory,
-    to be read. No front matter and no base: it is never a working copy."""
+def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict]]:
+    """The body as a reader wants it (ADR-0009), and the uploads it shows."""
+    body = remote_doc.get("body") or ""
+    if _is_html(remote_doc):
+        body = readable_html(body)
+    body = absolute_links(body, remote.base_url)
+    return reverse(body, _reversible_uploads(remote.uploads()), remote.base_url)
+
+
+def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> list[Path]:
+    """Write the readable body and the uploads it shows into an empty directory,
+    to be read, and return the paths written. No front matter and no base: it is
+    never a working copy."""
     eid = frontmatter.validate_id(eid)
     if directory.is_dir() and any(directory.iterdir()):
         raise RuntimeError(f"output directory is not empty: {directory}")
     remote = Remote(client, entity, eid, base_url)
-    body = remote.get().get("body") or ""
-    source, used = reverse(body, _reversible_uploads(remote.uploads()), base_url)
+    source, used = _readable(remote, remote.get())
     path = directory / "report.md"
     if any(_upload_name(upload).casefold() == path.name for upload in used):
         raise RuntimeError(f"an attachment is named {path.name}, like the body")
@@ -1323,9 +1354,28 @@ def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     frontmatter.atomic_write(path, source)
     _place_attachments(path, remote, used)
-    print(path)
-    for name in sorted({_upload_name(upload) for upload in used}):
-        print(directory / name)
+    return [path] + [
+        directory / name for name in sorted({_upload_name(u) for u in used})
+    ]
+
+
+def view(client, entity: str, eid, base_url: str, directory: Path | None = None):
+    """Print the body ``snapshot`` would write, or write the snapshot into
+    ``directory`` and print its paths."""
+    if directory is not None:
+        for path in snapshot(client, entity, eid, directory, base_url):
+            print(path)
+        return
+    remote = Remote(client, entity, frontmatter.validate_id(eid), base_url)
+    source, used = _readable(remote, remote.get())
+    sys.stdout.write(source)
+    names = {_upload_name(upload) for upload in used}
+    if names:
+        print(
+            f"{len(names)} attachment(s) shown by file name; "
+            "-o DIR writes them beside the body",
+            file=sys.stderr,
+        )
 
 
 def status(path: Path, client, config: dict, profile=None) -> str:
@@ -1380,12 +1430,13 @@ def status(path: Path, client, config: dict, profile=None) -> str:
     print("uploads reuse:", ", ".join(reused) or "none")
     if new:
         summary.append(f"{len(new)} new upload(s)")
-    print(
-        "mode:",
-        "markdown"
-        if remote_doc.get("content_type") == 2
-        else remote_doc.get("content_type", "unknown"),
-    )
+    if remote_doc.get("content_type") == 2:
+        mode = "markdown"
+    elif _is_html(remote_doc):
+        mode = "html (elport only reads it)"
+    else:
+        mode = remote_doc.get("content_type", "unknown")
+    print("mode:", mode)
     if remote_doc.get("locked"):
         print("lock: locked (push refused; unlock in the Web UI)")
     permission_changes = _permission_changes(meta, remote_doc, {}, True)

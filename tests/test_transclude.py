@@ -1449,3 +1449,97 @@ def test_plan_lists_each_directory_once(tmp_path, monkeypatch):
 
     assert [ref.file.name for ref in refs] == ["a.png", "b.png", "c.png"]
     assert len(listed) == 1
+
+
+# Bodies written in the Web UI (ELABFTW-API, "Bodies written in the Web UI").
+
+
+def test_reverse_localizes_the_relative_url_the_insert_button_writes():
+    upload = _upload("d6/d6ba.png", "fig2.png", storage=2)
+    body = "![image](app/download.php?name=fig2.png&f=d6%2Fd6ba.png&storage=2)\n"
+
+    assert reverse(body, [upload], BASE_URL) == ("![image](fig2.png)\n", [upload])
+
+
+def test_reverse_localizes_a_pasted_image_by_f_alone():
+    upload = _upload("f1/f19d.png", "pasted.png", storage=2)
+    body = '<img src="app/download.php?f=f1/f19d.png">'
+
+    assert reverse(body, [upload], BASE_URL) == ('<img src="pasted.png">', [upload])
+
+
+def test_reverse_takes_the_file_name_from_the_upload_not_the_query():
+    upload = _upload("aa/fig", "fig.png")
+    body = f"![x]({BASE_URL}/app/download.php?f=aa%2Ffig&name=old.png&storage=9)"
+
+    assert reverse(body, [upload], BASE_URL) == ("![x](fig.png)", [upload])
+
+
+def test_reverse_leaves_another_hosts_download_url_alone():
+    upload = _upload("aa/fig", "fig.png")
+    body = "![x](https://other.example/app/download.php?f=aa%2Ffig)"
+
+    assert reverse(body, [upload], BASE_URL) == (body, [])
+
+
+def test_unmatched_download_urls_names_a_relative_url_without_a_name():
+    body = '<img src="app/download.php?f=f1/gone.png">'
+
+    assert unmatched_download_urls(body, [], BASE_URL) == ["gone.png"]
+
+
+def test_absolute_links_completes_relative_entity_pages():
+    body = (
+        '<a href="experiments.php?mode=view&amp;id=19">BEN</a>\n'
+        "[buffer](database.php?mode=view&id=127)\n"
+        "`experiments.php?mode=view&id=3`\n"
+        "[web](https://other.example/experiments.php?mode=view&id=4)\n"
+    )
+
+    assert transclude.absolute_links(body, BASE_URL) == (
+        f'<a href="{BASE_URL}/experiments.php?mode=view&amp;id=19">BEN</a>\n'
+        f"[buffer]({BASE_URL}/database.php?mode=view&id=127)\n"
+        "`experiments.php?mode=view&id=3`\n"
+        "[web](https://other.example/experiments.php?mode=view&id=4)\n"
+    )
+
+
+WORD_PASTE = (
+    "<h2><span style=\"font-family:'游ゴシック', sans-serif;\">実験方法</span></h2>\n"
+    "<p><span style=\"font-family:'Times New Roman', serif;\">CH<sub>2</sub>Cl<sub>2"
+    '</sub></span><strong><span style="color:#FF0000;">遮光</span></strong>'
+    "<span>&Aring;</span></p>\n"
+    '<table style="border:none;" border="1">\n\n<tr>\n'
+    '<td style="width:84.95pt;" colspan="2">\n<p><span>n</span></p>\n</td>\n'
+    "</tr>\n\n</table>\n"
+    '<p style="margin-left:18pt;"><!-- [if !supportLists]--><span>1.<span>    '
+    "</span></span><!--[endif]-->試料</p>\n"
+    '<p><a href="https://e.example/x" target="_blank" rel="noreferrer">x</a>'
+    '<img src="fig.png" alt="fig.png" width="80"><br></p>'
+)
+
+
+def test_readable_html_keeps_structure_and_drops_presentation():
+    assert transclude.readable_html(WORD_PASTE) == (
+        "<h2>実験方法</h2>\n"
+        "<p>CH<sub>2</sub>Cl<sub>2</sub><strong>遮光</strong>&Aring;</p>\n"
+        "<table>\n<tr>\n"
+        '<td colspan="2">\n<p>n</p>\n</td>\n'
+        "</tr>\n</table>\n"
+        "<p>1.    試料</p>\n"
+        '<p><a href="https://e.example/x">x</a><img src="fig.png"><br></p>'
+    )
+
+
+def test_readable_html_keeps_the_whitespace_inside_pre():
+    body = '<pre class="language-python"><code>a = 1\n\n\n  b = "&lt;"\n</code></pre>'
+
+    assert transclude.readable_html(body) == (
+        '<pre><code>a = 1\n\n\n  b = "&lt;"\n</code></pre>'
+    )
+
+
+def test_readable_html_escapes_the_attribute_values_it_keeps():
+    body = '<a href="experiments.php?mode=view&amp;id=1&amp;q=&quot;x&quot;">e</a>'
+
+    assert transclude.readable_html(body) == body

@@ -1586,3 +1586,71 @@ def test_cli_activity_reads_own_or_team_entities(monkeypatch, capsys, flags, sco
         {"scope": scope, "limit": cli.SEARCH_PAGE, "offset": 0},
     )
     assert "Yasmin Heller" in capsys.readouterr().out
+
+
+class HtmlCloneClient(CloneClient):
+    def get(self, entity, eid):
+        return {**super().get(entity, eid), "content_type": 1}
+
+    def download(self, entity, eid, uid):
+        return b"data"
+
+
+def test_clone_refuses_an_html_entity_and_points_to_view(tmp_path, monkeypatch, capsys):
+    output = tmp_path / "report.md"
+    _clone_env(monkeypatch, tmp_path, HtmlCloneClient(body="<p>web UI</p>"))
+
+    assert cli.main(["clone", "357", "-o", str(output)]) == 1
+
+    assert not output.exists()
+    assert "view 357 -o" in capsys.readouterr().err
+    assert sync.state.load("https://e.example", "experiments", "357") is None
+
+
+def test_clone_all_writes_an_html_entity_as_a_snapshot_once(
+    tmp_path, monkeypatch, capsys
+):
+    root = tmp_path / "backup"
+    client = HtmlCloneClient(body='<p style="x">web <span>UI</span></p>')
+    _clone_env(monkeypatch, tmp_path, client)
+    monkeypatch.setattr(
+        client,
+        "search",
+        lambda entity, params: (
+            [{"id": 5, "title": "Web"}]
+            if entity == "experiments" and params["offset"] == 0
+            else []
+        ),
+        raising=False,
+    )
+    snapshot_dir = root / "experiments" / "5-Web"
+
+    assert cli.main(["clone", "--all", str(root)]) == 0
+
+    assert (snapshot_dir / "report.md").read_text() == "<p>web UI</p>"
+    assert (
+        f"✓ {snapshot_dir / 'report.md'}  experiments/5  snapshot (HTML entity, read-only)"
+        in capsys.readouterr().out
+    )
+    assert sync.state.load("https://e.example", "experiments", "5") is None
+
+    (snapshot_dir / "report.md").write_text("kept")
+    assert cli.main(["clone", "--all", str(root)]) == 0
+
+    assert (snapshot_dir / "report.md").read_text() == "kept"
+    assert "1 up to date" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("name", ["5-renamed", "5"])
+def test_clone_all_counts_a_directory_named_by_the_id_as_present(
+    tmp_path, monkeypatch, capsys, mirror_env, name
+):
+    root = tmp_path / "backup"
+    (root / "experiments" / name).mkdir(parents=True)
+    (root / "experiments" / "55-other").mkdir()
+    client = MirrorClient({"experiments": [{"id": 5, "title": "Web"}]})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+
+    assert cli.main(["clone", "--all", str(root), "--entity", "experiments"]) == 0
+
+    assert mirror_env == []

@@ -9,6 +9,14 @@ BASE = "https://e.example"
 FIG = {"id": 3, "long_name": "aa/fig", "real_name": "fig.png", "storage": 1}
 RAW = {"id": 4, "long_name": "bb/raw", "real_name": "raw.csv", "storage": 1}
 FIG_URL = f"{BASE}/app/download.php?f=aa%2Ffig&name=fig.png&storage=1"
+HTML_BODY = (
+    '<p style="line-height:1;"><img src="app/download.php?f=aa/fig" alt="x"></p>\n\n'
+    '<p>see <a href="experiments.php?mode=view&amp;id=19">BEN</a></p>'
+)
+HTML_READABLE = (
+    '<p><img src="fig.png"></p>\n'
+    f'<p>see <a href="{BASE}/experiments.php?mode=view&amp;id=19">BEN</a></p>'
+)
 
 
 def test_snapshot_writes_the_body_and_only_the_uploads_it_shows(tmp_path, capsys):
@@ -17,7 +25,7 @@ def test_snapshot_writes_the_body_and_only_the_uploads_it_shows(tmp_path, capsys
         remote_doc={"body": f"![figure]({FIG_URL})\n"}, uploads=[FIG, RAW]
     )
 
-    sync.snapshot(client, "experiments", 42, out, BASE)
+    sync.view(client, "experiments", 42, BASE, out)
 
     assert (out / "report.md").read_text() == "![figure](fig.png)\n"
     assert (out / "fig.png").read_bytes() == b"data"
@@ -26,6 +34,21 @@ def test_snapshot_writes_the_body_and_only_the_uploads_it_shows(tmp_path, capsys
         str(out / "report.md"),
         str(out / "fig.png"),
     ]
+
+
+def test_snapshot_of_an_html_entity_is_its_readable_body(tmp_path):
+    out = tmp_path / "out"
+    client = FakeClient(
+        remote_doc={"body": HTML_BODY, "content_type": 1}, uploads=[FIG, RAW]
+    )
+
+    assert sync.snapshot(client, "experiments", 42, out, BASE) == [
+        out / "report.md",
+        out / "fig.png",
+    ]
+
+    assert (out / "report.md").read_text() == HTML_READABLE
+    assert (out / "fig.png").read_bytes() == b"data"
 
 
 def test_snapshot_is_never_a_working_copy(tmp_path, monkeypatch):
@@ -101,3 +124,67 @@ def test_snapshot_refuses_a_body_that_would_read_as_an_elport_document(tmp_path)
         sync.snapshot(client, "experiments", 42, tmp_path / "out", BASE)
 
     assert not (tmp_path / "out").exists()
+
+
+# view without -o prints what the snapshot's report.md would hold (ADR-0009).
+
+
+def test_view_prints_what_the_snapshot_would_write(capsys):
+    client = FakeClient(
+        remote_doc={"body": HTML_BODY, "content_type": 1}, uploads=[FIG, RAW]
+    )
+
+    sync.view(client, "experiments", 42, BASE)
+
+    out, err = capsys.readouterr()
+    assert out == HTML_READABLE
+    assert "1 attachment" in err and "-o" in err
+    assert "download" not in client.calls
+
+
+def test_view_prints_a_markdown_body_as_stored(capsys):
+    client = FakeClient(remote_doc={"body": "# Title\n\n<b>Body</b> text\n\n\n"})
+
+    sync.view(client, "experiments", 42, BASE)
+
+    assert capsys.readouterr() == ("# Title\n\n<b>Body</b> text\n\n\n", "")
+
+
+def test_view_does_not_add_a_trailing_newline_the_body_lacks(capsys):
+    client = FakeClient(remote_doc={"body": "no final newline"})
+
+    sync.view(client, "experiments", 1, BASE)
+
+    assert capsys.readouterr().out == "no final newline"
+
+
+def test_view_prints_nothing_for_an_empty_body(capsys):
+    client = FakeClient(remote_doc={"body": None})
+
+    sync.view(client, "experiments", 1, BASE)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_view_does_not_write_a_base_or_touch_the_working_tree(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    def no_state(*args):
+        raise AssertionError("view must not touch state")
+
+    monkeypatch.setattr(sync.state, "load", no_state)
+    monkeypatch.setattr(sync.state, "save", no_state)
+    client = FakeClient(remote_doc={"body": f"![figure]({FIG_URL})\n"}, uploads=[FIG])
+
+    sync.view(client, "experiments", 42, BASE)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_view_rejects_an_invalid_id_before_any_request():
+    client = FakeClient()
+
+    with pytest.raises(ValueError):
+        sync.view(client, "experiments", 0, BASE)
+
+    assert client.calls == []

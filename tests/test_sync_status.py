@@ -278,3 +278,16 @@ def test_status_summary_names_pending_uploads_and_permissions(
     summary = sync.status(doc, client, {})
 
     assert summary == "1 new upload(s), permissions differ"
+
+
+def test_status_names_an_html_entity_as_read_only(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    client = FakeClient(gets=[{"body": "<p>web UI</p>", "content_type": 1}])
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "mode: html (elport only reads it)" in capsys.readouterr().out

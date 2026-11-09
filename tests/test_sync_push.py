@@ -1616,19 +1616,14 @@ def test_push_of_an_unchanged_document_sends_no_patch(
     assert "body unchanged" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize(
-    "remote_doc",
-    [
-        {"body": "remote", "title": "Old title", "content_type": 2},
-        {"body": "remote", "title": "Test", "content_type": 1},
-    ],
-)
 def test_push_of_an_unchanged_body_still_patches_changed_fields(
-    tmp_path, monkeypatch, configured, remote_doc
+    tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
-    client = FakeClient(remote_doc=remote_doc)
+    client = FakeClient(
+        remote_doc={"body": "remote", "title": "Old title", "content_type": 2}
+    )
     Store(monkeypatch, {"1": saved_state()})
 
     sync.push(doc, client, {})
@@ -1750,3 +1745,28 @@ def test_unchanged_push_with_reused_attachments_reads_the_remote_once(
     sync.push(doc, client, {})
 
     assert client.calls == ["me", "get", "uploads"]
+
+
+def test_push_refuses_an_html_entity_even_with_force(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    Store(monkeypatch, {"1": saved_state(local="old", remote="<p>web UI</p>")})
+    client = LinkClient(gets=[{"body": "<p>web UI</p>", "content_type": 1}], uploads=[])
+
+    with pytest.raises(sync.HtmlEntityError, match="HTML"):
+        sync.push(doc, client, {}, force=True)
+
+    assert "patch" not in client.calls and "upload" not in client.calls
+
+
+def test_push_fills_an_empty_html_entity(tmp_path, monkeypatch, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    Store(monkeypatch, {"1": saved_state(local="old", remote="")})
+    client = LinkClient(
+        gets=[{"body": "", "content_type": 1}, {"body": "body", "content_type": 2}]
+    )
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload["content_type"] == 2
