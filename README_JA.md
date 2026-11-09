@@ -100,7 +100,7 @@ Raw data: [raw.csv](data/raw.csv)
 
 `new` と `clone` は `-o <doc>` を指定しない限り `report.md` に書き出します。`list`
 はデフォルトで自分のノートのみ（`--scope self`）を 50 件ずつ返し、`-q <term>`、`--limit`、`--offset`、`--json`
-で絞り込めます。`comments` はターミナルに出力するだけで、本文ファイルには書き込みません。
+で絞り込めます。`--all` を付けると全件をページ送りで取得します。`comments` はターミナルに出力するだけで、本文ファイルには書き込みません。
 
 Web UI のリッチテキストエディタで書いたノートは、本文が HTML で保存されます。elport はこれを読むだけです。`clone`、`pull`、
 `push` は拒否するので、図も含めて読むときは `view -o` を使ってください。

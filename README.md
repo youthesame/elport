@@ -95,7 +95,8 @@ need not be a git repository.
 | `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
 
 `new` and `clone` write to `report.md` unless you pass `-o <doc>`. `list` defaults to your own entities
-(`--scope self`) and returns 50 at a time, with `-q <term>`, `--limit`, `--offset`, and `--json` to narrow it.
+(`--scope self`) and returns 50 at a time, with `-q <term>`, `--limit`, `--offset`, and `--json` to narrow it;
+`--all` pages through every result.
 `comments` prints to the terminal only, never into the body.
 
 An entity written in the Web UI's rich text editor stores HTML. elport only reads it: `clone`, `pull`, and `push`

@@ -363,3 +363,35 @@ def test_a_tiny_terminal_still_shows_the_current_week():
     text = browse.activity([row("2026-11-02 08:00:00")], "experiments", TODAY, width=5)
 
     assert grid(text)["Mon"][0] == "░"
+
+
+class PagedSearchClient:
+    """Serves `rows` a page at a time, capped at `cap` rows a page as a server may."""
+
+    def __init__(self, rows, cap=None):
+        self.rows = rows
+        self.cap = cap
+        self.searches = []
+
+    def search(self, entity, params):
+        self.searches.append((entity, dict(params)))
+        limit = min(params["limit"], self.cap or params["limit"])
+        return self.rows[params["offset"] : params["offset"] + limit]
+
+
+def test_list_all_walks_every_page_from_the_offset(capsys):
+    rows = [{"id": n, "date": "", "title": f"t{n}"} for n in range(250)]
+    client = PagedSearchClient(rows, cap=30)
+
+    browse.entities(
+        client, "items", scope="team", limit=None, offset=5, query="blot", as_json=True
+    )
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == rows[5:]
+    assert captured.err == ""
+    assert client.searches[0] == (
+        "items",
+        {"scope": 2, "q": "blot", "limit": browse.SEARCH_PAGE, "offset": 5},
+    )
+    assert client.searches[1][1]["offset"] == 35
