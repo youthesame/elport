@@ -1607,22 +1607,21 @@ def test_clone_refuses_an_html_entity_and_points_to_view(tmp_path, monkeypatch, 
     assert sync.state.load("https://e.example", "experiments", "357") is None
 
 
+def _lists_one_experiment(monkeypatch, client):
+    def search(entity, params):
+        first_page = entity == "experiments" and params["offset"] == 0
+        return [{"id": 5, "title": "Web"}] if first_page else []
+
+    monkeypatch.setattr(client, "search", search, raising=False)
+
+
 def test_clone_all_writes_an_html_entity_as_a_snapshot_once(
     tmp_path, monkeypatch, capsys
 ):
     root = tmp_path / "backup"
     client = HtmlCloneClient(body='<p style="x">web <span>UI</span></p>')
     _clone_env(monkeypatch, tmp_path, client)
-    monkeypatch.setattr(
-        client,
-        "search",
-        lambda entity, params: (
-            [{"id": 5, "title": "Web"}]
-            if entity == "experiments" and params["offset"] == 0
-            else []
-        ),
-        raising=False,
-    )
+    _lists_one_experiment(monkeypatch, client)
     snapshot_dir = root / "experiments" / "5-Web"
 
     assert cli.main(["clone", "--all", str(root)]) == 0
@@ -1663,16 +1662,7 @@ def test_clone_all_removes_a_snapshot_whose_download_fails(
     body = '<p><img src="app/download.php?f=aa/fig"></p>'
     client = HtmlCloneClient(body=body)
     _clone_env(monkeypatch, tmp_path, client)
-    monkeypatch.setattr(
-        client,
-        "search",
-        lambda entity, params: (
-            [{"id": 5, "title": "Web"}]
-            if entity == "experiments" and params["offset"] == 0
-            else []
-        ),
-        raising=False,
-    )
+    _lists_one_experiment(monkeypatch, client)
     monkeypatch.setattr(
         client,
         "uploads",
