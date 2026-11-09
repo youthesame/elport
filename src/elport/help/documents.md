@@ -42,6 +42,9 @@ push uploads every local file the body references, in any notation (`![](fig.png
 List raw data or spectra under `attachments:`. push uploads them, and fails on an entry that is missing, hidden,
 ignored, or a directory. elport never deletes an attachment. pull does not bring these down; `elport fetch` does.
 
+view and pull name on stderr what the entity holds outside its body: attachments it does not show, compounds,
+steps, and comments.
+
 ## Links to other notes
 
 Link another document by its local path, as in `[previous](../exp12/report.md)`. push sends that entity's URL and

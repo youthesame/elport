@@ -133,6 +133,9 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - **A drawing** ("Draw something") is saved as an attachment and leaves the body alone. The Chemical Structure
   Editor adds to the compounds database. A compound is tied to an entity through `compounds_links` (with
   `smiles`), outside the body.
+- **`GET /api/v2/{entity}/{id}` embeds `uploads` and `compounds_links`** (measured demo 6.0.9, 2026-11-09). The
+  embedded `uploads` equals `GET .../uploads` field for field, and each `compounds_links` entry is the full
+  compound row (`id`, `name`, `smiles`, …). Linking is `POST .../compounds_links/{compound_id}` with a JSON body.
 
 ## Tags / categories / metadata
 
