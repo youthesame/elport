@@ -67,9 +67,9 @@ need not be a git repository.
 |---|---|
 | `new "<title>"` | Create an entity and scaffold front matter. |
 | `clone <id>` | Start `<doc>` from an entity that already exists, then pull. |
-| `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. |
+| `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. An HTML entity is saved as `view -o` writes it. |
 | `list` | List remote entities as `id  date  title`. Read-only. |
-| `view <id>` | Print one remote body to stdout, exactly as stored. |
+| `view <id>` | Print one remote body to stdout, made readable. An HTML entity loses its styling, and attachments appear by file name. |
 | `view <id> -o <dir>` | Write the body and the files it shows into a new or empty `<dir>`, to read them. Not a working copy. |
 | `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
 | `comments [<id>]` | Print the remote comment thread. With an `<id>`, no local document is needed. |
@@ -78,6 +78,9 @@ need not be a git repository.
 `new` and `clone` write to `report.md` unless you pass `-o <doc>`. `list` defaults to your own entities
 (`--scope self`) and returns 50 at a time, with `-q <term>`, `--limit`, `--offset`, and `--json` to narrow it.
 `comments` prints to the terminal only, never into the body.
+
+An entity written in the Web UI's rich text editor stores HTML. elport only reads it: `clone`, `pull`, and `push`
+refuse it, and `view -o` is the way to read it with its figures.
 
 ### Setup
 
@@ -221,13 +224,13 @@ pattern is anchored at its own directory.
 | Module | Role |
 |---|---|
 | `cli.py` | Argument parsing and dispatch |
-| `sync.py` | push, pull, status, diff |
+| `sync.py` | push, pull, status, diff, view |
 | `transclude.py` | Path ↔ URL rewriting, both directions |
 | `client.py` | eLabFTW API wrapper |
 | `state.py` | The stored base and its hashes |
 | `config.py` | Profiles and credential resolution |
 | `frontmatter.py` | The YAML block |
-| `browse.py` | list, view and activity |
+| `browse.py` | list and activity |
 
 **The tests are the authoritative behavioral contract, so change tests first.** You can check live API behavior
 against <https://demo.elabftw.net>.

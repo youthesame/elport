@@ -33,7 +33,7 @@ elport list                      # your own entities as `id  date  title` (read-
 elport list --scope team -q blot # widen to the team / search title+body+elabid; --limit, --offset page
 elport list --json               # raw API rows; pipe to jq to drive clone/view
 #   default --limit is 50; a full page warns on stderr, so raise --limit rather than assume it is all
-elport view 357                  # print one remote body to stdout, as stored (read-only, writes nothing)
+elport view 357                  # print one remote body to stdout, made readable (read-only, writes nothing)
 elport view 357 -o DIR           # body + the images it shows into a new/empty DIR (no base); open them from there
 elport activity [--team]         # heatmap of entities created per day, up to a year (read-only)
 elport whoami                    # auth check: user, team+role, API-key read/write, server version, scopes
@@ -91,9 +91,11 @@ A push overwrites the shared server body; discarding remote changes with `--forc
   The sync base (one file per entity) lives in `~/.config/elport/state/`, never in the project.
 - **`list` and `view` never write remotely.** They need no local document and touch no base, so they
   are safe to run before anything is set up. Use them to find an entity instead of guessing an `id`.
-  `view` prints the body exactly as stored, so a note written in the Web UI comes out as HTML.
-  To see its figures, `view <id> -o DIR` into a scratch directory outside the project; the copy is
+  `view` prints the body made readable: HTML loses its styling and attachments appear by file name.
+  To see the figures, `view <id> -o DIR` into a scratch directory outside the project; the copy is
   not a working copy, so edit through `clone` instead.
+- **An HTML entity (written in the Web UI's rich text editor) is read-only.** clone, pull, and push
+  refuse it, even with `--force`. Read it with `view -o`; never switch its `content_type` yourself.
 - **Link another note by its local path** (`[prev](../exp12/report.md)`): push sends its URL,
   never the file. A target without `id` stops the push: push the target first.
 - **A locked entity cannot be pushed**, even with `--force`. Tell the user to unlock it in the Web

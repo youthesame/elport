@@ -10,6 +10,7 @@ import sys
 import unicodedata
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -576,27 +577,28 @@ def _destination_span(text: str, reference: Reference) -> tuple[int, int]:
     return start, end
 
 
+def _download_pattern(base_url: str) -> re.Pattern[str]:
+    # The Web UI writes the URL relative to the instance root (ELABFTW-API), so a
+    # relative one counts too, unless it is the tail of another host's URL.
+    root = re.escape(base_url.rstrip("/") + "/")
+    return re.compile(rf"(?<![\w/.:%-])(?:{root})?app/download\.php\?[^\s\"'<>)]*")
+
+
+def _download_query(value: str) -> dict[str, list[str]]:
+    return parse_qs(urlparse(html.unescape(value)).query)
+
+
 def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[dict]]:
     masked = _masked(text)
     destinations = extract(text)
-    by_key = {
-        (
-            str(upload.get("long_name", "")),
-            str(upload.get("real_name", "")),
-            str(upload.get("storage", 1)),
-        ): upload
-        for upload in uploads
-    }
-    prefix = re.escape(base_url.rstrip("/") + "/app/download.php?")
-    url_pattern = re.compile(prefix + r"[^\s\"'<>)]*")
+    # f alone identifies an upload: a pasted image's URL carries nothing else.
+    by_f = {str(upload.get("long_name", "")): upload for upload in uploads}
     replacements: list[tuple[int, int, str]] = []
     placed: list[dict] = []
     canonical_names: dict[str, str] = {}
-    for match in url_pattern.finditer(masked):
-        parsed = parse_download_url(text[match.start() : match.end()])
-        if parsed is None:
-            continue
-        upload = by_key.get(parsed)
+    for match in _download_pattern(base_url).finditer(masked):
+        f = _download_query(text[match.start() : match.end()]).get("f", [""])[0]
+        upload = by_f.get(f) if f else None
         if upload is None:
             continue
         value = text[match.start() : match.end()]
@@ -614,7 +616,7 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
             # rewrite, or a URL merely embedded in a larger destination:
             # localizing it here would not survive the round trip.
             continue
-        safe = safe_name(parsed[1])
+        safe = safe_name(str(upload.get("real_name", "attachment")))
         name = canonical_names.setdefault(safe.casefold(), safe)
         if destination.kind == "markdown" and re.search(r"[\s()#]", name):
             name = f"<{name}{fragment}>"
@@ -631,6 +633,74 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
     for start, end, name in reversed(replacements):
         result = result[:start] + name + result[end:]
     return result, placed
+
+
+_ENTITY_PAGE = re.compile(r"(?:experiments|database)\.php\?")
+
+
+def absolute_links(text: str, base_url: str) -> str:
+    """Complete the relative entity pages the Web UI writes (ELABFTW-API), so a
+    reader outside the instance can follow them."""
+    root = base_url.rstrip("/") + "/"
+    result = text
+    for reference in reversed(extract(text)):
+        if _ENTITY_PAGE.match(reference.path):
+            start = _destination_span(text, reference)[0]
+            result = result[:start] + root + result[start:]
+    return result
+
+
+_KEPT_ATTRIBUTES = {"href", "src", "colspan", "rowspan"}
+
+
+class _Readable(HTMLParser):
+    """Re-emits HTML without what only styles it: attributes other than
+    ``_KEPT_ATTRIBUTES``, ``<span>`` wrappers, comments, and runs of blank
+    lines outside ``<pre>``."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.out: list[str] = []
+        self.pre = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "pre":
+            self.pre += 1
+        if tag != "span":
+            kept = "".join(
+                f' {name}="{html.escape(value)}"'
+                for name, value in attrs
+                if name in _KEPT_ATTRIBUTES and value
+            )
+            self.out.append(f"<{tag}{kept}>")
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        if tag == "pre":
+            self.pre = max(0, self.pre - 1)
+        if tag != "span":
+            self.out.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if not self.pre and not data.strip() and "\n" in data:
+            data = "" if self.out and self.out[-1].endswith("\n") else "\n"
+        self.out.append(data)
+
+    def handle_entityref(self, name):
+        self.out.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.out.append(f"&#{name};")
+
+
+def readable_html(text: str) -> str:
+    """An HTML body without its presentation, for reading (ADR-0009)."""
+    parser = _Readable()
+    parser.feed(text)
+    parser.close()
+    return "".join(parser.out)
 
 
 def relink(text: str, doc_links: dict[str, dict[str, str]]) -> str:
@@ -659,23 +729,16 @@ def unmatched_download_urls(text: str, uploads: list[dict], base_url: str) -> li
     ``real_name`` once, in first-seen order.
     """
     masked = _masked(text)
-    by_key = {
-        (
-            str(upload.get("long_name", "")),
-            str(upload.get("real_name", "")),
-            str(upload.get("storage", 1)),
-        )
-        for upload in uploads
-    }
-    prefix = re.escape(base_url.rstrip("/") + "/app/download.php?")
-    url_pattern = re.compile(prefix + r"[^\s\"'<>)]*")
+    known = {str(upload.get("long_name", "")) for upload in uploads}
     names: list[str] = []
-    for match in url_pattern.finditer(masked):
-        parsed = parse_download_url(text[match.start() : match.end()])
-        if parsed is None or parsed in by_key:
+    for match in _download_pattern(base_url).finditer(masked):
+        query = _download_query(text[match.start() : match.end()])
+        f = query.get("f", [""])[0]
+        if not f or f in known:
             continue
-        if parsed[1] not in names:
-            names.append(parsed[1])
+        name = query.get("name", [""])[0] or f.rsplit("/", 1)[-1]
+        if name not in names:
+            names.append(name)
     return names
 
 
