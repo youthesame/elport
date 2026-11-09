@@ -1699,3 +1699,17 @@ def test_clone_all_removes_what_a_failed_clone_downloaded(
 
     assert not (tmp_path / "b" / "experiments" / "4-x").exists()
     assert "connection reset" in capsys.readouterr().out
+
+
+def test_clone_all_does_not_count_a_file_named_by_the_id(
+    tmp_path, monkeypatch, mirror_env
+):
+    root = tmp_path / "backup"
+    (root / "experiments").mkdir(parents=True)
+    (root / "experiments" / "5-notes.txt").write_text("mine")
+    client = MirrorClient({"experiments": [{"id": 5, "title": "Web"}]})
+    monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
+
+    assert cli.main(["clone", "--all", str(root), "--entity", "experiments"]) == 0
+
+    assert [eid for _, eid, _ in mirror_env] == [5]

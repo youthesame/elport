@@ -424,7 +424,11 @@ def _clone_all(args) -> int:
         # A snapshot has no front matter, so its directory is what marks it as
         # present (ADR-0010); the name starts with the id, whatever the title.
         folder = root / entity
-        taken = {p.name for p in folder.iterdir()} if folder.is_dir() else set()
+        taken = (
+            {p.name for p in folder.iterdir() if p.is_dir()}
+            if folder.is_dir()
+            else set()
+        )
         for row in _every(client, entity, args.scope):
             eid = frontmatter.parse_server_id(row.get("id"))
             if (profile_name, entity, eid) in present or any(
