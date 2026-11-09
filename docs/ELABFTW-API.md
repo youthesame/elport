@@ -80,6 +80,14 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   rendered markdown** (`#`→`<h1>`, etc.).
   → Policy: elport sends `content_type:2` and **verifies `content_type == 2` after push**. On old (still-buggy)
   instances it will not become 2, so abort and advise only in that case.
+- **6.x does not render raw HTML in a Markdown body** (measured demo 6.0.9, 2026-11-09). `<figure>`, `<img>`,
+  `<p>`, `<table>`, and inline `<b>` were all dropped from `body_html`, which the Web UI shows. The stored `body`
+  keeps them. Upstream closed the report ([#7583](https://github.com/elabftw/elabftw/issues/7583)) by disabling the
+  editor switch on a non-empty entry ([#7708](https://github.com/elabftw/elabftw/pull/7708), a template change on
+  master, in neither 6.0.9 nor 6.1.0-alpha2), not by rendering the HTML.
+- **The API can switch `content_type` on a non-empty entity** (measured demo 6.0.9, 2026-11-09). `PATCH`
+  `{"content_type": 2}` then `1` on an HTML body took effect both times and left `body` unchanged. While it was 2,
+  `body_html` was empty, so the Web UI showed no body at all. Back at 1 it showed again.
 - **MathJax is enabled in both md/html modes** (inline `$`, block `$$`, AMS extensions.
   [issue #892](https://github.com/elabftw/elabftw/issues/892)). Measured: `$\eta = 1 - e^{-kt}$` passes through
   intact and is rendered client-side.
@@ -106,6 +114,25 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   This **returns the real binary with the API key** (measured: got `text/csv` content). Reverse transclusion
   downloads use this.
 - Delete: `DELETE /api/v2/{entity}/{id}/uploads/{upload_id}` (not used by push).
+
+## Bodies written in the Web UI (measured demo 6.0.9, 2026-11-09)
+
+- **The Web UI writes relative URLs.** The rich text editor (TinyMCE) runs with `relative_urls: true` and
+  `document_base_url` set to the instance root, so it rewrites any URL on the same host to a relative one, such as
+  `experiments.php?mode=view&id=19` or `database.php?mode=view&id=127`.
+- **Two shapes of upload URL**, both relative:
+  - "Insert in main text" on an attachment writes
+    `app/download.php?name={real_name}&f={long_name}&storage={storage}`, percent-encoded. The Markdown editor
+    wraps it as `![image](…)`. The rich text editor writes an `<img>` and copies the URL into its `alt`. The
+    button is disabled for an attachment that is not an image.
+  - Pasting an image into the rich text editor uploads it and writes `app/download.php?f={long_name}`, with `f`
+    alone and not percent-encoded. Pasting an image into the Markdown editor uploads nothing.
+- **Text pasted from Word** keeps its `class`, `lang`, and `mso-*` styles in the editor. On save the server drops
+  `class`, `lang`, `mso-*`, and `background` (so highlighting is lost), and keeps `font-family`, `color`, `width`,
+  `border`, and `margin-left`. A Word numbered list arrives as `<p>` paragraphs that start with "1.", not as `<ol>`.
+- **A drawing** ("Draw something") is saved as an attachment and leaves the body alone. The Chemical Structure
+  Editor adds to the compounds database. A compound is tied to an entity through `compounds_links` (with
+  `smiles`), outside the body.
 
 ## Tags / categories / metadata
 
@@ -213,7 +240,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 | Item | Result |
 |---|---|
 | Does `content_type:2` work (#6416) | **Resolved.** Kept as 2 and rendered markdown even with `use_markdown:0` |
-| `<figure>` / `$...$` preservation | Kept as raw HTML in `body_html` / math passes through |
+| `<figure>` / `$...$` preservation | Kept as raw HTML in `body_html` / math passes through (6.0.9 drops all raw HTML from a Markdown `body_html`; see § content_type) |
 | `body` round-trip | Raw source recoverable, but the **server normalizes** (`alt` added, newline removed, `&amp;`). **Happens in md mode too.** **Appends a trailing newline each save; re-sending does not converge.** GET between saves is stable |
 | upload hash | Returns `hash` + `hash_algorithm:"sha256"`, matches local sha256 |
 | `long_name` shape | Contains `/` (percent-encode required) |
@@ -236,13 +263,13 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 
 ## Version-specific / to confirm
 
-**User's real instance = eLabFTW 5.5.3**:
+**User's real instance = eLabFTW 5.6.15**:
 
-- **#6416 is resolved** (5.5.3 includes fix commit `1ef3de57`). `content_type:2` can be assumed to work; push's
-  `content_type == 2` check aborts if it does not.
-- **`<figure>` rendering**: raw-HTML preservation in `body_html` confirmed on demo 5.6.12; 5.5.3 presumed the same
-  path.
-- **Revision GET**: confirmed retrievable on demo 5.6.12. Whether 5.5.3 supports it need only be checked if you
+- **#6416 is resolved** (5.5.3 and later include fix commit `1ef3de57`). `content_type:2` can be assumed to work;
+  push's `content_type == 2` check aborts if it does not.
+- **`<figure>` rendering**: raw-HTML preservation in `body_html` confirmed on demo 5.6.12; 5.6.15 presumed the
+  same path. Upgrading to 6.x hides it (see § content_type).
+- **Revision GET**: confirmed retrievable on demo 5.6.12. Whether 5.6.15 supports it need only be checked if you
   implement the read-only revision aid (not needed for MVP core behavior).
 - **Tag deletion API**: MVP is add-only. If you later delete, confirm feasibility of `DELETE .../tags/{id}` etc.
 

@@ -13,6 +13,11 @@ _Avoid_: note, page, file
 An eLabFTW experiment or resource, the remote counterpart of a document.
 _Avoid_: entry, record
 
+**HTML entity**:
+An entity whose body is HTML, as the Web UI's rich text editor writes it. elport reads it and never
+syncs it, so it never has a document.
+_Avoid_: rich-text entity
+
 **Reference**:
 A local path written in the document body, in any notation, that push uploads and replaces with
 the attachment's URL.
@@ -44,6 +49,6 @@ The one document that holds an entity's base on this machine.
 _Avoid_: checkout, clone (as a noun)
 
 **Snapshot**:
-A copy of an entity's body and the attachments it shows, made only to be read. It has no front
-matter and no base, so it is never a document.
+An entity's body in readable form, with the attachments it shows. It has no front matter and no
+base, so it is never a document.
 _Avoid_: export, archive
