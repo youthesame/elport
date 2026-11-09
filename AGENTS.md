@@ -16,11 +16,12 @@ files) to/from eLabFTW entities. **Local is the source of truth.**
   where they overlap; DESIGN is not edited to match, it only gains a pointer.
 - **Measured eLabFTW API facts = [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** (observation log of the external
   world; update only when the demo's version changes).
-- **User-facing usage = [README.md](README.md)** (commands, front matter, config). Write each entry briefly
-  and in step with the text around it: what a user needs to use the feature, not its edge cases or rationale
-  (those belong to the tests and ADRs).
-- **Driving elport from an agent = [skills/elport/SKILL.md](skills/elport/SKILL.md)** (for the downstream operating
-  context).
+- **User-facing usage = [README.md](README.md)** (install, commands, config) **and the help topics in
+  [src/elport/help/](src/elport/help/)** (documents, workflow, agent rules; `elport help <topic>` prints them, and
+  README links to them instead of repeating them). Write each entry briefly and in step with the text around it:
+  what a user needs to use the feature, not its edge cases or rationale (those belong to the tests and ADRs).
+- **Driving elport from an agent = `elport help agents`** ([src/elport/help/agents.md](src/elport/help/agents.md)).
+  [skills/elport/SKILL.md](skills/elport/SKILL.md) only tells an agent that elport exists and points there.
 
 Design principles (DESIGN §2.1): single engine / markdown-native / explicit-and-simple / secret isolation. Keep
 added features **thin** (YAGNI); prefer read-only, single-endpoint features.
