@@ -445,7 +445,12 @@ def _clone_all(args) -> int:
                     try:
                         return _clone_to(eid, entity, path, profile_name)
                     except sync.HtmlEntityError:
-                        sync.snapshot(client, entity, eid, directory, client.root)
+                        try:
+                            sync.snapshot(client, entity, eid, directory, client.root)
+                        except BaseException:
+                            # A partial snapshot would count as present on re-runs.
+                            shutil.rmtree(directory)
+                            raise
                         return "snapshot (HTML entity, read-only)"
                 except BaseException:
                     if not any(directory.iterdir()):

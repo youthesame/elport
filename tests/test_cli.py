@@ -1654,3 +1654,39 @@ def test_clone_all_counts_a_directory_named_by_the_id_as_present(
     assert cli.main(["clone", "--all", str(root), "--entity", "experiments"]) == 0
 
     assert mirror_env == []
+
+
+def test_clone_all_removes_a_snapshot_whose_download_fails(
+    tmp_path, monkeypatch, capsys
+):
+    root = tmp_path / "backup"
+    body = '<p><img src="app/download.php?f=aa/fig"></p>'
+    client = HtmlCloneClient(body=body)
+    _clone_env(monkeypatch, tmp_path, client)
+    monkeypatch.setattr(
+        client,
+        "search",
+        lambda entity, params: (
+            [{"id": 5, "title": "Web"}]
+            if entity == "experiments" and params["offset"] == 0
+            else []
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        client,
+        "uploads",
+        lambda entity, eid: [
+            {"id": 3, "long_name": "aa/fig", "real_name": "fig.png", "storage": 1}
+        ],
+    )
+    monkeypatch.setattr(
+        client,
+        "download",
+        lambda *args: (_ for _ in ()).throw(OSError("connection reset")),
+    )
+
+    assert cli.main(["clone", "--all", str(root)]) == 1
+
+    # Left in place, a partial snapshot would count as present on every re-run.
+    assert not (root / "experiments" / "5-Web").exists()
