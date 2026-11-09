@@ -1,5 +1,6 @@
 import datetime
 import io
+import json
 import stat
 import sys
 from contextlib import redirect_stdout
@@ -10,7 +11,7 @@ import keyring.errors
 import pytest
 from _sync_harness import elport_doc
 
-from elport import cli, config, frontmatter, sync
+from elport import browse, cli, config, frontmatter, sync
 
 
 class NewClient:
@@ -1135,6 +1136,26 @@ def test_list_command_needs_no_local_document(tmp_path, monkeypatch):
     assert list(tmp_path.iterdir()) == []
 
 
+def test_list_command_all_walks_every_page(monkeypatch, capsys):
+    rows = [{"id": n, "date": "", "title": f"t{n}"} for n in range(150)]
+    client = BrowseClient()
+    client.search = lambda entity, params: rows[
+        params["offset"] : params["offset"] + params["limit"]
+    ]
+    _stub_browse_client(monkeypatch, client)
+
+    assert cli.main(["list", "--all", "--json"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == rows
+
+
+def test_list_command_rejects_all_with_limit(monkeypatch):
+    _stub_browse_client(monkeypatch, BrowseClient(rows=[]))
+
+    with pytest.raises(SystemExit):
+        cli.main(["list", "--all", "--limit", "5"])
+
+
 def test_view_command_prints_the_remote_body(monkeypatch, capsys):
     client = BrowseClient(body="remote text\n")
     _stub_browse_client(monkeypatch, client)
@@ -1584,9 +1605,16 @@ def test_cli_activity_reads_own_or_team_entities(monkeypatch, capsys, flags, sco
 
     assert client.searches[0] == (
         "experiments",
-        {"scope": scope, "limit": cli.SEARCH_PAGE, "offset": 0},
+        {"scope": scope, "limit": browse.SEARCH_PAGE, "offset": 0},
     )
     assert "Yasmin Heller" in capsys.readouterr().out
+
+
+def test_activity_help_points_to_the_raw_rows(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["activity", "--help"])
+
+    assert "elport list --all --json" in capsys.readouterr().out
 
 
 class HtmlCloneClient(CloneClient):

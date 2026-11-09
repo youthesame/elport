@@ -32,7 +32,6 @@ from .sync import (
 )
 
 ENTITIES = ("experiments", "items")
-SEARCH_PAGE = 100
 SIDECARS = (".remote.md", ".base.md")
 TITLE_LIMIT = 50
 _WORDS = {"✓": "done", "·": sync.UP_TO_DATE, "*": "to sync", "✗": "failed"}
@@ -214,12 +213,14 @@ def _parser() -> argparse.ArgumentParser:
     list_parser.add_argument(
         "-q", "--query", help="search term matched against title, body and elabid"
     )
-    list_parser.add_argument(
+    size = list_parser.add_mutually_exclusive_group()
+    size.add_argument(
         "--limit",
         type=int,
         default=browse.DEFAULT_LIMIT,
         help=f"maximum number of results (default: {browse.DEFAULT_LIMIT})",
     )
+    size.add_argument("--all", action="store_true", help="page through every result")
     list_parser.add_argument(
         "--offset", type=int, default=0, help="skip this many results"
     )
@@ -229,7 +230,9 @@ def _parser() -> argparse.ArgumentParser:
     list_parser.add_argument("--profile", help="config profile to use")
 
     activity_parser = commands.add_parser(
-        "activity", help="heatmap of entities created per day, up to a year (read-only)"
+        "activity",
+        help="heatmap of entities created per day, up to a year (read-only)",
+        epilog="raw rows as JSON: elport list --all --json [--scope team]",
     )
     activity_parser.add_argument(
         "--team", action="store_true", help="one heatmap per author in your team"
@@ -407,21 +410,6 @@ def _clone(args) -> int:
     return 0
 
 
-def _every(client, entity: str, scope: str):
-    # Page until an empty answer: a server that caps the page size below ours
-    # must not end the walk early.
-    offset = 0
-    while True:
-        rows = client.search(
-            entity,
-            {"scope": browse.SCOPES[scope], "limit": SEARCH_PAGE, "offset": offset},
-        )
-        if not rows:
-            return
-        yield from rows
-        offset += len(rows)
-
-
 def _clone_all(args) -> int:
     root = Path(args.all_root)
     data = config.load(Path.cwd(), root)
@@ -442,7 +430,7 @@ def _clone_all(args) -> int:
             if folder.is_dir()
             else set()
         )
-        for row in _every(client, entity, args.scope):
+        for row in browse.every(client, entity, args.scope):
             eid = frontmatter.parse_server_id(row.get("id"))
             if (profile_name, entity, eid) in present or any(
                 name == str(eid) or name.startswith(f"{eid}-") for name in taken
@@ -788,7 +776,7 @@ def main(argv=None) -> int:
                 client,
                 entity,
                 scope=args.scope,
-                limit=args.limit,
+                limit=None if args.all else args.limit,
                 offset=args.offset,
                 query=args.query,
                 as_json=args.json,
@@ -796,7 +784,7 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "activity":
             entity, client = _browse_target(args)
-            rows = _every(client, entity, "team" if args.team else "self")
+            rows = browse.every(client, entity, "team" if args.team else "self")
             today = datetime.datetime.now().astimezone().date()
             width = shutil.get_terminal_size().columns
             print(browse.activity(rows, entity, today, _colors(), width), end="")

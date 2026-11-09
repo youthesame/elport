@@ -7,27 +7,43 @@ from collections import Counter, defaultdict
 
 SCOPES = {"self": 1, "team": 2, "all": 3}
 DEFAULT_LIMIT = 50
+SEARCH_PAGE = 100
+
+
+def every(client, entity: str, scope: str, query: str | None = None, offset: int = 0):
+    # Page until an empty answer: a server that caps the page size below ours
+    # must not end the walk early.
+    params = {"scope": SCOPES[scope], **({"q": query} if query else {})}
+    while True:
+        rows = client.search(entity, {**params, "limit": SEARCH_PAGE, "offset": offset})
+        if not rows:
+            return
+        yield from rows
+        offset += len(rows)
 
 
 def entities(
     client,
     entity: str,
     scope: str = "self",
-    limit: int = DEFAULT_LIMIT,
+    limit: int | None = DEFAULT_LIMIT,
     offset: int = 0,
     query: str | None = None,
     as_json: bool = False,
 ) -> None:
     if scope not in SCOPES:
         raise ValueError("scope must be one of: self, team, all")
-    if limit < 1:
+    if limit is not None and limit < 1:
         raise ValueError("limit must be a positive integer")
     if offset < 0:
         raise ValueError("offset must not be negative")
-    params = {"scope": SCOPES[scope], "limit": limit, "offset": offset}
-    if query:
-        params["q"] = query
-    rows = client.search(entity, params)
+    if limit is None:
+        rows = list(every(client, entity, scope, query, offset))
+    else:
+        params = {"scope": SCOPES[scope], "limit": limit, "offset": offset}
+        if query:
+            params["q"] = query
+        rows = client.search(entity, params)
 
     if as_json:
         print(json.dumps(rows, indent=2, ensure_ascii=False))
@@ -41,7 +57,7 @@ def entities(
             print(f"{row.get('id', '')!s:<{width}}  {date}  {title}".rstrip())
     # The notice goes to stderr, so it reaches a --json pipeline too: a silently
     # truncated id list would make a scripted clone-everything miss entities.
-    if len(rows) >= limit:
+    if limit is not None and len(rows) >= limit:
         print(
             f"showing {limit}; raise --limit or page with --offset for more",
             file=sys.stderr,
