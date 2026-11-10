@@ -90,7 +90,7 @@ def write_doc(path: Path, body: str, **extra):
 
 
 def saved_state(local="local", remote="remote"):
-    return {"local_base": local, "remote_base": remote, "team": 7}
+    return {"local_base": local, "remote_base": remote}
 
 
 def elport_doc(path, body="body", **meta):

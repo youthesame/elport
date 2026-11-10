@@ -137,7 +137,6 @@ def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch, cap
         {
             "remote_base": "server empty\n",
             "local_base": "",
-            "team": 7,
             "path": str(output.resolve()),
         },
     )
@@ -396,7 +395,6 @@ def test_new_persists_created_id_and_resumable_base_on_followup_failure(
             "remote_base": "",
             "local_base": "",
             "meta_base": {},
-            "team": 7,
             "pending_create": True,
             "body_sent": False,
         }
@@ -983,7 +981,6 @@ def test_clone_scaffolds_frontmatter_and_pulls(tmp_path, monkeypatch):
             "read": "team",
             "write": "owner",
         },
-        "team": 7,
         "path": str(output.resolve()),
     }
 
@@ -996,7 +993,6 @@ def test_clone_refuses_when_the_entity_already_has_a_working_copy(
     saved = {
         "remote_base": "remote body\n",
         "local_base": "old local\n",
-        "team": 7,
         "path": "/notes/exp357/report.md",
     }
     sync.state.save("https://e.example", "experiments", "357", saved)

@@ -169,24 +169,24 @@ def test_push_summary_omits_empty_sharelink(tmp_path, monkeypatch, configured, c
     )
 
 
-def test_push_stops_before_target_reads_when_team_changed(
-    tmp_path, monkeypatch, configured
-):
+def test_push_works_after_the_active_team_changed(tmp_path, monkeypatch, configured):
     doc = tmp_path / "report.md"
-    write_doc(doc, "local", category="Synthesis")
+    write_doc(doc, "local")
 
     class OtherTeamClient(FakeClient):
         def me(self):
             self.calls.append("me")
-            return {"team": 8}
+            return {**super().me(), "team": 8}
 
-    client = OtherTeamClient()
+    client = OtherTeamClient(
+        gets=[{"body": "remote"}, {"body": "stored", "content_type": 2}]
+    )
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
 
-    with pytest.raises(RuntimeError, match="active team differs"):
-        sync.push(doc, client, {})
+    sync.push(doc, client, {})
 
-    assert client.calls == ["me"]
+    assert client.saved_payload["body"] == "local"
 
 
 def test_push_stops_if_remote_changes_after_uploads(tmp_path, monkeypatch, configured):
@@ -687,7 +687,6 @@ def test_verified_state_is_saved_before_tag_failure(tmp_path, monkeypatch, confi
                 "remote_base": "stored",
                 "local_base": "local",
                 "meta_base": {"title": "Test"},
-                "team": 7,
                 "path": str(doc.resolve()),
             },
         )
@@ -1078,7 +1077,6 @@ def test_resumed_create_still_detects_a_remote_written_before_the_first_push(
             "remote_base": "",
             "local_base": "",
             "meta_base": {},
-            "team": 7,
             "pending_create": True,
             "body_sent": False,
         },
@@ -1102,7 +1100,6 @@ def test_resumed_create_detects_a_remote_edit_made_during_the_retry(
             "remote_base": "",
             "local_base": "",
             "meta_base": {},
-            "team": 7,
             "pending_create": True,
             "body_sent": True,
         },
@@ -1125,7 +1122,6 @@ def test_resume_conflict_is_not_overwritten_by_the_next_push(
         "remote_base": "",
         "local_base": "",
         "meta_base": {},
-        "team": 7,
         "pending_create": True,
         "body_sent": True,
     }
@@ -1162,7 +1158,6 @@ def test_resumed_create_warns_when_it_overwrites_a_nonempty_remote(
             "remote_base": "",
             "local_base": "",
             "meta_base": {},
-            "team": 7,
             "pending_create": True,
             "body_sent": True,
         },
