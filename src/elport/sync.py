@@ -524,13 +524,11 @@ def push(
     saved = state.load(base_url, entity, str(eid)) if eid else None
     _check_working_copy(saved, path, entity, eid)
     identity = client.me()
-    category = _resolve_category(
-        client, entity, identity.get("team"), meta.get("category")
-    )
-    status_id = _resolve_status(
-        client, entity, identity.get("team"), meta.get("status")
-    )
     remote_doc = remote.get() if remote is not None else {}
+    # Catalogs belong to a team: the entity's, or for a new one the active team.
+    team = remote_doc.get("team") or identity.get("team")
+    category = _resolve_category(client, entity, team, meta.get("category"))
+    status_id = _resolve_status(client, entity, team, meta.get("status"))
     _refuse_html(remote_doc, entity, eid)
     if remote_doc.get("locked"):
         # eLabFTW lets the owner keep writing to a locked entity (ADR-0004).

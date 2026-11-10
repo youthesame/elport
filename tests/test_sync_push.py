@@ -189,6 +189,33 @@ def test_push_works_after_the_active_team_changed(tmp_path, monkeypatch, configu
     assert client.saved_payload["body"] == "local"
 
 
+def test_push_looks_a_category_up_in_the_entitys_team(
+    tmp_path, monkeypatch, configured
+):
+    # Categories belong to a team; the active one may be another of the user's.
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", category="Synthesis")
+    looked_up = []
+
+    class OtherTeamClient(FakeClient):
+        def me(self):
+            return {**super().me(), "team": 8}
+
+        def categories(self, team_id, entity):
+            looked_up.append(team_id)
+            return super().categories(team_id, entity)
+
+    client = OtherTeamClient(
+        gets=[{"body": "remote", "team": 7}, {"body": "stored", "content_type": 2}]
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert looked_up == [7]
+
+
 def test_push_stops_if_remote_changes_after_uploads(tmp_path, monkeypatch, configured):
     doc = tmp_path / "report.md"
     (tmp_path / "data.csv").write_text("new")
@@ -740,7 +767,7 @@ def test_category_unknown_numeric_id_is_rejected_before_mutation(tmp_path, confi
     with pytest.raises(RuntimeError, match="category not found: 99"):
         sync.push(doc, client, {})
 
-    assert client.calls == ["me", "categories"]
+    assert client.calls == ["me", "get", "categories"]
 
 
 @pytest.mark.parametrize("status", ["Running", 5])
@@ -774,7 +801,7 @@ def test_unknown_status_is_rejected_before_mutation(tmp_path, configured, status
     with pytest.raises(RuntimeError, match=f"status not found: {status}"):
         sync.push(doc, client, {})
 
-    assert client.calls == ["me", "statuses"]
+    assert client.calls == ["me", "get", "statuses"]
 
 
 def test_push_without_status_does_not_send_status(tmp_path, monkeypatch, configured):
@@ -808,7 +835,7 @@ def test_dry_run_previews_declared_status_without_mutation(
     sync.push(doc, client, {}, dry_run=True)
 
     assert "status: Running\n" in capsys.readouterr().out
-    assert client.calls == ["me", "statuses", "get"]
+    assert client.calls == ["me", "get", "statuses"]
 
 
 def test_push_without_referenced_files_skips_upload_listing(
