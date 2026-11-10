@@ -745,6 +745,11 @@ def _batch(args, paths: list[Path]) -> int:
 
 
 def main(argv=None) -> int:
+    # Windows encodes a piped stdout with the locale code page, which cannot hold
+    # most titles, names or emoji; whoever reads elport's output gets UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     args = _parser().parse_args(argv)
     _connect.cache_clear()
     if args.cmd == "help":
