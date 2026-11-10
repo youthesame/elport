@@ -299,6 +299,9 @@ def _resolve_status(client, entity: str, team_id, status):
 
 
 def _remote_tags(remote: dict) -> set[str]:
+    if remote.get("tags_decoded"):
+        # A list, so a comma inside a tag stays (demo 6.0.9; ELABFTW-API).
+        return {str(tag["tag"]).strip() for tag in remote["tags_decoded"]}
     value = remote.get("tags") or ""
     if isinstance(value, str):
         return {tag.strip() for tag in re.split(r"[|,]", value) if tag.strip()}

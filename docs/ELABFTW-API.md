@@ -141,7 +141,10 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 
 - Add tag: `POST /api/v2/{entity}/{id}/tags` (JSON `{"tag": "<name>"}`; a non-existent one is auto-created).
   Measured 201; the current demo joins tag names with `|` in `"tags":"CRISPR|PCR|RNA"`, while `tags_id` remains
-  comma-joined. elport tolerates both `|` and `,` separators. **Add-only** (delete via Web UI).
+  comma-joined. A tag may itself contain `,` ("1,2-dichloroethane"), so the joined string cannot be split
+  safely; `tags_decoded` lists them as `[{"id", "tag", "is_favorite"}]` in both `GET /{entity}/{id}` and
+  search rows (measured demo 6.0.9, 2026-11-10). elport reads `tags_decoded` and splits `tags` on `|` or `,`
+  only without it. **Add-only** (delete via Web UI).
 - Metadata: `PATCH` with `{"metadata": "<JSON string>"}`. **Any top-level key is shown to users** (measured demo
   6.0.8, 2026-10-18: `{"elport": {"base": …}}` rendered under "Custom fields" on the entity page), so metadata is
   not a hidden place for tool state either.

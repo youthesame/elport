@@ -1030,6 +1030,31 @@ REMOTE_META = {
 }
 
 
+def test_pull_keeps_a_tag_with_a_comma_whole(tmp_path, monkeypatch, configured):
+    # Measured on demo 6.0.9: tags_decoded lists the tags, so a comma inside one
+    # ("1,2-dichloroethane") is not a separator.
+    doc = tmp_path / "report.md"
+    doc.write_text(frontmatter.render({"id": 1, "entity": "experiments"}, ""))
+    remote = {
+        "body": "remote",
+        "tags": "1,2-dichloroethane|plain",
+        "tags_decoded": [
+            {"id": 141, "tag": "1,2-dichloroethane", "is_favorite": False},
+            {"id": 142, "tag": "plain", "is_favorite": False},
+        ],
+    }
+    client = FakeClient(gets=[remote])
+    monkeypatch.setattr(sync.state, "load", lambda *args: None)
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[0]["tags"] == [
+        "1,2-dichloroethane",
+        "plain",
+    ]
+
+
 def test_pull_writes_remote_metadata_into_stub(tmp_path, monkeypatch, configured):
     doc = tmp_path / "report.md"
     doc.write_text(frontmatter.render({"id": 1, "entity": "experiments"}, ""))
