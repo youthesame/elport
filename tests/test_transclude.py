@@ -544,6 +544,18 @@ def test_mismatched_backtick_runs_do_not_form_code_span(tmp_path: Path):
     assert references[0].file == secret.resolve()
 
 
+def test_backtick_code_span_does_not_cross_a_blank_line(tmp_path: Path):
+    # A code span cannot leave its paragraph (CommonMark), so a stray backtick
+    # does not hide what follows it until the next backtick.
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(b"png")
+    text = "`stray\n\n![figure](figure.png)\n\nlater `code` here"
+
+    references = plan(text, tmp_path)
+
+    assert [reference.file for reference in references] == [figure.resolve()]
+
+
 def test_fenced_backtick_does_not_consume_later_inline_opener(tmp_path: Path):
     (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
     real = tmp_path / "real.txt"

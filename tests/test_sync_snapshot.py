@@ -234,3 +234,14 @@ def test_view_names_an_attachment_by_its_link_in_any_form(capsys):
     sync.view(client, "experiments", 42, BASE)
 
     assert "not shown in the body" not in capsys.readouterr().err
+
+
+def test_view_names_an_image_it_cannot_show(capsys):
+    foreign = f"{BASE}/app/download.php?f=bb%2Ftheirs&name=theirs.png&storage=1"
+    client = FakeClient(remote_doc={"body": f"![x]({foreign})\n"})
+
+    sync.view(client, "experiments", 42, BASE)
+
+    assert "kept as a URL (not downloaded, not localized): theirs.png" in (
+        capsys.readouterr().err
+    )

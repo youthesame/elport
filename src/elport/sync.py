@@ -1374,6 +1374,8 @@ def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict]]:
     body = absolute_links(body, remote.base_url)
     uploads = remote.uploads()
     _name_what_is_aside(remote, remote_doc, uploads)
+    # A one-off read, unlike pull and push (#16): say what the reader will miss.
+    _warn_unmatched_attachments(body, uploads, remote.base_url)
     return reverse(body, _reversible_uploads(uploads), remote.base_url)
 
 
