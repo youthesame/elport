@@ -70,7 +70,10 @@ def _masked(text: str) -> str:
         end = closer.end() if closer else len(text)
         blank(opener.start(), end)
         pos = end
-    for m in re.finditer(r"(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)", "".join(mask)):
+    # A code span stays within its paragraph: it cannot cross a blank line.
+    for m in re.finditer(
+        r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)", "".join(mask)
+    ):
         blank(*m.span())
     for m in re.finditer(r"<!--[\s\S]*?(?:-->|\Z)", "".join(mask)):
         blank(*m.span())
