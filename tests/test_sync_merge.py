@@ -101,7 +101,6 @@ def test_clean_merge_promotes_pending_remote_and_allows_regular_push(
     assert saved_versions[-1] == {
         "local_base": base_body,
         "remote_base": base_body,
-        "team": 7,
         "pending_remote": remote_body,
     }
 
@@ -112,7 +111,6 @@ def test_clean_merge_promotes_pending_remote_and_allows_regular_push(
     assert stored_state == {
         "local_base": base_body,
         "remote_base": remote_body,
-        "team": 7,
     }
 
     sync.push(doc, client, {})
@@ -160,7 +158,6 @@ def test_resolved_merge_without_git_promotes_pending_remote_and_allows_regular_p
     assert stored_state == {
         "local_base": base_body,
         "remote_base": remote_body,
-        "team": 7,
     }
     assert not (tmp_path / "report.base.md").exists()
     assert not (tmp_path / "report.remote.md").exists()
@@ -208,7 +205,6 @@ def test_resolved_merge_regular_push_reconflicts_if_remote_changed_again(
     assert stored_state == {
         "local_base": base_body,
         "remote_base": remote_body,
-        "team": 7,
         "pending_remote": newer_remote_body,
     }
     assert (tmp_path / "report.base.md").exists()
@@ -265,7 +261,6 @@ def test_conflicted_merge_promotes_pending_remote_and_allows_regular_push(
     assert stored_state == {
         "local_base": base_body,
         "remote_base": remote_body,
-        "team": 7,
     }
 
     write_doc(doc, "resolved\n")
@@ -309,7 +304,6 @@ def test_conflicted_merge_regular_push_reconflicts_if_remote_changed_again(
     assert stored_state == {
         "local_base": base_body,
         "remote_base": remote_body,
-        "team": 7,
         "pending_remote": newer_remote_body,
     }
     assert (tmp_path / "report.base.md").exists()
@@ -536,7 +530,6 @@ def test_merge_clears_the_provisional_creation_flags(tmp_path, monkeypatch, conf
         "local_base": "",
         "remote_base": "",
         "meta_base": {},
-        "team": 7,
         "pending_create": True,
         "body_sent": True,
         "pending_remote": "remote\n",

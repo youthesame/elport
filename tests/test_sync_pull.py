@@ -81,24 +81,22 @@ def test_pull_names_a_later_same_name_upload_after_its_id(
     )
 
 
-def test_pull_stops_before_entity_read_when_team_changed(
-    tmp_path, monkeypatch, configured
-):
+def test_pull_works_after_the_active_team_changed(tmp_path, monkeypatch, configured):
+    # Someone in two teams pulls with the other team's API key: same entity.
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
 
     class OtherTeamClient(FakeClient):
         def me(self):
-            self.calls.append("me")
             return {"team": 8}
 
-    client = OtherTeamClient()
+    client = OtherTeamClient(gets=[{"body": "remote"}])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
 
-    with pytest.raises(RuntimeError, match="active team differs"):
-        sync.pull(doc, client, {})
+    sync.pull(doc, client, {})
 
-    assert client.calls == ["me"]
+    assert frontmatter.parse(doc.read_text())[1] == "remote"
 
 
 def test_pull_dirty_writes_three_way_sidecars(
@@ -258,7 +256,7 @@ def test_pull_dirty_remote_unchanged_is_noop(tmp_path, monkeypatch, configured, 
     sync.pull(doc, client, {})
 
     assert doc.read_bytes() == original
-    assert client.calls == ["me", "get", "uploads"]
+    assert client.calls == ["get", "uploads"]
     assert not (tmp_path / "report.remote.md").exists()
     assert not (tmp_path / "report.base.md").exists()
     out, err = capsys.readouterr()
@@ -400,7 +398,7 @@ def test_pull_without_base_rejects_sidecar_attachment_before_download(
     with pytest.raises(RuntimeError, match="sidecar.*report.remote.md"):
         sync.pull(doc, client, {})
 
-    assert client.calls == ["me", "get", "uploads"]
+    assert client.calls == ["get", "uploads"]
     assert not (tmp_path / "report.remote.md").exists()
 
 
@@ -1117,14 +1115,13 @@ def test_pull_skips_matching_attachment_and_saves_the_same_state(
 
     sync.pull(doc, client, {})
 
-    assert client.calls == ["me", "get", "uploads"]
+    assert client.calls == ["get", "uploads"]
     assert frontmatter.parse(doc.read_text())[1] == "[file](data.csv)"
     assert saved == [
         {
             "remote_base": remote_body,
             "local_base": "[file](data.csv)",
             "meta_base": {},
-            "team": 7,
             "path": str(doc.resolve()),
         }
     ]

@@ -431,15 +431,6 @@ def comment(path: Path, client, config: dict, profile=None, text="") -> None:
     print(f"commented on {entity}/{eid}")
 
 
-def _check_team_match(saved: dict | None, identity: dict) -> None:
-    if (
-        saved
-        and saved.get("team") is not None
-        and identity.get("team") != saved.get("team")
-    ):
-        raise RuntimeError("active team differs from saved state")
-
-
 def _permission_changes(
     meta: dict, remote_doc: dict, identity: dict, existing: bool
 ) -> list[tuple[str, str, int, int]]:
@@ -492,7 +483,7 @@ def _warn_permission_narrowing(
 
 
 def mark_created(
-    base_url: str, entity: str, eid: object, team=None, body_sent: bool = False
+    base_url: str, entity: str, eid: object, body_sent: bool = False
 ) -> None:
     """Record a provisional base as soon as the remote entity exists, so a failure
     later in the same run can be resumed by a plain retry instead of pull/--force
@@ -509,7 +500,6 @@ def mark_created(
             "remote_base": "",
             "local_base": "",
             "meta_base": {},
-            "team": team,
             "pending_create": True,
             "body_sent": body_sent,
         },
@@ -556,15 +546,12 @@ def push(
     saved = state.load(base_url, entity, str(eid)) if eid else None
     _check_working_copy(saved, path, entity, eid)
     identity = client.me()
-    _check_team_match(saved, identity)
     edited = _edited_meta(meta, saved)
-    category = _resolve_category(
-        client, entity, identity.get("team"), edited.get("category")
-    )
-    status_id = _resolve_status(
-        client, entity, identity.get("team"), edited.get("status")
-    )
     remote_doc = remote.get() if remote is not None else {}
+    # Catalogs belong to a team: the entity's, or for a new one the active team.
+    team = remote_doc.get("team") or identity.get("team")
+    category = _resolve_category(client, entity, team, edited.get("category"))
+    status_id = _resolve_status(client, entity, team, edited.get("status"))
     _refuse_html(remote_doc, entity, eid)
     if remote_doc.get("locked"):
         # eLabFTW lets the owner keep writing to a locked entity (ADR-0004).
@@ -731,7 +718,7 @@ def push(
         meta["entity"] = entity
         meta["profile"] = resolved_profile
         frontmatter.atomic_write(path, frontmatter.render(meta, body))
-        mark_created(base_url, entity, eid, identity.get("team"))
+        mark_created(base_url, entity, eid)
         pending_create = True
     remote = Remote(client, entity, eid, base_url)
 
@@ -804,7 +791,7 @@ def push(
             )
 
     if pending_create:
-        mark_created(base_url, entity, eid, identity.get("team"), body_sent=True)
+        mark_created(base_url, entity, eid, body_sent=True)
     stored = remote_doc if unchanged else remote.patch(payload)
     if stored.get("content_type") != 2:
         raise RuntimeError(
@@ -817,7 +804,6 @@ def push(
         "remote_base": stored.get("body", ""),
         "local_base": body,
         "meta_base": meta_base,
-        "team": identity.get("team"),
         "path": str(path.resolve()),
     }
     if doc_links:
@@ -1198,8 +1184,6 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     remote = Remote(client, entity, eid, base_url)
     saved = state.load(base_url, entity, str(eid))
     _check_working_copy(saved, path, entity, eid)
-    identity = client.me()
-    _check_team_match(saved, identity)
     remote_doc = remote.get()
     _refuse_html(remote_doc, entity, eid)
     up_to_date = saved is not None and remote_doc.get("body", "") == saved.get(
@@ -1283,7 +1267,6 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
             "remote_base": remote_doc.get("body", ""),
             "local_base": source,
             "meta_base": new_base,
-            "team": identity.get("team"),
             "path": str(path.resolve()),
             **_carried(saved),
         },

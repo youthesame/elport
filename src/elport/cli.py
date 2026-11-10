@@ -382,12 +382,11 @@ def _new(args) -> None:
     resolved_profile, client = _resolved_client(data, args.profile, meta)
     meta["profile"] = resolved_profile
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
-    team = client.me().get("team")
     created = client.create(args.entity, args.title)
     eid = frontmatter.parse_server_id(created.get("id"))
     meta["id"] = eid
     frontmatter.atomic_write(path, frontmatter.render(meta, ""))
-    mark_created(client.root, args.entity, eid, team)
+    mark_created(client.root, args.entity, eid)
     remote = client.get(args.entity, eid)
     state.save(
         client.root,
@@ -396,7 +395,6 @@ def _new(args) -> None:
         {
             "remote_base": remote.get("body", ""),
             "local_base": "",
-            "team": team,
             "path": str(path.resolve()),
         },
     )
