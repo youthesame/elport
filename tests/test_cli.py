@@ -113,7 +113,9 @@ def test_output_is_utf8_whatever_the_locale(monkeypatch):
     # Windows encodes a piped stdout (an agent, a script) with the locale code
     # page, which cannot hold most titles, names or emoji.
     raw = io.BytesIO()
-    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252"))
+    monkeypatch.setattr(
+        sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
+    )
     monkeypatch.setattr(cli.config, "logout", lambda name: True, raising=False)
 
     assert cli.main(["logout", "実験🧪"]) == 0
