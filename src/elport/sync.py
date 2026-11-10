@@ -29,6 +29,7 @@ from .transclude import (
     relink,
     replace_spans,
     reverse,
+    safe_name,
     unmatched_download_urls,
     upload_name,
 )
@@ -121,19 +122,24 @@ def _remote_sha256(upload: dict) -> str | None:
 
 
 def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
-    # The hash finds the upload whatever it is called; without one, compare as
-    # pull named the file (safe_name and name_uploads may have renamed it).
+    # A file pull wrote (image-1235.png) or one that kept its upload's name
+    # (image.png, re-uploaded under the same name): the hash picks among them.
+    candidates = [
+        upload
+        for upload in uploads
+        if path.name
+        in (upload_name(upload), safe_name(str(upload.get("real_name", ""))))
+    ]
     local_hash = None
-    for upload in uploads:
+    for upload in candidates:
         remote_hash = _remote_sha256(upload)
         if remote_hash:
             local_hash = local_hash or _sha256(path)
             if remote_hash == local_hash:
                 return upload
-    for upload in uploads:
+    for upload in candidates:
         if (
-            upload_name(upload) == path.name
-            and _remote_sha256(upload) is None
+            _remote_sha256(upload) is None
             and upload.get("filesize") == path.stat().st_size
         ):
             return upload
