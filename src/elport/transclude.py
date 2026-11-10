@@ -595,7 +595,6 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
     by_f = {str(upload.get("long_name", "")): upload for upload in uploads}
     replacements: list[tuple[int, int, str]] = []
     placed: list[dict] = []
-    canonical_names: dict[str, str] = {}
     for match in _download_pattern(base_url).finditer(masked):
         f = _download_query(text[match.start() : match.end()]).get("f", [""])[0]
         upload = by_f.get(f) if f else None
@@ -616,8 +615,7 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
             # rewrite, or a URL merely embedded in a larger destination:
             # localizing it here would not survive the round trip.
             continue
-        safe = safe_name(str(upload.get("real_name", "attachment")))
-        name = canonical_names.setdefault(safe.casefold(), safe)
+        name = upload_name(upload)
         if destination.kind == "markdown" and re.search(r"[\s()#]", name):
             name = f"<{name}{fragment}>"
         elif destination.kind == "html":
@@ -746,6 +744,28 @@ _WINDOWS = sys.platform == "win32"
 _WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL"} | {
     f"{port}{n}" for port in ("COM", "LPT") for n in range(1, 10)
 }
+
+
+def name_uploads(uploads: list[dict]) -> list[dict]:
+    """Give each upload the file name it takes beside the note: its real_name made
+    safe, or, for a later upload sharing that name as the file system sees it
+    (eLabFTW names every pasted image image.png), that name with the upload id
+    added."""
+    taken = set()
+    for upload in sorted(uploads, key=lambda upload: int(upload.get("id") or 0)):
+        name = safe_name(str(upload.get("real_name", "attachment")))
+        while _fold(name) in taken:
+            path = Path(name)
+            name = f"{path.stem}-{upload.get('id')}{path.suffix}"
+        taken.add(_fold(name))
+        upload["elport_name"] = name
+    return uploads
+
+
+def upload_name(upload: dict) -> str:
+    return upload.get("elport_name") or safe_name(
+        str(upload.get("real_name", "attachment"))
+    )
 
 
 def safe_name(name: str) -> str:

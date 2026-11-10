@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import os
 import shlex
 import shutil
@@ -467,7 +466,7 @@ def test_merge_command_preserves_and_quotes_relative_document_path(
     ) in capsys.readouterr().err
 
 
-def test_merge_preserves_different_same_name_remote_and_base_attachments(
+def test_merge_names_the_base_upload_sharing_the_remote_name_after_its_id(
     tmp_path, monkeypatch, configured
 ):
     doc = tmp_path / "report.md"
@@ -508,38 +507,7 @@ def test_merge_preserves_different_same_name_remote_and_base_attachments(
 
     assert (tmp_path / "figure.png").read_bytes() == b"local"
     assert (tmp_path / "figure.png.remote").read_bytes() == b"remote"
-    assert (tmp_path / "figure.png.base").read_bytes() == b"base"
-
-
-def test_merge_rejects_different_same_basename_uploads_in_remote_body(
-    tmp_path, monkeypatch, configured
-):
-    doc = tmp_path / "report.md"
-    write_doc(doc, "edited")
-    uploads = [
-        {
-            "id": upload_id,
-            "long_name": f"aa/{upload_id}",
-            "real_name": "figure.png",
-            "storage": 1,
-            "hash": hashlib.sha256(content).hexdigest(),
-            "hash_algorithm": "sha256",
-        }
-        for upload_id, content in ((3, b"first"), (4, b"second"))
-    ]
-    urls = [sync.download_url("https://e.example", upload) for upload in uploads]
-    client = FakeClient(
-        gets=[{"body": f"[first]({urls[0]}) [second]({urls[1]})"}],
-        uploads=uploads,
-    )
-    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
-
-    with pytest.raises(RuntimeError, match="basename collision.*figure.png"):
-        sync.pull(doc, client, {})
-
-    assert "download" not in client.calls
-    assert not (tmp_path / "report.remote.md").exists()
-    assert not (tmp_path / "report.base.md").exists()
+    assert (tmp_path / "figure-4.png").read_bytes() == b"base"
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
