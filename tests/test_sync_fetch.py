@@ -175,9 +175,7 @@ def test_fetch_rejects_symlink_even_when_its_content_matches(tmp_path, configure
     assert "download" not in client.calls
 
 
-def test_fetch_same_name_collision_is_rejected_even_when_one_matches_local(
-    tmp_path, configured
-):
+def test_fetch_names_a_later_same_name_upload_after_its_id(tmp_path, configured):
     doc = tmp_path / "report.md"
     write_doc(doc, "body")
     (tmp_path / "raw_data.csv").write_bytes(b"data")
@@ -188,8 +186,10 @@ def test_fetch_same_name_collision_is_rejected_even_when_one_matches_local(
         ]
     )
 
-    with pytest.raises(RuntimeError, match="basename collision"):
-        sync.fetch(doc, client, {})
+    sync.fetch(doc, client, {})
+
+    assert (tmp_path / "raw_data.csv").read_bytes() == b"data"
+    assert (tmp_path / "Raw_Data-4.csv").exists()
 
 
 def test_fetch_matching_local_file_leaves_stale_conflict_copy_alone(

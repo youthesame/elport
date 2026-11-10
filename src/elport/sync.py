@@ -23,13 +23,14 @@ from .transclude import (
     extract,
     listed_files,
     local_files,
+    name_uploads,
     plan,
     readable_html,
     relink,
     replace_spans,
     reverse,
-    safe_name,
     unmatched_download_urls,
+    upload_name,
 )
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -55,7 +56,7 @@ class Remote:
         return self.client.get(self.entity, self.eid)
 
     def uploads(self):
-        return self.client.uploads(self.entity, self.eid)
+        return name_uploads(self.client.uploads(self.entity, self.eid))
 
     def upload(self, path):
         return self.client.upload(self.entity, self.eid, path)
@@ -67,14 +68,10 @@ class Remote:
         return self.client.patch(self.entity, self.eid, payload)
 
 
-def _upload_name(upload: dict) -> str:
-    return safe_name(str(upload.get("real_name", "attachment")))
-
-
 def _is_hidden_upload(upload: dict) -> bool:
     # Push never uploads hidden files, so a hidden name can only be planted
     # remotely (.elport.toml, .envrc, ...); never place one beside the note.
-    return _upload_name(upload).startswith(".")
+    return upload_name(upload).startswith(".")
 
 
 def _reversible_uploads(uploads: list[dict]) -> list[dict]:
@@ -124,18 +121,19 @@ def _remote_sha256(upload: dict) -> str | None:
 
 
 def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
-    # Compare as pull named the file: safe_name may have rewritten real_name.
-    candidates = [u for u in uploads if _upload_name(u) == path.name]
+    # The hash finds the upload whatever it is called; without one, compare as
+    # pull named the file (safe_name and name_uploads may have renamed it).
     local_hash = None
-    for upload in candidates:
+    for upload in uploads:
         remote_hash = _remote_sha256(upload)
         if remote_hash:
             local_hash = local_hash or _sha256(path)
             if remote_hash == local_hash:
                 return upload
-    for upload in candidates:
+    for upload in uploads:
         if (
-            _remote_sha256(upload) is None
+            upload_name(upload) == path.name
+            and _remote_sha256(upload) is None
             and upload.get("filesize") == path.stat().st_size
         ):
             return upload
@@ -958,7 +956,7 @@ def _reject_sidecar_attachment_collisions(
 ) -> None:
     sidecar_names = {sidecar.name.casefold() for sidecar in sidecars}
     for upload in uploads:
-        name = _upload_name(upload)
+        name = upload_name(upload)
         if name.casefold() in sidecar_names:
             raise RuntimeError(f"sidecar conflicts with attachment: {name}")
 
@@ -985,9 +983,9 @@ def _reject_existing_sidecars(writes: list[tuple[Path, str]]) -> None:
 def _reject_attachment_conflict_name_collisions(
     planned: list[dict], suffixed: list[tuple[dict, str]]
 ) -> None:
-    planned_names = {_upload_name(upload).casefold() for upload in planned}
+    planned_names = {upload_name(upload).casefold() for upload in planned}
     for upload, suffix in suffixed:
-        conflict_name = _upload_name(upload) + suffix
+        conflict_name = upload_name(upload) + suffix
         if conflict_name.casefold() in planned_names:
             raise RuntimeError(f"attachment {conflict_name} conflict-name collision")
 
@@ -1132,39 +1130,6 @@ def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None
         Path(temporary).unlink(missing_ok=True)
 
 
-def _coalesce_attachments(remote: Remote, uploads: list[dict]):
-    groups: dict[str, list[dict]] = {}
-    for upload in uploads:
-        name = _upload_name(upload)
-        groups.setdefault(name.casefold(), []).append(upload)
-
-    result = []
-    for group in groups.values():
-        if len(group) == 1:
-            result.append((group[0], None))
-            continue
-        # Only the first download is kept for placement; the others are hashed
-        # and dropped, so a large same-name group never piles up in memory.
-        digests = set()
-        kept = None
-        for upload in group:
-            digest = _remote_sha256(upload)
-            if digest is None:
-                data = remote.download(upload["id"])
-                digest = hashlib.sha256(data).hexdigest()
-                if kept is None:
-                    kept = (upload, data)
-                del data
-            digests.add(digest)
-        if len(digests) > 1:
-            name = _upload_name(group[0])
-            raise RuntimeError(
-                f"attachment basename collision with different content: {name}"
-            )
-        result.append(kept or (group[0], None))
-    return result
-
-
 def _place_attachments(
     path: Path,
     remote: Remote,
@@ -1172,8 +1137,8 @@ def _place_attachments(
     conflict_suffix: str = ".remote",
 ) -> list[str]:
     conflicts = []
-    for upload, prefetched in _coalesce_attachments(remote, uploads):
-        name = _upload_name(upload)
+    for upload in uploads:
+        name = upload_name(upload)
         if _is_hidden_upload(upload):
             print(
                 f"warning: refusing to place hidden file attachment: {name}",
@@ -1185,7 +1150,7 @@ def _place_attachments(
         digest = _remote_sha256(upload)
         if digest and target.is_file() and _sha256(target) == digest:
             continue  # already in place; the download would change nothing
-        data = prefetched if prefetched is not None else remote.download(upload["id"])
+        data = remote.download(upload["id"])
         _validate_attachment_target(target, path.parent)
         try:
             _write_attachment(target, data, path.parent)
@@ -1233,7 +1198,7 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
         if _is_hidden_upload(upload):
             print(
                 "warning: refusing to place hidden file attachment: "
-                f"{_upload_name(upload)}",
+                f"{upload_name(upload)}",
                 file=sys.stderr,
             )
     # A URL push recorded comes back as written and is not downloaded: it names
@@ -1318,7 +1283,7 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
         if _is_hidden_upload(upload):
             print(
                 "warning: refusing to place hidden file attachment: "
-                f"{_upload_name(upload)}",
+                f"{upload_name(upload)}",
                 file=sys.stderr,
             )
     attachments = _reversible_uploads(uploads)
@@ -1329,7 +1294,7 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
         attachments, [(upload, ".remote") for upload in attachments]
     )
     conflicts = _place_attachments(path, remote, attachments)
-    names = sorted({_upload_name(upload) for upload in attachments})
+    names = sorted({upload_name(upload) for upload in attachments})
     print(f"fetched {entity}/{eid}: {len(names)} attachment(s)")
     if names:
         print("  " + ", ".join(names))
@@ -1345,7 +1310,7 @@ def _name_what_is_aside(remote: Remote, remote_doc: dict, uploads: list[dict]) -
     body = remote_doc.get("body") or ""
     names = sorted(
         {
-            _upload_name(upload)
+            upload_name(upload)
             for upload in uploads
             if upload.get("long_name", "").rsplit("/", 1)[-1] not in body
         }
@@ -1387,7 +1352,7 @@ def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> list[P
     remote = Remote(client, entity, eid, base_url)
     source, used = _readable(remote, remote.get())
     path = directory / "report.md"
-    if any(_upload_name(upload).casefold() == path.name for upload in used):
+    if any(upload_name(upload).casefold() == path.name for upload in used):
         raise RuntimeError(f"an attachment is named {path.name}, like the body")
     if frontmatter.text_meta(source) is not None:
         # Directory-wide push would take it for a working copy.
@@ -1396,7 +1361,7 @@ def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> list[P
     frontmatter.atomic_write(path, source)
     _place_attachments(path, remote, used)
     return [path] + [
-        directory / name for name in sorted({_upload_name(u) for u in used})
+        directory / name for name in sorted({upload_name(u) for u in used})
     ]
 
 
@@ -1410,7 +1375,7 @@ def view(client, entity: str, eid, base_url: str, directory: Path | None = None)
     remote = Remote(client, entity, frontmatter.validate_id(eid), base_url)
     source, used = _readable(remote, remote.get())
     sys.stdout.write(source)
-    names = {_upload_name(upload) for upload in used}
+    names = {upload_name(upload) for upload in used}
     if names:
         print(
             f"{len(names)} attachment(s) shown by file name; "

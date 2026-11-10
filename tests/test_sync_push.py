@@ -1723,6 +1723,35 @@ def test_unchanged_push_patches_when_a_reused_upload_replaced_the_linked_one(
     assert "bb%2Fagain" in client.saved_payload["body"]
 
 
+def test_push_reuses_uploads_that_share_a_name(tmp_path, monkeypatch, configured):
+    # image-5.png is the name pull gave the second upload called image.png.
+    doc = tmp_path / "report.md"
+    (tmp_path / "image.png").write_bytes(b"second")
+    (tmp_path / "image-5.png").write_bytes(b"first")
+    write_doc(doc, "![a](image.png) ![b](image-5.png)")
+    uploads = [
+        {
+            "id": upload_id,
+            "long_name": f"aa/{upload_id}",
+            "real_name": "image.png",
+            "storage": 1,
+            "hash": hashlib.sha256(content).hexdigest(),
+            "hash_algorithm": "sha256",
+        }
+        for upload_id, content in ((3, b"old"), (5, b"first"), (7, b"second"))
+    ]
+    client = FakeClient(
+        remote_doc={"body": "remote", "content_type": 2}, uploads=uploads
+    )
+    Store(monkeypatch, {"1": saved_state()})
+
+    sync.push(doc, client, {})
+
+    assert "upload" not in client.calls
+    assert "aa%2F7" in client.saved_payload["body"]
+    assert "aa%2F5" in client.saved_payload["body"]
+
+
 def test_unchanged_push_with_reused_attachments_reads_the_remote_once(
     tmp_path, monkeypatch, configured
 ):
