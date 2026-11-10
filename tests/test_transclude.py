@@ -1562,3 +1562,15 @@ def test_name_uploads_tells_apart_names_the_file_system_takes_as_one():
         "\u30c7\u30fc\u30bf.csv",
         unicodedata.normalize("NFD", "\u30c7\u30fc\u30bf-5.csv"),
     ]
+
+
+def test_name_uploads_never_gives_two_uploads_one_name():
+    uploads = [
+        {"id": 1, "real_name": "image.png"},
+        {"id": 2, "real_name": "image-3.png"},
+        {"id": 3, "real_name": "image.png"},
+    ]
+
+    names = [u["elport_name"] for u in transclude.name_uploads(uploads)]
+
+    assert names == ["image.png", "image-3.png", "image-3-3.png"]

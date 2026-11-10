@@ -754,7 +754,7 @@ def name_uploads(uploads: list[dict]) -> list[dict]:
     taken = set()
     for upload in sorted(uploads, key=lambda upload: int(upload.get("id") or 0)):
         name = safe_name(str(upload.get("real_name", "attachment")))
-        if _fold(name) in taken:
+        while _fold(name) in taken:
             path = Path(name)
             name = f"{path.stem}-{upload.get('id')}{path.suffix}"
         taken.add(_fold(name))
