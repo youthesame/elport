@@ -181,7 +181,9 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     new_parser = commands.add_parser(
-        "new", help="create a new remote entity and local document"
+        "new",
+        help="create a new remote entity and local document",
+        epilog="to upload an existing note as a new entity, run: elport push <file>",
     )
     new_parser.add_argument("title", help="title of the new entity")
     new_parser.add_argument(
@@ -369,7 +371,10 @@ def _target(path: Path, profile: str | None, entity: str | None):
 def _new(args) -> None:
     path = Path(args.output)
     if path.exists():
-        raise RuntimeError(f"output already exists: {path}")
+        raise RuntimeError(
+            f"output already exists: {path}\n"
+            f"to create an entity from an existing note, run: elport push {path}"
+        )
     if not path.parent.is_dir():
         raise RuntimeError(f"output parent does not exist: {path.parent}")
     meta = {"title": args.title, "entity": args.entity}
