@@ -262,3 +262,19 @@ def test_me_is_fetched_once_per_client(monkeypatch):
     assert client.me() == {"userid": 3}
     assert client.me() == {"userid": 3}
     assert calls == [("GET", "/users/me")]
+
+
+def test_forbidden_names_what_the_key_may_not_do(monkeypatch):
+    class Forbidden:
+        ok = False
+        status_code = 403
+        text = '{"code":403,"message":"Forbidden"}'
+
+    monkeypatch.setattr(
+        "elport.client.requests.Session.request", lambda *a, **k: Forbidden()
+    )
+
+    with pytest.raises(
+        RuntimeError, match="API 403: this API key may not GET experiments/12"
+    ):
+        Client("https://example.org", "key").request("GET", "/experiments/12")

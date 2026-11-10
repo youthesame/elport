@@ -422,7 +422,10 @@ def test_pull_dirty_refuses_to_clobber_unrelated_remote_sidecar(
         sync.state, "load", lambda *args: saved_state(remote=f"base [figure]({url})")
     )
 
-    with pytest.raises(RuntimeError, match="refusing to overwrite"):
+    with pytest.raises(
+        RuntimeError,
+        match="report.remote.md; if an earlier conflict left it, delete it and retry",
+    ):
         sync.pull(doc, client, {})
 
     assert (tmp_path / "report.remote.md").read_text() == "a real user document"
@@ -775,7 +778,11 @@ def test_pull_regular_attachment_conflict_writes_remote(
     client = FakeClient(gets=[{"body": f"[file]({url})"}], uploads=[upload])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
 
-    with pytest.raises(RuntimeError, match="attachment conflicts written"):
+    with pytest.raises(
+        RuntimeError,
+        match="written to: attachment.bin.remote; the server holds other versions: "
+        "replace each file with its .remote copy, then run 'elport pull' again",
+    ):
         sync.pull(doc, client, {})
 
     assert target.read_bytes() == b"local"
