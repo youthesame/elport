@@ -597,3 +597,82 @@ def test_new_entity_widening_uses_identity_default(tmp_path, monkeypatch, config
 
     assert "create" not in client.calls
     assert "patch" not in client.calls
+
+
+# pull writes these keys into front matter; the Web UI may change them later.
+SYNCED_BASE = {
+    "title": "Test",
+    "category": "Retired",
+    "status": "Running",
+    "read": "team",
+    "write": "owner",
+}
+WEB_EDITED = {
+    "body": "remote",
+    "content_type": 2,
+    "title": "Web title",
+    "canread_base": 40,
+    "canwrite_base": 20,
+}
+
+
+def test_push_leaves_metadata_not_edited_since_the_last_sync(
+    tmp_path, monkeypatch, configured
+):
+    # "Retired" is in no catalog: an unedited key is never looked up either.
+    doc = tmp_path / "report.md"
+    write_doc(
+        doc, "local", category="Retired", status="Running", read="team", write="owner"
+    )
+    client = FakeClient(remote_doc=WEB_EDITED)
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: {**saved_state(), "meta_base": SYNCED_BASE}
+    )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert "categories" not in client.calls
+    assert "statuses" not in client.calls
+    assert "patch" not in client.calls  # nothing edited, so nothing to send
+
+
+def test_push_sends_metadata_edited_since_the_last_sync(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(
+        doc,
+        "local",
+        title="Local title",
+        category="Synthesis",
+        read="owner",
+        write="owner",
+    )
+    client = FakeClient(remote_doc=WEB_EDITED)
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: {**saved_state(), "meta_base": SYNCED_BASE}
+    )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload["title"] == "Local title"
+    assert client.saved_payload["category"] == 9
+    assert client.saved_payload["canread_base"] == 10
+    assert "canwrite_base" not in client.saved_payload
+
+
+def test_status_reports_no_permission_change_made_only_in_the_web_ui(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", read="team", write="owner")
+    client = FakeClient(gets=[WEB_EDITED])
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: {**saved_state(), "meta_base": SYNCED_BASE}
+    )
+
+    sync.status(doc, client, {})
+
+    assert "permission" not in capsys.readouterr().out

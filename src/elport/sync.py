@@ -312,6 +312,20 @@ def _synced_meta(meta: dict) -> dict:
     return {key: meta[key] for key in SYNCED_META if key in meta}
 
 
+def _edited_meta(meta: dict, saved: dict | None) -> dict:
+    """The front matter push sends: all of it without a metadata base (a new
+    entity), else only the synced keys edited since the last sync, so a Web-side
+    change to the others survives the push (ADR-0012)."""
+    base = (saved or {}).get("meta_base")
+    if base is None:
+        return meta
+    return {
+        key: value
+        for key, value in meta.items()
+        if key not in SYNCED_META or value != base.get(key)
+    }
+
+
 def _remote_meta(remote_doc: dict) -> dict:
     """Frontmatter values the server holds; None means the key is unset remotely.
     Fields absent from the response are left out so they never erase local keys."""
@@ -535,11 +549,12 @@ def push(
     _check_working_copy(saved, path, entity, eid)
     identity = client.me()
     _check_team_match(saved, identity)
+    edited = _edited_meta(meta, saved)
     category = _resolve_category(
-        client, entity, identity.get("team"), meta.get("category")
+        client, entity, identity.get("team"), edited.get("category")
     )
     status_id = _resolve_status(
-        client, entity, identity.get("team"), meta.get("status")
+        client, entity, identity.get("team"), edited.get("status")
     )
     remote_doc = remote.get() if remote is not None else {}
     _refuse_html(remote_doc, entity, eid)
@@ -550,7 +565,7 @@ def push(
             "(--force does not override a lock)"
         )
     permission_changes = _permission_changes(
-        meta, remote_doc, identity, eid is not None
+        edited, remote_doc, identity, eid is not None
     )
     is_owner = remote_doc.get("userid") == identity.get("userid")
     is_team_admin = any(
@@ -672,8 +687,8 @@ def push(
                 f"{field}→{keyword}" for field, keyword, _, _ in permission_changes
             )
             print(f"permissions: {planned}")
-        if meta.get("title"):
-            print(f"title: {meta['title']}")
+        if edited.get("title"):
+            print(f"title: {edited['title']}")
         if category is not None:
             print(f"category: {category}")
         if meta.get("status") is not None:
@@ -734,8 +749,8 @@ def push(
 
     sent = replace_spans(body, refs, urls)
     payload = {"body": sent, "content_type": 2}
-    if meta.get("title"):
-        payload["title"] = meta["title"]
+    if edited.get("title"):
+        payload["title"] = edited["title"]
     if category is not None:
         payload["category"] = category
     if status_id is not None:
@@ -1480,7 +1495,9 @@ def status(path: Path, client, config: dict, profile=None) -> str:
     print("mode:", mode)
     if remote_doc.get("locked"):
         print("lock: locked (push refused; unlock in the Web UI)")
-    permission_changes = _permission_changes(meta, remote_doc, {}, True)
+    permission_changes = _permission_changes(
+        _edited_meta(meta, saved), remote_doc, {}, True
+    )
     if permission_changes:
         permission_keywords = {
             level: keyword for keyword, level in frontmatter.PERMISSION_LEVELS.items()
