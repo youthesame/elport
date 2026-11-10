@@ -414,7 +414,9 @@ def test_new_rejects_missing_parent_before_remote_creation(tmp_path, monkeypatch
     assert not output.exists()
 
 
-def test_new_rejects_existing_output_before_remote_creation(tmp_path, monkeypatch):
+def test_new_rejects_existing_output_before_remote_creation(
+    tmp_path, monkeypatch, capsys
+):
     output = tmp_path / "report.md"
     output.write_bytes(b"keep me")
     client = NewClient()
@@ -424,6 +426,8 @@ def test_new_rejects_existing_output_before_remote_creation(tmp_path, monkeypatc
     assert cli.main(["new", "Experiment", "-o", str(output)]) == 1
     assert client.created == []
     assert output.read_bytes() == b"keep me"
+    # An existing note becomes an entity through push, so the error names it.
+    assert f"elport push {output}" in capsys.readouterr().err
 
 
 def test_new_preflights_atomic_output_write_before_remote_creation(
@@ -1615,6 +1619,13 @@ def test_activity_help_points_to_the_raw_rows(capsys):
         cli.main(["activity", "--help"])
 
     assert "elport list --all --json" in capsys.readouterr().out
+
+
+def test_new_help_points_an_existing_note_to_push(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["new", "--help"])
+
+    assert "elport push <file>" in capsys.readouterr().out
 
 
 class HtmlCloneClient(CloneClient):
