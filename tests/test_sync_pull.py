@@ -15,6 +15,7 @@ from _sync_harness import (
 )
 
 from elport import frontmatter, sync
+from elport.transclude import safe_name
 
 
 def test_pull_clean_updates_document(tmp_path, monkeypatch, configured, capsys):
@@ -42,64 +43,30 @@ def test_pull_clean_updates_document(tmp_path, monkeypatch, configured, capsys):
     )
 
 
-def test_pull_rejects_same_basename_uploads_with_different_content(
+def test_pull_names_a_later_same_name_upload_after_its_id(
     tmp_path, monkeypatch, configured
 ):
+    # eLabFTW names every pasted image image.png; case alone does not tell
+    # files apart on macOS or Windows.
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
-    uploads = [
-        {
-            "id": 3,
-            "long_name": "aa/first",
-            "real_name": "nested/figure.png",
-            "storage": 1,
-            "hash": hashlib.sha256(b"first").hexdigest(),
-            "hash_algorithm": "sha256",
-        },
-        {
-            "id": 4,
-            "long_name": "aa/second",
-            "real_name": "figure.png",
-            "storage": 1,
-            "hash": hashlib.sha256(b"second").hexdigest(),
-            "hash_algorithm": "sha256",
-        },
-    ]
-    urls = [sync.download_url("https://e.example", upload) for upload in uploads]
-    client = FakeClient(
-        gets=[{"body": f"[first]({urls[0]}) [second]({urls[1]})"}],
-        uploads=uploads,
-    )
-    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
-
-    with pytest.raises(RuntimeError, match="basename collision.*figure.png"):
-        sync.pull(doc, client, {})
-
-    assert "download" not in client.calls
-    assert frontmatter.parse(doc.read_text())[1] == "local"
-    assert not (tmp_path / "figure.png").exists()
-
-
-def test_pull_coalesces_same_basename_uploads_with_identical_content(
-    tmp_path, monkeypatch, configured
-):
-    doc = tmp_path / "report.md"
-    write_doc(doc, "local")
-    digest = hashlib.sha256(b"data").hexdigest()
     uploads = [
         {
             "id": upload_id,
             "long_name": f"aa/{upload_id}",
-            "real_name": "nested/Figure.png" if upload_id == 3 else "figure.png",
+            "real_name": real_name,
             "storage": 1,
-            "hash": digest,
-            "hash_algorithm": "sha256",
         }
-        for upload_id in (3, 4)
+        for upload_id, real_name in ((4, "figure.png"), (3, "nested/Figure.png"))
     ]
     urls = [sync.download_url("https://e.example", upload) for upload in uploads]
-    client = FakeClient(
-        gets=[{"body": f"[first]({urls[0]}) [second]({urls[1]})"}],
+
+    class DifferentAttachmentsClient(FakeClient):
+        def download(self, entity, eid, upload_id):
+            return {3: b"first", 4: b"second"}[upload_id]
+
+    client = DifferentAttachmentsClient(
+        gets=[{"body": f"[second]({urls[0]}) [first]({urls[1]})"}],
         uploads=uploads,
     )
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
@@ -107,47 +74,11 @@ def test_pull_coalesces_same_basename_uploads_with_identical_content(
 
     sync.pull(doc, client, {})
 
-    assert client.calls.count("download") == 1
-    assert (tmp_path / "Figure.png").read_bytes() == b"data"
+    assert (tmp_path / "Figure.png").read_bytes() == b"first"
+    assert (tmp_path / "figure-4.png").read_bytes() == b"second"
     assert frontmatter.parse(doc.read_text())[1] == (
-        "[first](Figure.png) [second](Figure.png)"
+        "[second](figure-4.png) [first](Figure.png)"
     )
-
-
-def test_pull_compares_same_basename_upload_content_when_hashes_are_missing(
-    tmp_path, monkeypatch, configured
-):
-    doc = tmp_path / "report.md"
-    write_doc(doc, "local")
-    uploads = [
-        {
-            "id": upload_id,
-            "long_name": f"aa/{upload_id}",
-            "real_name": "figure.png",
-            "storage": 1,
-        }
-        for upload_id in (3, 4)
-    ]
-    urls = [sync.download_url("https://e.example", upload) for upload in uploads]
-
-    class DifferentAttachmentsClient(FakeClient):
-        def download(self, entity, eid, upload_id):
-            self.calls.append(f"download:{upload_id}")
-            return {3: b"first", 4: b"second"}[upload_id]
-
-    client = DifferentAttachmentsClient(
-        gets=[{"body": f"[first]({urls[0]}) [second]({urls[1]})"}],
-        uploads=uploads,
-    )
-    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
-
-    with pytest.raises(RuntimeError, match="basename collision.*figure.png"):
-        sync.pull(doc, client, {})
-
-    assert "download:3" in client.calls
-    assert "download:4" in client.calls
-    assert frontmatter.parse(doc.read_text())[1] == "local"
-    assert not (tmp_path / "figure.png").exists()
 
 
 def test_pull_works_after_the_active_team_changed(tmp_path, monkeypatch, configured):
@@ -302,10 +233,10 @@ def test_pull_skips_hidden_file_attachment(
 
     sync.pull(doc, client, {})
 
-    assert not (tmp_path / sync.safe_name(real_name)).exists()
+    assert not (tmp_path / safe_name(real_name)).exists()
     assert frontmatter.parse(doc.read_text())[1] == f"[file]({url})"
     assert "download" not in client.calls
-    assert f"refusing to place hidden file attachment: {sync.safe_name(real_name)}" in (
+    assert f"refusing to place hidden file attachment: {safe_name(real_name)}" in (
         capsys.readouterr().err
     )
 
@@ -489,7 +420,10 @@ def test_pull_dirty_refuses_to_clobber_unrelated_remote_sidecar(
         sync.state, "load", lambda *args: saved_state(remote=f"base [figure]({url})")
     )
 
-    with pytest.raises(RuntimeError, match="refusing to overwrite"):
+    with pytest.raises(
+        RuntimeError,
+        match="report.remote.md; if an earlier conflict left it, delete it and retry",
+    ):
         sync.pull(doc, client, {})
 
     assert (tmp_path / "report.remote.md").read_text() == "a real user document"
@@ -842,7 +776,11 @@ def test_pull_regular_attachment_conflict_writes_remote(
     client = FakeClient(gets=[{"body": f"[file]({url})"}], uploads=[upload])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
 
-    with pytest.raises(RuntimeError, match="attachment conflicts written"):
+    with pytest.raises(
+        RuntimeError,
+        match="written to: attachment.bin.remote; the server holds other versions: "
+        "replace each file with its .remote copy, then run 'elport pull' again",
+    ):
         sync.pull(doc, client, {})
 
     assert target.read_bytes() == b"local"
@@ -1026,6 +964,31 @@ REMOTE_META = {
     "canread_base": 10,
     "canwrite_base": 20,
 }
+
+
+def test_pull_keeps_a_tag_with_a_comma_whole(tmp_path, monkeypatch, configured):
+    # Measured on demo 6.0.9: tags_decoded lists the tags, so a comma inside one
+    # ("1,2-dichloroethane") is not a separator.
+    doc = tmp_path / "report.md"
+    doc.write_text(frontmatter.render({"id": 1, "entity": "experiments"}, ""))
+    remote = {
+        "body": "remote",
+        "tags": "1,2-dichloroethane|plain",
+        "tags_decoded": [
+            {"id": 141, "tag": "1,2-dichloroethane", "is_favorite": False},
+            {"id": 142, "tag": "plain", "is_favorite": False},
+        ],
+    }
+    client = FakeClient(gets=[remote])
+    monkeypatch.setattr(sync.state, "load", lambda *args: None)
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.pull(doc, client, {})
+
+    assert frontmatter.parse(doc.read_text())[0]["tags"] == [
+        "1,2-dichloroethane",
+        "plain",
+    ]
 
 
 def test_pull_writes_remote_metadata_into_stub(tmp_path, monkeypatch, configured):

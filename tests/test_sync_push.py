@@ -1745,6 +1745,68 @@ def test_unchanged_push_patches_when_a_reused_upload_replaced_the_linked_one(
     assert "bb%2Fagain" in client.saved_payload["body"]
 
 
+def test_push_reuses_uploads_that_share_a_name(tmp_path, monkeypatch, configured):
+    # image-5.png is the name pull gave the second upload called image.png.
+    doc = tmp_path / "report.md"
+    (tmp_path / "image.png").write_bytes(b"second")
+    (tmp_path / "image-5.png").write_bytes(b"first")
+    write_doc(doc, "![a](image.png) ![b](image-5.png)")
+    uploads = [
+        {
+            "id": upload_id,
+            "long_name": f"aa/{upload_id}",
+            "real_name": "image.png",
+            "storage": 1,
+            "hash": hashlib.sha256(content).hexdigest(),
+            "hash_algorithm": "sha256",
+        }
+        for upload_id, content in ((3, b"old"), (5, b"first"), (7, b"second"))
+    ]
+    client = FakeClient(
+        remote_doc={"body": "remote", "content_type": 2}, uploads=uploads
+    )
+    Store(monkeypatch, {"1": saved_state()})
+
+    sync.push(doc, client, {})
+
+    assert "upload" not in client.calls
+    assert "aa%2F7" in client.saved_payload["body"]
+    assert "aa%2F5" in client.saved_payload["body"]
+
+
+def test_push_keeps_identical_files_with_different_names_apart(
+    tmp_path, monkeypatch, configured
+):
+    # Matching by content alone would point both links at one upload, and the
+    # next pull would rewrite both to one file.
+    doc = tmp_path / "report.md"
+    (tmp_path / "a.csv").write_bytes(b"same")
+    (tmp_path / "b.csv").write_bytes(b"same")
+    write_doc(doc, "[a](a.csv) [b](b.csv)")
+    digest = hashlib.sha256(b"same").hexdigest()
+    uploads = [
+        {
+            "id": upload_id,
+            "long_name": f"aa/{upload_id}",
+            "real_name": name,
+            "storage": 1,
+            "hash": digest,
+            "hash_algorithm": "sha256",
+        }
+        for upload_id, name in ((3, "a.csv"), (4, "b.csv"))
+    ]
+    client = FakeClient(
+        remote_doc={"body": "remote", "content_type": 2}, uploads=uploads
+    )
+    Store(monkeypatch, {"1": saved_state()})
+
+    sync.push(doc, client, {})
+
+    assert "upload" not in client.calls
+    assert "aa%2F3" in client.saved_payload["body"]
+    assert "aa%2F4" in client.saved_payload["body"]
+
+
 def test_unchanged_push_with_reused_attachments_reads_the_remote_once(
     tmp_path, monkeypatch, configured
 ):

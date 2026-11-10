@@ -109,6 +109,21 @@ def test_logout_reports_result(argv, removed, expected, monkeypatch, capsys):
     assert capsys.readouterr().out == expected
 
 
+def test_output_is_utf8_whatever_the_locale(monkeypatch):
+    # Windows encodes a piped stdout (an agent, a script) with the locale code
+    # page, which cannot hold most titles, names or emoji.
+    raw = io.BytesIO()
+    monkeypatch.setattr(
+        sys, "stdout", io.TextIOWrapper(raw, encoding="cp1252", newline="\n")
+    )
+    monkeypatch.setattr(cli.config, "logout", lambda name: True, raising=False)
+
+    assert cli.main(["logout", "実験🧪"]) == 0
+
+    sys.stdout.flush()
+    assert raw.getvalue().decode("utf-8") == "logged out profile 実験🧪\n"
+
+
 def test_new_creates_remote_entity_and_local_document(tmp_path, monkeypatch, capsys):
     output = tmp_path / "report.md"
     client = NewClient()

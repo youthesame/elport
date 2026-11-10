@@ -60,7 +60,12 @@ class Client:
             raise OSError(f"could not reach {self.root} (connection failed)") from exc
         if not r.ok:
             error = NotFoundError if r.status_code == 404 else RuntimeError
-            raise error(f"API {r.status_code}: {r.text[:300]}")
+            denied = (
+                f"this API key may not {method} {path.lstrip('/')}: "
+                if r.status_code == 403
+                else ""
+            )
+            raise error(f"API {r.status_code}: {denied}{r.text[:300]}")
         return r
 
     def me(self):

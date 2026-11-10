@@ -36,6 +36,31 @@ def test_snapshot_writes_the_body_and_only_the_uploads_it_shows(tmp_path, capsys
     ]
 
 
+def test_snapshot_writes_every_pasted_image_although_all_are_named_image_png(
+    tmp_path,
+):
+    pasted = [
+        {"id": i, "long_name": f"aa/{i}", "real_name": "image.png", "storage": 1}
+        for i in (3, 5)
+    ]
+    urls = [sync.download_url(BASE, upload) for upload in pasted]
+
+    class PastedClient(FakeClient):
+        def download(self, entity, eid, upload_id):
+            return f"png{upload_id}".encode()
+
+    out = tmp_path / "out"
+    client = PastedClient(
+        remote_doc={"body": f"![a]({urls[0]}) ![b]({urls[1]})\n"}, uploads=pasted
+    )
+
+    sync.snapshot(client, "experiments", 42, out, BASE)
+
+    assert (out / "report.md").read_text() == "![a](image.png) ![b](image-5.png)\n"
+    assert (out / "image.png").read_bytes() == b"png3"
+    assert (out / "image-5.png").read_bytes() == b"png5"
+
+
 def test_snapshot_of_an_html_entity_is_its_readable_body(tmp_path):
     out = tmp_path / "out"
     client = FakeClient(
@@ -234,3 +259,14 @@ def test_view_names_an_attachment_by_its_link_in_any_form(capsys):
     sync.view(client, "experiments", 42, BASE)
 
     assert "not shown in the body" not in capsys.readouterr().err
+
+
+def test_view_names_an_image_it_cannot_show(capsys):
+    foreign = f"{BASE}/app/download.php?f=bb%2Ftheirs&name=theirs.png&storage=1"
+    client = FakeClient(remote_doc={"body": f"![x]({foreign})\n"})
+
+    sync.view(client, "experiments", 42, BASE)
+
+    assert "kept as a URL (not downloaded, not localized): theirs.png" in (
+        capsys.readouterr().err
+    )

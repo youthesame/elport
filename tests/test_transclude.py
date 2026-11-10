@@ -544,6 +544,18 @@ def test_mismatched_backtick_runs_do_not_form_code_span(tmp_path: Path):
     assert references[0].file == secret.resolve()
 
 
+def test_backtick_code_span_does_not_cross_a_blank_line(tmp_path: Path):
+    # A code span cannot leave its paragraph (CommonMark), so a stray backtick
+    # does not hide what follows it until the next backtick.
+    figure = tmp_path / "figure.png"
+    figure.write_bytes(b"png")
+    text = "`stray\n\n![figure](figure.png)\n\nlater `code` here"
+
+    references = plan(text, tmp_path)
+
+    assert [reference.file for reference in references] == [figure.resolve()]
+
+
 def test_fenced_backtick_does_not_consume_later_inline_opener(tmp_path: Path):
     (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
     real = tmp_path / "real.txt"
@@ -1543,3 +1555,34 @@ def test_readable_html_escapes_the_attribute_values_it_keeps():
     body = '<a href="experiments.php?mode=view&amp;id=1&amp;q=&quot;x&quot;">e</a>'
 
     assert transclude.readable_html(body) == body
+
+
+def test_name_uploads_tells_apart_names_the_file_system_takes_as_one():
+    # NFD is how macOS spells a name it was given in NFC.
+    uploads = [
+        {"id": 9, "real_name": "Data.csv"},
+        {"id": 2, "real_name": "data.csv"},
+        {"id": 4, "real_name": "\u30c7\u30fc\u30bf.csv"},
+        {"id": 5, "real_name": unicodedata.normalize("NFD", "\u30c7\u30fc\u30bf.csv")},
+    ]
+
+    names = [u["elport_name"] for u in transclude.name_uploads(uploads)]
+
+    assert names == [
+        "Data-9.csv",
+        "data.csv",
+        "\u30c7\u30fc\u30bf.csv",
+        unicodedata.normalize("NFD", "\u30c7\u30fc\u30bf-5.csv"),
+    ]
+
+
+def test_name_uploads_never_gives_two_uploads_one_name():
+    uploads = [
+        {"id": 1, "real_name": "image.png"},
+        {"id": 2, "real_name": "image-3.png"},
+        {"id": 3, "real_name": "image.png"},
+    ]
+
+    names = [u["elport_name"] for u in transclude.name_uploads(uploads)]
+
+    assert names == ["image.png", "image-3.png", "image-3-3.png"]

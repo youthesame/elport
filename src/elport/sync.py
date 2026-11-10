@@ -23,6 +23,7 @@ from .transclude import (
     extract,
     listed_files,
     local_files,
+    name_uploads,
     plan,
     readable_html,
     relink,
@@ -30,6 +31,7 @@ from .transclude import (
     reverse,
     safe_name,
     unmatched_download_urls,
+    upload_name,
 )
 
 LARGE_UPLOAD_BYTES = 25 * 1024 * 1024
@@ -55,7 +57,7 @@ class Remote:
         return self.client.get(self.entity, self.eid)
 
     def uploads(self):
-        return self.client.uploads(self.entity, self.eid)
+        return name_uploads(self.client.uploads(self.entity, self.eid))
 
     def upload(self, path):
         return self.client.upload(self.entity, self.eid, path)
@@ -67,14 +69,10 @@ class Remote:
         return self.client.patch(self.entity, self.eid, payload)
 
 
-def _upload_name(upload: dict) -> str:
-    return safe_name(str(upload.get("real_name", "attachment")))
-
-
 def _is_hidden_upload(upload: dict) -> bool:
     # Push never uploads hidden files, so a hidden name can only be planted
     # remotely (.elport.toml, .envrc, ...); never place one beside the note.
-    return _upload_name(upload).startswith(".")
+    return upload_name(upload).startswith(".")
 
 
 def _reversible_uploads(uploads: list[dict]) -> list[dict]:
@@ -124,8 +122,14 @@ def _remote_sha256(upload: dict) -> str | None:
 
 
 def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
-    # Compare as pull named the file: safe_name may have rewritten real_name.
-    candidates = [u for u in uploads if _upload_name(u) == path.name]
+    # A file pull wrote (image-1235.png) or one that kept its upload's name
+    # (image.png, re-uploaded under the same name): the hash picks among them.
+    candidates = [
+        upload
+        for upload in uploads
+        if path.name
+        in (upload_name(upload), safe_name(str(upload.get("real_name", ""))))
+    ]
     local_hash = None
     for upload in candidates:
         remote_hash = _remote_sha256(upload)
@@ -299,6 +303,9 @@ def _resolve_status(client, entity: str, team_id, status):
 
 
 def _remote_tags(remote: dict) -> set[str]:
+    if remote.get("tags_decoded"):
+        # A list, so a comma inside a tag stays (demo 6.0.9; ELABFTW-API).
+        return {str(tag["tag"]).strip() for tag in remote["tags_decoded"]}
     value = remote.get("tags") or ""
     if isinstance(value, str):
         return {tag.strip() for tag in re.split(r"[|,]", value) if tag.strip()}
@@ -310,6 +317,21 @@ SYNCED_META = ("title", "category", "status", "read", "write")
 
 def _synced_meta(meta: dict) -> dict:
     return {key: meta[key] for key in SYNCED_META if key in meta}
+
+
+def _edited_meta(meta: dict, saved: dict | None) -> dict:
+    """The front matter push sends: all of it without a metadata base (a new
+    entity), else only the synced keys edited since the last sync, so a Web-side
+    change to the others survives the push (ADR-0012)."""
+    base = (saved or {}).get("meta_base")
+    if base is None:
+        return meta
+    return {
+        key: value
+        for key, value in meta.items()
+        # str: push reads category and status as strings, pull may store an id.
+        if key not in SYNCED_META or str(value) != str(base.get(key))
+    }
 
 
 def _remote_meta(remote_doc: dict) -> dict:
@@ -524,11 +546,12 @@ def push(
     saved = state.load(base_url, entity, str(eid)) if eid else None
     _check_working_copy(saved, path, entity, eid)
     identity = client.me()
+    edited = _edited_meta(meta, saved)
     remote_doc = remote.get() if remote is not None else {}
     # Catalogs belong to a team: the entity's, or for a new one the active team.
     team = remote_doc.get("team") or identity.get("team")
-    category = _resolve_category(client, entity, team, meta.get("category"))
-    status_id = _resolve_status(client, entity, team, meta.get("status"))
+    category = _resolve_category(client, entity, team, edited.get("category"))
+    status_id = _resolve_status(client, entity, team, edited.get("status"))
     _refuse_html(remote_doc, entity, eid)
     if remote_doc.get("locked"):
         # eLabFTW lets the owner keep writing to a locked entity (ADR-0004).
@@ -537,7 +560,7 @@ def push(
             "(--force does not override a lock)"
         )
     permission_changes = _permission_changes(
-        meta, remote_doc, identity, eid is not None
+        edited, remote_doc, identity, eid is not None
     )
     is_owner = remote_doc.get("userid") == identity.get("userid")
     is_team_admin = any(
@@ -659,12 +682,12 @@ def push(
                 f"{field}→{keyword}" for field, keyword, _, _ in permission_changes
             )
             print(f"permissions: {planned}")
-        if meta.get("title"):
-            print(f"title: {meta['title']}")
+        if edited.get("title"):
+            print(f"title: {edited['title']}")
         if category is not None:
             print(f"category: {category}")
-        if meta.get("status") is not None:
-            print(f"status: {meta['status']}")
+        if edited.get("status") is not None:
+            print(f"status: {edited['status']}")
         existing = _remote_tags(remote_doc)
         new_tags = [tag for tag in (meta.get("tags") or []) if tag not in existing]
         if new_tags:
@@ -721,8 +744,8 @@ def push(
 
     sent = replace_spans(body, refs, urls)
     payload = {"body": sent, "content_type": 2}
-    if meta.get("title"):
-        payload["title"] = meta["title"]
+    if edited.get("title"):
+        payload["title"] = edited["title"]
     if category is not None:
         payload["category"] = category
     if status_id is not None:
@@ -944,7 +967,7 @@ def _reject_sidecar_attachment_collisions(
 ) -> None:
     sidecar_names = {sidecar.name.casefold() for sidecar in sidecars}
     for upload in uploads:
-        name = _upload_name(upload)
+        name = upload_name(upload)
         if name.casefold() in sidecar_names:
             raise RuntimeError(f"sidecar conflicts with attachment: {name}")
 
@@ -964,16 +987,17 @@ def _reject_existing_sidecars(writes: list[tuple[Path, str]]) -> None:
         existing = path.read_bytes().replace(b"\r\n", b"\n") if path.exists() else None
         if existing is not None and existing != content.encode("utf-8"):
             raise RuntimeError(
-                f"refusing to overwrite existing file at sidecar path: {path.name}"
+                f"refusing to overwrite existing file at sidecar path: {path.name}; "
+                "if an earlier conflict left it, delete it and retry"
             )
 
 
 def _reject_attachment_conflict_name_collisions(
     planned: list[dict], suffixed: list[tuple[dict, str]]
 ) -> None:
-    planned_names = {_upload_name(upload).casefold() for upload in planned}
+    planned_names = {upload_name(upload).casefold() for upload in planned}
     for upload, suffix in suffixed:
-        conflict_name = _upload_name(upload) + suffix
+        conflict_name = upload_name(upload) + suffix
         if conflict_name.casefold() in planned_names:
             raise RuntimeError(f"attachment {conflict_name} conflict-name collision")
 
@@ -1118,39 +1142,6 @@ def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None
         Path(temporary).unlink(missing_ok=True)
 
 
-def _coalesce_attachments(remote: Remote, uploads: list[dict]):
-    groups: dict[str, list[dict]] = {}
-    for upload in uploads:
-        name = _upload_name(upload)
-        groups.setdefault(name.casefold(), []).append(upload)
-
-    result = []
-    for group in groups.values():
-        if len(group) == 1:
-            result.append((group[0], None))
-            continue
-        # Only the first download is kept for placement; the others are hashed
-        # and dropped, so a large same-name group never piles up in memory.
-        digests = set()
-        kept = None
-        for upload in group:
-            digest = _remote_sha256(upload)
-            if digest is None:
-                data = remote.download(upload["id"])
-                digest = hashlib.sha256(data).hexdigest()
-                if kept is None:
-                    kept = (upload, data)
-                del data
-            digests.add(digest)
-        if len(digests) > 1:
-            name = _upload_name(group[0])
-            raise RuntimeError(
-                f"attachment basename collision with different content: {name}"
-            )
-        result.append(kept or (group[0], None))
-    return result
-
-
 def _place_attachments(
     path: Path,
     remote: Remote,
@@ -1158,8 +1149,8 @@ def _place_attachments(
     conflict_suffix: str = ".remote",
 ) -> list[str]:
     conflicts = []
-    for upload, prefetched in _coalesce_attachments(remote, uploads):
-        name = _upload_name(upload)
+    for upload in uploads:
+        name = upload_name(upload)
         if _is_hidden_upload(upload):
             print(
                 f"warning: refusing to place hidden file attachment: {name}",
@@ -1171,7 +1162,7 @@ def _place_attachments(
         digest = _remote_sha256(upload)
         if digest and target.is_file() and _sha256(target) == digest:
             continue  # already in place; the download would change nothing
-        data = prefetched if prefetched is not None else remote.download(upload["id"])
+        data = remote.download(upload["id"])
         _validate_attachment_target(target, path.parent)
         try:
             _write_attachment(target, data, path.parent)
@@ -1217,7 +1208,7 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
         if _is_hidden_upload(upload):
             print(
                 "warning: refusing to place hidden file attachment: "
-                f"{_upload_name(upload)}",
+                f"{upload_name(upload)}",
                 file=sys.stderr,
             )
     # A URL push recorded comes back as written and is not downloaded: it names
@@ -1260,7 +1251,10 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     attachment_conflicts = _place_attachments(path, remote, used)
     if attachment_conflicts:
         raise RuntimeError(
-            "attachment conflicts written to: " + ", ".join(attachment_conflicts)
+            "attachment conflicts written to: "
+            + ", ".join(attachment_conflicts)
+            + "; the server holds other versions: replace each file with its "
+            ".remote copy, then run 'elport pull' again"
         )
 
     meta, new_base = _merge_meta(meta, base_meta, remote_doc)
@@ -1301,7 +1295,7 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
         if _is_hidden_upload(upload):
             print(
                 "warning: refusing to place hidden file attachment: "
-                f"{_upload_name(upload)}",
+                f"{upload_name(upload)}",
                 file=sys.stderr,
             )
     attachments = _reversible_uploads(uploads)
@@ -1312,7 +1306,7 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
         attachments, [(upload, ".remote") for upload in attachments]
     )
     conflicts = _place_attachments(path, remote, attachments)
-    names = sorted({_upload_name(upload) for upload in attachments})
+    names = sorted({upload_name(upload) for upload in attachments})
     print(f"fetched {entity}/{eid}: {len(names)} attachment(s)")
     if names:
         print("  " + ", ".join(names))
@@ -1328,7 +1322,7 @@ def _name_what_is_aside(remote: Remote, remote_doc: dict, uploads: list[dict]) -
     body = remote_doc.get("body") or ""
     names = sorted(
         {
-            _upload_name(upload)
+            upload_name(upload)
             for upload in uploads
             if upload.get("long_name", "").rsplit("/", 1)[-1] not in body
         }
@@ -1357,6 +1351,8 @@ def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict]]:
     body = absolute_links(body, remote.base_url)
     uploads = remote.uploads()
     _name_what_is_aside(remote, remote_doc, uploads)
+    # A one-off read, unlike pull and push (#16): say what the reader will miss.
+    _warn_unmatched_attachments(body, uploads, remote.base_url)
     return reverse(body, _reversible_uploads(uploads), remote.base_url)
 
 
@@ -1370,7 +1366,7 @@ def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> list[P
     remote = Remote(client, entity, eid, base_url)
     source, used = _readable(remote, remote.get())
     path = directory / "report.md"
-    if any(_upload_name(upload).casefold() == path.name for upload in used):
+    if any(upload_name(upload).casefold() == path.name for upload in used):
         raise RuntimeError(f"an attachment is named {path.name}, like the body")
     if frontmatter.text_meta(source) is not None:
         # Directory-wide push would take it for a working copy.
@@ -1379,7 +1375,7 @@ def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> list[P
     frontmatter.atomic_write(path, source)
     _place_attachments(path, remote, used)
     return [path] + [
-        directory / name for name in sorted({_upload_name(u) for u in used})
+        directory / name for name in sorted({upload_name(u) for u in used})
     ]
 
 
@@ -1393,7 +1389,7 @@ def view(client, entity: str, eid, base_url: str, directory: Path | None = None)
     remote = Remote(client, entity, frontmatter.validate_id(eid), base_url)
     source, used = _readable(remote, remote.get())
     sys.stdout.write(source)
-    names = {_upload_name(upload) for upload in used}
+    names = {upload_name(upload) for upload in used}
     if names:
         print(
             f"{len(names)} attachment(s) shown by file name; "
@@ -1463,7 +1459,9 @@ def status(path: Path, client, config: dict, profile=None) -> str:
     print("mode:", mode)
     if remote_doc.get("locked"):
         print("lock: locked (push refused; unlock in the Web UI)")
-    permission_changes = _permission_changes(meta, remote_doc, {}, True)
+    permission_changes = _permission_changes(
+        _edited_meta(meta, saved), remote_doc, {}, True
+    )
     if permission_changes:
         permission_keywords = {
             level: keyword for keyword, level in frontmatter.PERMISSION_LEVELS.items()
