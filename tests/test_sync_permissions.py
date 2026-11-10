@@ -696,3 +696,18 @@ def test_status_reports_no_permission_change_made_only_in_the_web_ui(
     sync.status(doc, client, {})
 
     assert "permission" not in capsys.readouterr().out
+
+
+def test_dry_run_previews_only_the_metadata_push_would_send(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", status="Running")
+    client = FakeClient(remote_doc=WEB_EDITED)
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: {**saved_state(), "meta_base": SYNCED_BASE}
+    )
+
+    sync.push(doc, client, {}, dry_run=True)
+
+    assert "status:" not in capsys.readouterr().out

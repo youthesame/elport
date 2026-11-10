@@ -692,8 +692,8 @@ def push(
             print(f"title: {edited['title']}")
         if category is not None:
             print(f"category: {category}")
-        if meta.get("status") is not None:
-            print(f"status: {meta['status']}")
+        if edited.get("status") is not None:
+            print(f"status: {edited['status']}")
         existing = _remote_tags(remote_doc)
         new_tags = [tag for tag in (meta.get("tags") or []) if tag not in existing]
         if new_tags:
