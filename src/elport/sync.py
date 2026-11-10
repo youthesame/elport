@@ -978,7 +978,8 @@ def _reject_existing_sidecars(writes: list[tuple[Path, str]]) -> None:
         existing = path.read_bytes().replace(b"\r\n", b"\n") if path.exists() else None
         if existing is not None and existing != content.encode("utf-8"):
             raise RuntimeError(
-                f"refusing to overwrite existing file at sidecar path: {path.name}"
+                f"refusing to overwrite existing file at sidecar path: {path.name}; "
+                "if an earlier conflict left it, delete it and retry"
             )
 
 
@@ -1276,7 +1277,10 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     attachment_conflicts = _place_attachments(path, remote, used)
     if attachment_conflicts:
         raise RuntimeError(
-            "attachment conflicts written to: " + ", ".join(attachment_conflicts)
+            "attachment conflicts written to: "
+            + ", ".join(attachment_conflicts)
+            + "; the server holds other versions: replace each file with its "
+            ".remote copy, then run 'elport pull' again"
         )
 
     meta, new_base = _merge_meta(meta, base_meta, remote_doc)
