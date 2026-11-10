@@ -322,7 +322,8 @@ def _edited_meta(meta: dict, saved: dict | None) -> dict:
     return {
         key: value
         for key, value in meta.items()
-        if key not in SYNCED_META or value != base.get(key)
+        # str: push reads category and status as strings, pull may store an id.
+        if key not in SYNCED_META or str(value) != str(base.get(key))
     }
 
 

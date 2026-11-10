@@ -637,6 +637,26 @@ def test_push_leaves_metadata_not_edited_since_the_last_sync(
     assert "patch" not in client.calls  # nothing edited, so nothing to send
 
 
+def test_push_leaves_a_digit_titled_category_it_did_not_edit(
+    tmp_path, monkeypatch, configured
+):
+    # A category titled "2026" is kept by id (16): pull records the int, push
+    # reads front matter as a string.
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", category=16)
+    client = FakeClient(remote_doc=WEB_EDITED)
+    monkeypatch.setattr(
+        sync.state,
+        "load",
+        lambda *args: {**saved_state(), "meta_base": {"title": "Test", "category": 16}},
+    )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert "categories" not in client.calls
+
+
 def test_push_sends_metadata_edited_since_the_last_sync(
     tmp_path, monkeypatch, configured
 ):
