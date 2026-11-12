@@ -1343,8 +1343,9 @@ def _name_what_is_aside(remote: Remote, remote_doc: dict, uploads: list[dict]) -
         )
 
 
-def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict]]:
-    """The body as a reader wants it (ADR-0009), and the uploads it shows."""
+def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict], list[dict]]:
+    """The body as a reader wants it (ADR-0009), the uploads it shows, and every
+    upload elport may place."""
     body = remote_doc.get("body") or ""
     if _is_html(remote_doc):
         body = readable_html(body)
@@ -1353,29 +1354,30 @@ def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict]]:
     _name_what_is_aside(remote, remote_doc, uploads)
     # A one-off read, unlike pull and push (#16): say what the reader will miss.
     _warn_unmatched_attachments(body, uploads, remote.base_url)
-    return reverse(body, _reversible_uploads(uploads), remote.base_url)
+    attachments = _reversible_uploads(uploads)
+    return *reverse(body, attachments, remote.base_url), attachments
 
 
 def snapshot(client, entity: str, eid, directory: Path, base_url: str) -> list[Path]:
-    """Write the readable body and the uploads it shows into an empty directory,
-    to be read, and return the paths written. No front matter and no base: it is
-    never a working copy."""
+    """Write the readable body and every upload (ADR-0013) into an empty
+    directory, to be read, and return the paths written. No front matter and no
+    base: it is never a working copy."""
     eid = frontmatter.validate_id(eid)
     if directory.is_dir() and any(directory.iterdir()):
         raise RuntimeError(f"output directory is not empty: {directory}")
     remote = Remote(client, entity, eid, base_url)
-    source, used = _readable(remote, remote.get())
+    source, _, attachments = _readable(remote, remote.get())
     path = directory / "report.md"
-    if any(upload_name(upload).casefold() == path.name for upload in used):
+    if any(upload_name(upload).casefold() == path.name for upload in attachments):
         raise RuntimeError(f"an attachment is named {path.name}, like the body")
     if frontmatter.text_meta(source) is not None:
         # Directory-wide push would take it for a working copy.
         raise RuntimeError("the remote body starts with elport front matter")
     directory.mkdir(parents=True, exist_ok=True)
     frontmatter.atomic_write(path, source)
-    _place_attachments(path, remote, used)
+    _place_attachments(path, remote, attachments)
     return [path] + [
-        directory / name for name in sorted({upload_name(u) for u in used})
+        directory / name for name in sorted({upload_name(u) for u in attachments})
     ]
 
 
@@ -1387,7 +1389,7 @@ def view(client, entity: str, eid, base_url: str, directory: Path | None = None)
             print(path)
         return
     remote = Remote(client, entity, frontmatter.validate_id(eid), base_url)
-    source, used = _readable(remote, remote.get())
+    source, used, _ = _readable(remote, remote.get())
     sys.stdout.write(source)
     names = {upload_name(upload) for upload in used}
     if names:

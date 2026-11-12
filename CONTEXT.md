@@ -49,6 +49,6 @@ The one document that holds an entity's base on this machine.
 _Avoid_: checkout, clone (as a noun)
 
 **Snapshot**:
-An entity's body in readable form, with the attachments it shows. It has no front matter and no
+An entity's body in readable form, with all its attachments. It has no front matter and no
 base, so it is never a document.
 _Avoid_: export, archive

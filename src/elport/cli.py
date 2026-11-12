@@ -51,7 +51,7 @@ examples:
   elport new "Cell viability assay"  create a remote entity and report.md
   elport list                        list your own entities on the server
   elport view 357                    read an entity without cloning it
-  elport view 357 -o e357/           read it with the images and files it shows, in a new dir
+  elport view 357 -o e357/           read it with all its attachments, in a new dir
   elport clone 357                   start report.md to edit and push an existing entity
   elport activity                    heatmap of the experiments you created this year
   elport push                        upload report.md (add -n to preview first)
@@ -247,7 +247,7 @@ def _parser() -> argparse.ArgumentParser:
     activity_parser.add_argument("--profile", help="config profile to use")
 
     view_help = (
-        "read a remote entity; -o DIR saves it with the images and files it shows "
+        "read a remote entity; -o DIR saves it with all its attachments "
         "(read-only, not a working copy)"
     )
     view_parser = commands.add_parser("view", help=view_help, description=view_help)
@@ -261,7 +261,7 @@ def _parser() -> argparse.ArgumentParser:
         "-o",
         "--output",
         metavar="DIR",
-        help="write the body and the files it shows into DIR (new or empty) "
+        help="write the body and all its attachments into DIR (new or empty) "
         "instead of printing it",
     )
     view_parser.add_argument("--profile", help="config profile to use")
