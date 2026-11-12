@@ -49,11 +49,11 @@ _EXAMPLES = """\
 examples:
   elport login                       store credentials for the default profile
   elport new "Cell viability assay"  create a remote entity and report.md
-  elport clone 357                  start report.md from an existing entity
   elport list                        list your own entities on the server
+  elport view 357                    read an entity without cloning it
+  elport view 357 -o e357/           read it with the images and files it shows, in a new dir
+  elport clone 357                   start report.md to edit and push an existing entity
   elport activity                    heatmap of the experiments you created this year
-  elport view 357                    print a remote body without cloning it
-  elport view 357 -o e357/           write the body and the images it shows into a new dir
   elport push                        upload report.md (add -n to preview first)
   elport status                      show local/remote sync state
   elport pull                        download the remote body and attachments
@@ -246,9 +246,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     activity_parser.add_argument("--profile", help="config profile to use")
 
-    view_parser = commands.add_parser(
-        "view", help="print a remote body to stdout, made readable (read-only)"
+    view_help = (
+        "read a remote entity; -o DIR saves it with the images and files it shows "
+        "(read-only, not a working copy)"
     )
+    view_parser = commands.add_parser("view", help=view_help, description=view_help)
     view_parser.add_argument("id", type=int, help="id of the remote entity")
     view_parser.add_argument(
         "--entity",
@@ -264,9 +266,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     view_parser.add_argument("--profile", help="config profile to use")
 
-    clone_parser = commands.add_parser(
-        "clone", help="start a local document from an existing remote entity"
+    clone_help = (
+        "start a local document to edit and push an existing remote entity "
+        "(to only read one, use view)"
     )
+    clone_parser = commands.add_parser("clone", help=clone_help, description=clone_help)
     clone_parser.add_argument("id", type=int, nargs="?", help="id of the remote entity")
     clone_parser.add_argument(
         "--all",

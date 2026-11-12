@@ -34,7 +34,7 @@ instead of uploading, write its eLabFTW URL or its local document's path. Code f
 elport login labA                       # store base_url (config) + api_key (OS keyring), interactively
 elport list                             # what do I already have on the server? (read-only)
 elport new "CRISPR titration"           # create the entity, scaffold report.md with id
-# ...or start from an entity made in the Web UI: elport clone <id>
+# ...or edit an entity made in the Web UI: elport clone <id> (to only read it: elport view <id>)
 # ...edit report.md, drop fig1.png / data.csv next to it...
 elport status                           # what would sync? (read-only)
 elport push                             # upload references + push the body
@@ -85,11 +85,11 @@ need not be a git repository.
 | Command | Summary |
 |---|---|
 | `new "<title>"` | Create an entity and scaffold front matter. |
-| `clone <id>` | Start `<doc>` from an entity that already exists, then pull. |
+| `clone <id>` | Start `<doc>` to edit and push an entity that already exists, then pull. To only read one, use `view`. |
 | `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. An HTML entity is saved as `view -o` writes it. |
 | `list` | List remote entities as `id  date  title`. Read-only. |
-| `view <id>` | Print one remote body to stdout, made readable. An HTML entity loses its styling, and attachments appear by file name. |
-| `view <id> -o <dir>` | Write the body and the files it shows into a new or empty `<dir>`, to read them. Not a working copy. |
+| `view <id>` | Read one remote entity: print its body to stdout, made readable. Read-only. An HTML entity loses its styling, and attachments appear by file name. |
+| `view <id> -o <dir>` | Read it with the images and files it shows, saved into a new or empty `<dir>`. Not a working copy. |
 | `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
 | `comments [<id>]` | Print the remote comment thread. With an `<id>`, no local document is needed. |
 | `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
