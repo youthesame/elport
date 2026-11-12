@@ -88,7 +88,7 @@ need not be a git repository.
 | `clone <id>` | Start `<doc>` to edit and push an entity that already exists, then pull. To only read one, use `view`. |
 | `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. An HTML entity is saved as `view -o` writes it. |
 | `list` | List remote entities as `id  date  title`. Read-only. |
-| `view <id>` | Read one remote entity: print its body to stdout, made readable. Read-only. An HTML entity loses its styling, and attachments appear by file name. |
+| `view <id>` | Read one remote entity: print its body to stdout, made readable. Read-only. An HTML entity loses its styling, and attachments appear by file name. Links to and from it are listed on stderr. |
 | `view <id> -o <dir>` | Read it with all its attachments, saved into a new or empty `<dir>`. Not a working copy. |
 | `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
 | `comments [<id>]` | Print the remote comment thread. With an `<id>`, no local document is needed. |

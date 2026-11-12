@@ -50,3 +50,6 @@ steps, and comments.
 
 Link another document by its local path, as in `[previous](../exp12/report.md)`. push sends that entity's URL and
 never the file. The target needs an `id`, so push it first. A full eLabFTW URL works too.
+
+push also links the two entities in eLabFTW. `elport view` lists an entity's links both ways on stderr, as
+`links to items/5: …` and `linked from experiments/30: …`. Read one with `elport view 5 --entity items`.
