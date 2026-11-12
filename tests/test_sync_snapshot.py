@@ -294,3 +294,34 @@ def test_view_names_an_image_it_cannot_show(capsys):
     assert "kept as a URL (not downloaded, not localized): theirs.png" in (
         capsys.readouterr().err
     )
+
+
+# Links are listed on stderr in both directions, so a reader can follow them.
+
+LINKS = {
+    "experiments_links": [{"entityid": 22, "title": "Pretreatment"}],
+    "items_links": [{"entityid": 124, "title": "HeLa stock #3"}],
+    "related_experiments_links": [{"entityid": 30, "title": "Replication"}],
+    "related_items_links": [{"entityid": 125, "title": "Protocol"}],
+}
+
+
+def test_view_lists_the_links_from_and_to_the_entity(capsys):
+    client = FakeClient(remote_doc={"body": "text\n", **LINKS})
+
+    sync.view(client, "experiments", 42, BASE)
+
+    assert capsys.readouterr().err.splitlines() == [
+        "links to experiments/22: Pretreatment",
+        "links to items/124: HeLa stock #3",
+        "linked from experiments/30: Replication",
+        "linked from items/125: Protocol",
+    ]
+
+
+def test_snapshot_lists_the_links_too(tmp_path, capsys):
+    client = FakeClient(remote_doc={"body": "text\n", **LINKS})
+
+    sync.view(client, "experiments", 42, BASE, tmp_path / "out")
+
+    assert "linked from items/125: Protocol" in capsys.readouterr().err

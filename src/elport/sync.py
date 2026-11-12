@@ -1343,6 +1343,18 @@ def _name_what_is_aside(remote: Remote, remote_doc: dict, uploads: list[dict]) -
         )
 
 
+def _list_links(remote_doc: dict) -> None:
+    """Name each entity linked from or to this one, as entity/id like push does.
+    eLabFTW stores a link one way and shows the other side as related_*."""
+    for direction, prefix in (("links to", ""), ("linked from", "related_")):
+        for entity in ("experiments", "items"):
+            for link in remote_doc.get(f"{prefix}{entity}_links") or []:
+                print(
+                    f"{direction} {entity}/{link['entityid']}: {link.get('title', '')}",
+                    file=sys.stderr,
+                )
+
+
 def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict], list[dict]]:
     """The body as a reader wants it (ADR-0009), the uploads it shows, and every
     upload elport may place."""
@@ -1352,6 +1364,7 @@ def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict], list[d
     body = absolute_links(body, remote.base_url)
     uploads = remote.uploads()
     _name_what_is_aside(remote, remote_doc, uploads)
+    _list_links(remote_doc)
     # A one-off read, unlike pull and push (#16): say what the reader will miss.
     _warn_unmatched_attachments(body, uploads, remote.base_url)
     attachments = _reversible_uploads(uploads)

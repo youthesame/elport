@@ -178,7 +178,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
     `finished_time` timestamp. (Also editable via `{"body": "..."}` → 200.)
   - Delete: `DELETE .../steps/{sid}` → **204**.
 
-## Links (reciprocal links; measured 5.6.12, 2026-08-11)
+## Links (one-way, with a reverse view; measured 5.6.12, 2026-08-11)
 
 - `POST .../items_links/{itemid}` and `POST .../experiments_links/{expid}` create a link; `DELETE` the same path
   removes it (**204**).
@@ -186,6 +186,11 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   content-type header."** (Sending `-d '{}'` with the header → 201.)
 - On `GET {entity}/{id}` the links come back expanded under `items_links[]` / `experiments_links[]` (each with
   `title`, `category_title`, …). A self-link (exp→itself) is rejected (400).
+- **A link is one-way; the same `GET` also embeds the reverse side** (measured demo 6.0.9, 2026-11-12). After
+  A→B, B's `experiments_links`/`items_links` stay empty, and B lists A under `related_experiments_links[]` /
+  `related_items_links[]` (keyed by A's entity type). Each entry has `entityid`, `type`, `title`, `page`,
+  `link_state`, category and status fields; forward entries also carry `elabid`, reverse ones do not. Deleting
+  a target removes it from both lists.
 
 ## Lock (measured 6.0.8, 2026-10-17)
 
