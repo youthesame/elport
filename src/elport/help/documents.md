@@ -41,7 +41,7 @@ push uploads every local file the body references, in any notation (`![](fig.png
 ## Attachments not shown in the body
 
 List raw data or spectra under `attachments:`. push uploads them, and fails on an entry that is missing, hidden,
-ignored, or a directory. elport never deletes an attachment. pull does not bring these down; `elport fetch` does.
+ignored, or a directory. elport never deletes an attachment. pull does not bring these down; `elport fetch` does, and `elport view <id> -o DIR` does without a working copy.
 
 view and pull name on stderr what the entity holds outside its body: attachments it does not show, compounds,
 steps, and comments.

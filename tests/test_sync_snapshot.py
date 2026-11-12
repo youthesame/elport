@@ -19,7 +19,7 @@ HTML_READABLE = (
 )
 
 
-def test_snapshot_writes_the_body_and_only_the_uploads_it_shows(tmp_path, capsys):
+def test_snapshot_writes_the_body_and_every_upload_shown_or_not(tmp_path, capsys):
     out = tmp_path / "out"
     client = FakeClient(
         remote_doc={"body": f"![figure]({FIG_URL})\n"}, uploads=[FIG, RAW]
@@ -29,10 +29,23 @@ def test_snapshot_writes_the_body_and_only_the_uploads_it_shows(tmp_path, capsys
 
     assert (out / "report.md").read_text() == "![figure](fig.png)\n"
     assert (out / "fig.png").read_bytes() == b"data"
-    assert sorted(p.name for p in out.iterdir()) == ["fig.png", "report.md"]
+    assert (out / "raw.csv").read_bytes() == b"data"
     assert capsys.readouterr().out.splitlines() == [
         str(out / "report.md"),
         str(out / "fig.png"),
+        str(out / "raw.csv"),
+    ]
+
+
+def test_snapshot_never_places_a_hidden_upload_the_body_does_not_show(tmp_path):
+    hidden = {"id": 5, "long_name": "cc/env", "real_name": ".envrc", "storage": 1}
+    client = FakeClient(remote_doc={"body": "text\n"}, uploads=[hidden, RAW])
+
+    sync.snapshot(client, "experiments", 42, tmp_path / "out", BASE)
+
+    assert sorted(p.name for p in (tmp_path / "out").iterdir()) == [
+        "raw.csv",
+        "report.md",
     ]
 
 
@@ -70,6 +83,7 @@ def test_snapshot_of_an_html_entity_is_its_readable_body(tmp_path):
     assert sync.snapshot(client, "experiments", 42, out, BASE) == [
         out / "report.md",
         out / "fig.png",
+        out / "raw.csv",
     ]
 
     assert (out / "report.md").read_text() == HTML_READABLE
@@ -127,6 +141,16 @@ def test_snapshot_rejects_an_invalid_id_before_any_request(tmp_path):
         sync.snapshot(client, "experiments", 0, tmp_path / "out", BASE)
 
     assert client.calls == []
+    assert not (tmp_path / "out").exists()
+
+
+def test_snapshot_refuses_an_unshown_attachment_named_like_the_body(tmp_path):
+    note = {"id": 6, "long_name": "dd/note", "real_name": "report.md", "storage": 1}
+    client = FakeClient(remote_doc={"body": "text\n"}, uploads=[note])
+
+    with pytest.raises(RuntimeError, match="report.md"):
+        sync.snapshot(client, "experiments", 42, tmp_path / "out", BASE)
+
     assert not (tmp_path / "out").exists()
 
 
@@ -240,7 +264,7 @@ def test_view_names_what_the_body_does_not_show(capsys):
     assert ASIDE_LINE in err
 
 
-def test_snapshot_names_what_it_leaves_on_the_server(tmp_path, capsys):
+def test_snapshot_still_names_what_the_body_does_not_show(tmp_path, capsys):
     out = tmp_path / "out"
     client = FakeClient(
         remote_doc={"body": f"![figure]({FIG_URL})\n", **ASIDE}, uploads=[FIG, RAW]
@@ -248,7 +272,7 @@ def test_snapshot_names_what_it_leaves_on_the_server(tmp_path, capsys):
 
     sync.view(client, "experiments", 42, BASE, out)
 
-    assert sorted(p.name for p in out.iterdir()) == ["fig.png", "report.md"]
+    assert sorted(p.name for p in out.iterdir()) == ["fig.png", "raw.csv", "report.md"]
     assert capsys.readouterr().err == ASIDE_LINE
 
 

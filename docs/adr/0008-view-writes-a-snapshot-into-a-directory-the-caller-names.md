@@ -1,5 +1,8 @@
 # `view -o` writes a snapshot into a directory the caller names
 
+> Superseded in part by [ADR-0013](0013-view-o-writes-every-attachment.md):
+> `view -o` now writes every attachment, not only those the body shows.
+
 An agent asked to look at an entity's figures had no way to do it with elport. `view` printed only the
 body, whose images are `download.php` URLs that need a browser session, and `fetch` and `clone` need a
 working copy, which the entity already had elsewhere. To look at a file, the agent needs it on disk after
