@@ -8,12 +8,27 @@ from collections import Counter, defaultdict
 SCOPES = {"self": 1, "team": 2, "all": 3}
 DEFAULT_LIMIT = 50
 SEARCH_PAGE = 100
+# eLabFTW's own order names. It answers an unknown one with its default order
+# rather than an error, so only these are offered.
+ORDERS = (
+    "cat", "comment", "customid", "date", "id",
+    "lastchange", "rating", "status", "title", "user",
+)  # fmt: skip
+# The column an order sorts by, shown in place of the date so the order reads.
+ORDER_COLUMNS = {"lastchange": "modified_at", "comment": "recent_comment"}
 
 
-def every(client, entity: str, scope: str, query: str | None = None, offset: int = 0):
+def every(
+    client,
+    entity: str,
+    scope: str,
+    query: str | None = None,
+    offset: int = 0,
+    **filters,
+):
     # Page until an empty answer: a server that caps the page size below ours
     # must not end the walk early.
-    params = {"scope": SCOPES[scope], **({"q": query} if query else {})}
+    params = {"scope": SCOPES[scope], **({"q": query} if query else {}), **filters}
     while True:
         rows = client.search(entity, {**params, "limit": SEARCH_PAGE, "offset": offset})
         if not rows:
@@ -30,6 +45,9 @@ def entities(
     offset: int = 0,
     query: str | None = None,
     as_json: bool = False,
+    order: str | None = None,
+    sort: str | None = None,
+    tags: list[str] | None = None,
 ) -> None:
     if scope not in SCOPES:
         raise ValueError("scope must be one of: self, team, all")
@@ -37,10 +55,15 @@ def entities(
         raise ValueError("limit must be a positive integer")
     if offset < 0:
         raise ValueError("offset must not be negative")
+    filters = {
+        key: value
+        for key, value in {"order": order, "sort": sort, "tags[]": tags}.items()
+        if value
+    }
     if limit is None:
-        rows = list(every(client, entity, scope, query, offset))
+        rows = list(every(client, entity, scope, query, offset, **filters))
     else:
-        params = {"scope": SCOPES[scope], "limit": limit, "offset": offset}
+        params = {"scope": SCOPES[scope], "limit": limit, "offset": offset, **filters}
         if query:
             params["q"] = query
         rows = client.search(entity, params)
@@ -50,11 +73,13 @@ def entities(
     elif not rows:
         print(f"no {entity} found")
     else:
+        column = ORDER_COLUMNS.get(order, "date")
         width = max(len(str(row.get("id", ""))) for row in rows)
+        when = max(len(row.get(column) or "") for row in rows)
         for row in rows:
-            date = row.get("date") or ""
+            date = row.get(column) or ""
             title = row.get("title") or ""
-            print(f"{row.get('id', '')!s:<{width}}  {date}  {title}".rstrip())
+            print(f"{row.get('id', '')!s:<{width}}  {date:<{when}}  {title}".rstrip())
     # The notice goes to stderr, so it reaches a --json pipeline too: a silently
     # truncated id list would make a scripted clone-everything miss entities.
     if limit is not None and len(rows) >= limit:

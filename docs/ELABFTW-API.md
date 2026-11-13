@@ -36,6 +36,16 @@
   carries `created_at` (`"2026-11-02 14:55:13"`, server time), the editable experiment `date`, and the owner as
   `userid` / `fullname` (measured demo 6.0.9, 2026-11-03: `scope=1` returned only the key owner's rows,
   `scope=2` every author in the active team).
+  - Ordering and filters (measured demo 6.0.9, 2026-11-13): `order=` with `sort=asc|desc`. Measured to sort:
+    `comment`, `lastchange`, `title`, `id`, `date`, `user`; openapi also lists `cat`, `customid`, `rating`,
+    `status` (not measured). Without `sort` the API returns `desc`, **not** the user's Web UI `sort`/`orderby`
+    preference (flipping it to `asc`/`title` left the API order unchanged). **An unknown `order` is ignored, not
+    rejected.** `order=comment` sorts by `recent_comment` (when the latest comment was posted, `null` without one;
+    editing a comment does not move it). **Posting a comment does not move `modified_at`**, so
+    `order=lastchange` misses new comments.
+    Rows carry no comment count (not even with `full=1`); the single-entity `GET` has a `comments` array.
+  - `q` takes the Web UI's search syntax: `author:"Name"`, `category:"Title"`, `status:"Title"` narrow by name and
+    combine. There is no `tag:` field (400); `tags[]=` narrows by tag, repeated tags must all match.
 
 ## Body normalization (the fact most directly tied to conflict detection)
 

@@ -200,7 +200,15 @@ def _parser() -> argparse.ArgumentParser:
         help="local document to create (default: report.md)",
     )
 
-    list_parser = commands.add_parser("list", help="list remote entities (read-only)")
+    list_parser = commands.add_parser(
+        "list",
+        help="list remote entities (read-only)",
+        description="list remote entities (read-only)",
+        epilog="what moved in the team: --scope team --order lastchange, then "
+        "--order comment (a new comment does not count as a change). "
+        "--json rows carry modified_at and recent_comment (server time); "
+        "read a thread with: elport comments <id>",
+    )
     list_parser.add_argument(
         "--entity",
         choices=ENTITIES,
@@ -213,7 +221,25 @@ def _parser() -> argparse.ArgumentParser:
         help="whose entities to list (default: self)",
     )
     list_parser.add_argument(
-        "-q", "--query", help="search term matched against title, body and elabid"
+        "-q",
+        "--query",
+        help="search term matched against title, body and elabid, or fields such as "
+        '\'author:"Jane Doe" category:"Assay" status:"Success"\'',
+    )
+    list_parser.add_argument(
+        "--tag",
+        action="append",
+        dest="tags",
+        metavar="TAG",
+        help="only entities with this tag (repeat to require several)",
+    )
+    list_parser.add_argument(
+        "--order",
+        choices=browse.ORDERS,
+        help="sort by this field (lastchange and comment show their time)",
+    )
+    list_parser.add_argument(
+        "--sort", choices=("asc", "desc"), help="sort direction (default: desc)"
     )
     size = list_parser.add_mutually_exclusive_group()
     size.add_argument(
@@ -792,6 +818,9 @@ def main(argv=None) -> int:
                 offset=args.offset,
                 query=args.query,
                 as_json=args.json,
+                order=args.order,
+                sort=args.sort,
+                tags=args.tags,
             )
             return 0
         if args.cmd == "activity":

@@ -87,7 +87,7 @@ need not be a git repository.
 | `new "<title>"` | Create an entity and scaffold front matter. |
 | `clone <id>` | Start `<doc>` to edit and push an entity that already exists, then pull. To only read one, use `view`. |
 | `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. An HTML entity is saved as `view -o` writes it. |
-| `list` | List remote entities as `id  date  title`. Read-only. |
+| `list` | List remote entities as `id  date  title`. Read-only. `--order lastchange` or `--order comment` shows that time instead of the date. |
 | `view <id>` | Read one remote entity: print its body to stdout, made readable. Read-only. An HTML entity loses its styling, and attachments appear by file name. Links to and from it are listed on stderr. |
 | `view <id> -o <dir>` | Read it with all its attachments, saved into a new or empty `<dir>`. Not a working copy. |
 | `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
@@ -95,8 +95,10 @@ need not be a git repository.
 | `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
 
 `new` and `clone` write to `report.md` unless you pass `-o <doc>`. `list` defaults to your own entities
-(`--scope self`) and returns 50 at a time, with `-q <term>`, `--limit`, `--offset`, and `--json` to narrow it;
-`--all` pages through every result.
+(`--scope self`) and returns 50 at a time, with `-q <term>`, `--tag <tag>`, `--limit`, `--offset`, and `--json` to
+narrow it; `--all` pages through every result. `-q` also takes the Web UI's search fields, such as
+`-q 'author:"Jane Doe" status:"Success"'`. `--order` and `--sort asc|desc` pick the order, as the Web UI's Sort menu
+does: `elport list --scope team --order comment` puts the team's latest comments first.
 `comments` prints to the terminal only, never into the body.
 
 An entity written in the Web UI's rich text editor stores HTML. elport only reads it: `clone`, `pull`, and `push`
