@@ -13,6 +13,14 @@ Python 3.10+, installed as a `uv` tool (provides the `elport` command):
 uv tool install elport    # upgrade: uv tool upgrade elport
 ```
 
+Or as a conda global tool, on conda 26.10 or later:
+
+```sh
+conda install -c conda-forge "conda-global>=0.2"
+conda global ensurepath
+conda global install elport -c conda-forge -c conda-pypi    # upgrade: conda global update
+```
+
 Or with pip:
 
 ```sh
