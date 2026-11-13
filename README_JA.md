@@ -14,6 +14,14 @@ Python 3.10 以上が必要です。`uv` ツールとしてインストールす
 uv tool install elport    # 更新: uv tool upgrade elport
 ```
 
+conda 26.10 以降では、グローバルツールとしてもインストールできます:
+
+```sh
+conda install -c conda-forge "conda-global>=0.2"
+conda global ensurepath
+conda global install elport -c conda-forge -c conda-pypi    # 更新: conda global update
+```
+
 pip でもインストールできます:
 
 ```sh
