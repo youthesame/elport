@@ -395,3 +395,88 @@ def test_list_all_walks_every_page_from_the_offset(capsys):
         {"scope": 2, "q": "blot", "limit": browse.SEARCH_PAGE, "offset": 5},
     )
     assert client.searches[1][1]["offset"] == 35
+
+
+def test_list_passes_order_sort_and_tags_to_the_server():
+    client = FakeSearchClient(rows=ROWS)
+
+    browse.entities(
+        client, "experiments", order="comment", sort="asc", tags=["qpcr", "mouse"]
+    )
+
+    params = client.searches[0][1]
+    assert params["order"] == "comment"
+    assert params["sort"] == "asc"
+    assert params["tags[]"] == ["qpcr", "mouse"]
+
+
+def test_list_leaves_the_server_default_order_when_none_is_asked():
+    client = FakeSearchClient(rows=ROWS)
+
+    browse.entities(client, "experiments")
+
+    assert {"order", "sort", "tags[]"}.isdisjoint(client.searches[0][1])
+
+
+def test_list_all_sends_order_and_tags_on_every_page(capsys):
+    rows = [{"id": n} for n in range(150)]
+    client = PagedSearchClient(rows)
+
+    browse.entities(
+        client,
+        "experiments",
+        limit=None,
+        order="lastchange",
+        tags=["qpcr"],
+        as_json=True,
+    )
+
+    assert len(client.searches) == 3
+    for _, params in client.searches:
+        assert params["order"] == "lastchange"
+        assert params["tags[]"] == ["qpcr"]
+
+
+def test_list_ordered_by_last_change_shows_when_each_changed(capsys):
+    client = FakeSearchClient(
+        rows=[
+            {
+                "id": 42,
+                "date": "2026-09-18",
+                "modified_at": "2026-11-13 06:08:34",
+                "title": "A",
+            },
+            {
+                "id": 7,
+                "date": "2026-08-01",
+                "modified_at": "2026-11-12 09:00:00",
+                "title": "B",
+            },
+        ]
+    )
+
+    browse.entities(client, "experiments", order="lastchange")
+
+    assert capsys.readouterr().out == (
+        "42  2026-11-13 06:08:34  A\n7   2026-11-12 09:00:00  B\n"
+    )
+
+
+def test_list_ordered_by_comment_shows_the_latest_comment_and_blanks_none(capsys):
+    client = FakeSearchClient(
+        rows=[
+            {
+                "id": 13,
+                "date": "2026-09-18",
+                "recent_comment": "2026-11-13 06:34:49",
+                "title": "A",
+            },
+            {"id": 16, "date": "2026-08-01", "recent_comment": None, "title": "B"},
+        ]
+    )
+
+    browse.entities(client, "experiments", order="comment")
+
+    assert capsys.readouterr().out == (
+        "13  2026-11-13 06:34:49  A\n16                       B\n"
+    )

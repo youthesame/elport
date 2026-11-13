@@ -1164,6 +1164,43 @@ def test_list_command_all_walks_every_page(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == rows
 
 
+def test_list_command_forwards_order_sort_and_repeated_tags(monkeypatch):
+    client = BrowseClient(rows=[])
+    _stub_browse_client(monkeypatch, client)
+
+    assert (
+        cli.main(
+            [
+                "list",
+                "--order",
+                "comment",
+                "--sort",
+                "asc",
+                "--tag",
+                "a",
+                "--tag",
+                "b c",
+            ]
+        )
+        == 0
+    )
+
+    params = client.searches[0][1]
+    assert (params["order"], params["sort"], params["tags[]"]) == (
+        "comment",
+        "asc",
+        ["a", "b c"],
+    )
+
+
+def test_list_command_rejects_an_order_the_server_would_silently_ignore(monkeypatch):
+    # eLabFTW answers an unknown order with its default order, not an error.
+    _stub_browse_client(monkeypatch, BrowseClient(rows=[]))
+
+    with pytest.raises(SystemExit):
+        cli.main(["list", "--order", "newest"])
+
+
 def test_list_command_rejects_all_with_limit(monkeypatch):
     _stub_browse_client(monkeypatch, BrowseClient(rows=[]))
 
