@@ -18,62 +18,6 @@ from elport.transclude import (
     unmatched_download_urls,
 )
 
-BASE_URL = "https://e.example"
-
-
-def _upload(long_name: str, real_name: str, storage: int = 1) -> dict:
-    return {
-        "id": 1,
-        "long_name": long_name,
-        "real_name": real_name,
-        "storage": storage,
-    }
-
-
-def test_unmatched_download_url_names_a_foreign_attachment():
-    ours = _upload("aa/mine", "mine.png")
-    theirs = _upload("bb/theirs", "theirs.png")
-    body = (
-        f"[mine]({download_url(BASE_URL, ours)})\n"
-        f"[theirs]({download_url(BASE_URL, theirs)})\n"
-    )
-
-    assert unmatched_download_urls(body, [ours], BASE_URL) == ["theirs.png"]
-
-
-def test_unmatched_download_urls_ignores_matched_and_non_download_links():
-    ours = _upload("aa/mine", "mine.png")
-    body = (
-        f"[mine]({download_url(BASE_URL, ours)})\n"
-        "[web](https://elsewhere.example/app/download.php?f=x&name=y&storage=1)\n"
-        "[page](https://e.example/experiments.php?mode=view&id=3)\n"
-    )
-
-    assert unmatched_download_urls(body, [ours], BASE_URL) == []
-
-
-def test_unmatched_download_url_inside_code_fence_is_ignored():
-    theirs = _upload("bb/theirs", "theirs.png")
-    body = f"```\n{download_url(BASE_URL, theirs)}\n```\n"
-
-    assert unmatched_download_urls(body, [], BASE_URL) == []
-
-
-def test_unmatched_download_url_parses_html_escaped_query():
-    theirs = _upload("bb/theirs", "theirs.png")
-    escaped = download_url(BASE_URL, theirs).replace("&", "&amp;")
-    body = f'<img src="{escaped}">'
-
-    assert unmatched_download_urls(body, [], BASE_URL) == ["theirs.png"]
-
-
-def test_unmatched_download_urls_deduplicate_by_name():
-    theirs = _upload("bb/theirs", "theirs.png")
-    url = download_url(BASE_URL, theirs)
-    body = f"[a]({url})\n[b]({url})\n"
-
-    assert unmatched_download_urls(body, [], BASE_URL) == ["theirs.png"]
-
 
 def test_extracts_each_markdown_and_html_notation():
     text = (
@@ -309,172 +253,56 @@ def test_balanced_bare_destination_preserves_link_title(tmp_path: Path):
     )
 
 
-def test_fragment_is_preserved_when_local_path_is_replaced(tmp_path: Path):
-    attachment = tmp_path / "manual.pdf"
-    attachment.write_bytes(b"pdf")
-    text = "[manual](manual.pdf#page=4)"
-
-    references = plan(text, tmp_path)
-
-    assert references[0].file == attachment.resolve()
-    assert replace_spans(text, references, {attachment: "URL"}) == (
-        "[manual](URL#page=4)"
-    )
-
-
-def test_query_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
-    attachment = tmp_path / "manual.pdf"
-    attachment.write_bytes(b"pdf")
-
-    reference = plan("[manual](manual.pdf?download=1)", tmp_path)[0]
-
-    assert reference.file is None
-    assert (
-        "not uploaded (has a query string): manual.pdf?download=1"
-        in capsys.readouterr().err
-    )
-
-
-def test_missing_file_reference_warns_that_there_is_no_such_file(
-    tmp_path: Path, capsys
-):
-    reference = plan("![fig](figs/missing.png)", tmp_path)[0]
-
-    assert reference.file is None
-    assert "not uploaded (no such file): figs/missing.png" in capsys.readouterr().err
-
-
-def test_dotfile_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
-    (tmp_path / ".env").write_text("SECRET=value", encoding="utf-8")
-
-    reference = plan("[x](.env)", tmp_path)[0]
-
-    assert reference.file is None
-    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
-
-
-def test_file_in_hidden_directory_is_not_uploaded_and_warns(tmp_path: Path, capsys):
-    (tmp_path / ".git").mkdir()
-    (tmp_path / ".git" / "config").write_text("secret", encoding="utf-8")
-
-    reference = plan("[x](.git/config)", tmp_path)[0]
-
-    assert reference.file is None
-    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
-
-
-def test_file_through_hidden_symlink_is_not_uploaded_and_warns(tmp_path: Path, capsys):
-    (tmp_path / "shared" / "aws").mkdir(parents=True)
-    (tmp_path / "shared" / "aws" / "credentials").write_text("secret", encoding="utf-8")
-    (tmp_path / ".aws").symlink_to("shared/aws", target_is_directory=True)
-
-    reference = plan("[x](.aws/credentials)", tmp_path)[0]
-
-    assert reference.file is None
-    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
-
-
-def test_regular_file_reference_is_still_uploaded(tmp_path: Path):
-    attachment = tmp_path / "figure.png"
-    attachment.write_bytes(b"image")
-
-    reference = plan("[real](figure.png)", tmp_path)[0]
-
-    assert reference.file is not None
-
-
-def test_explicit_relative_file_reference_is_still_uploaded(tmp_path: Path):
-    attachment = tmp_path / "figure.png"
-    attachment.write_bytes(b"image")
-
-    reference = plan("[real](./figure.png)", tmp_path)[0]
-
-    assert reference.file is not None
-
-
-def test_existing_reference_definition_warns_that_it_is_not_uploaded(
-    tmp_path: Path, capsys
-):
-    (tmp_path / "results.png").write_bytes(b"image")
-
-    assert plan("[x][fig]\n\n[fig]: results.png\n", tmp_path) == []
-
-    assert "reference-style link not uploaded" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize(
-    "definition",
-    ["[x]: https://example.org/a.png", "[y]: missing.png"],
-)
-def test_nonlocal_reference_definition_does_not_warn(
-    tmp_path: Path, capsys, definition: str
-):
-    plan(definition, tmp_path)
-
-    assert "reference-style link not uploaded" not in capsys.readouterr().err
-
-
-def test_reference_definition_inside_fence_does_not_warn(tmp_path: Path, capsys):
-    (tmp_path / "results.png").write_bytes(b"image")
-
-    plan("```markdown\n[fig]: results.png\n```\n", tmp_path)
-
-    assert "reference-style link not uploaded" not in capsys.readouterr().err
-
-
 def test_escaped_markdown_link_is_not_extracted(tmp_path: Path):
     (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
 
     assert plan(r"\[example](secret.txt)", tmp_path) == []
 
 
+@pytest.mark.parametrize("destination", ["https://x.test", "<https://x.test>"])
 @pytest.mark.parametrize(
-    "target",
+    "title",
     [
-        "http://example.test/a",
-        "https://example.test/a",
-        "data:image/png;base64,AA",
-        "mailto:user@example.test",
-        "#section",
+        '"caption [hidden](secret.txt)"',
+        "'caption [hidden](secret.txt)'",
+        r"(caption [hidden]\(secret.txt\))",
     ],
 )
-def test_scheme_and_anchor_references_are_not_uploads(tmp_path: Path, target: str):
-    reference = plan(f"[x]({target})", tmp_path)[0]
-    assert reference.file is None
+def test_link_title_does_not_create_a_second_reference(
+    tmp_path: Path, destination: str, title: str
+):
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    (tmp_path / "real.txt").write_text("real", encoding="utf-8")
+
+    references = plan(f"[outer]({destination} {title}) [real](real.txt)", tmp_path)
+
+    assert [reference.path for reference in references] == [
+        destination.strip("<>"),
+        "real.txt",
+    ]
 
 
-def test_only_existing_files_are_targets(tmp_path: Path):
-    existing = tmp_path / "data.csv"
-    existing.write_text("x")
-    references = plan("[yes](data.csv) [no](missing.csv)", tmp_path)
-    assert references[0].file == existing.resolve()
-    assert references[1].file is None
+def test_link_label_containing_a_link_does_not_upload_outer_destination(
+    tmp_path: Path,
+):
+    # CommonMark forbids nested links, so the outer link is not rendered and its
+    # destination must not become an upload target.
+    (tmp_path / "public.png").write_bytes(b"x")
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+
+    references = plan("[pre [inner](public.png) post](secret.txt)", tmp_path)
+
+    assert [reference.path for reference in references] == ["public.png"]
 
 
-def test_multiple_references_resolve_to_one_upload_target(tmp_path: Path):
-    file_path = tmp_path / "figure.png"
-    file_path.write_bytes(b"x")
-    references = plan('[a](figure.png) <img src="figure.png">', tmp_path)
-    assert len({reference.file for reference in references if reference.file}) == 1
+def test_angle_destination_with_inner_angle_is_not_a_link(tmp_path: Path):
+    # An unescaped '<' is illegal inside an angle destination, so the outer link
+    # does not render; the inner link is the genuine one and must be kept.
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
 
+    references = plan('[outer](<bad<dest> "[inner](secret.txt)")', tmp_path)
 
-def test_basename_collision_is_an_error(tmp_path: Path):
-    (tmp_path / "a").mkdir()
-    (tmp_path / "b").mkdir()
-    (tmp_path / "a" / "x.dat").write_text("a")
-    (tmp_path / "b" / "x.dat").write_text("b")
-    with pytest.raises(ValueError, match="basename collision"):
-        plan("[a](a/x.dat) [b](b/x.dat)", tmp_path)
-
-
-def test_basename_collision_is_case_insensitive(tmp_path: Path):
-    (tmp_path / "a").mkdir()
-    (tmp_path / "b").mkdir()
-    (tmp_path / "a" / "X.dat").write_text("a")
-    (tmp_path / "b" / "x.dat").write_text("b")
-
-    with pytest.raises(ValueError, match="basename collision"):
-        plan("[a](a/X.dat) [b](b/x.dat)", tmp_path)
+    assert [reference.path for reference in references] == ["secret.txt"]
 
 
 def test_code_comments_pre_and_code_are_not_parsed(tmp_path: Path):
@@ -651,52 +479,6 @@ def test_raw_text_opener_in_excluded_region_does_not_mask_later_reference(
     assert [reference.path for reference in references] == ["real.txt"]
 
 
-@pytest.mark.parametrize("destination", ["https://x.test", "<https://x.test>"])
-@pytest.mark.parametrize(
-    "title",
-    [
-        '"caption [hidden](secret.txt)"',
-        "'caption [hidden](secret.txt)'",
-        r"(caption [hidden]\(secret.txt\))",
-    ],
-)
-def test_link_title_does_not_create_a_second_reference(
-    tmp_path: Path, destination: str, title: str
-):
-    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
-    (tmp_path / "real.txt").write_text("real", encoding="utf-8")
-
-    references = plan(f"[outer]({destination} {title}) [real](real.txt)", tmp_path)
-
-    assert [reference.path for reference in references] == [
-        destination.strip("<>"),
-        "real.txt",
-    ]
-
-
-def test_link_label_containing_a_link_does_not_upload_outer_destination(
-    tmp_path: Path,
-):
-    # CommonMark forbids nested links, so the outer link is not rendered and its
-    # destination must not become an upload target.
-    (tmp_path / "public.png").write_bytes(b"x")
-    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
-
-    references = plan("[pre [inner](public.png) post](secret.txt)", tmp_path)
-
-    assert [reference.path for reference in references] == ["public.png"]
-
-
-def test_angle_destination_with_inner_angle_is_not_a_link(tmp_path: Path):
-    # An unescaped '<' is illegal inside an angle destination, so the outer link
-    # does not render; the inner link is the genuine one and must be kept.
-    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
-
-    references = plan('[outer](<bad<dest> "[inner](secret.txt)")', tmp_path)
-
-    assert [reference.path for reference in references] == ["secret.txt"]
-
-
 @pytest.mark.parametrize(
     "element", ["script-loader", "code-block", "style-guide", "title-bar"]
 )
@@ -710,6 +492,333 @@ def test_hyphenated_custom_element_is_not_masked_as_raw_text(
     references = plan(f"<{element}>[real](real.txt)</{element}>", tmp_path)
 
     assert [reference.path for reference in references] == ["real.txt"]
+
+
+@pytest.mark.parametrize("ticks", ["`", "``"])
+def test_multiline_inline_code_is_masked(tmp_path: Path, ticks: str):
+    path = tmp_path / "secret.txt"
+    path.write_text("secret", encoding="utf-8")
+
+    references = plan(f"{ticks}example\n[secret](secret.txt)\ncode{ticks}", tmp_path)
+
+    assert references == []
+
+
+@pytest.mark.parametrize(
+    "block",
+    [
+        "> ~~~\n> [code](secret.txt)\n> ~~~\n",
+        "> ```\n> [code](secret.txt)\n> ```\n",
+        "> > ~~~\n> > [code](secret.txt)\n> > ~~~\n",
+        "1.  item\n\n    ~~~\n    [code](secret.txt)\n    ~~~\n",
+        "  ~~~\n    ~~~\n[code](secret.txt)\n~~~\n",
+        "- ```\n  [code](secret.txt)\n  ```\n",
+        "* ~~~\n  [code](secret.txt)\n  ~~~\n",
+        "1. ```\n   [code](secret.txt)\n   ```\n",
+        "10) ~~~\n    [code](secret.txt)\n    ~~~\n",
+        "> - ```\n>   [code](secret.txt)\n>   ```\n",
+        "- > ```\n  > [code](secret.txt)\n  > ```\n",
+    ],
+)
+def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+
+    references = plan(block + "\n[real](real.txt)\n", tmp_path)
+
+    assert [reference.file for reference in references] == [real.resolve()]
+
+
+@pytest.mark.parametrize("line", ["```code```", "- ```code```", "> ```a`b"])
+def test_backtick_line_with_backtick_info_is_not_a_fence(tmp_path: Path, line: str):
+    # A backtick fence's info string cannot contain backticks (CommonMark).
+    real = tmp_path / "real.txt"
+    real.write_text("real", encoding="utf-8")
+
+    references = plan(f"{line}\n\n[real](real.txt)\n", tmp_path)
+
+    assert [reference.file for reference in references] == [real.resolve()]
+
+
+def test_unindented_fence_after_list_item_fence_is_not_its_closer(tmp_path: Path):
+    # The dedented fence ends the list and opens a top-level code block.
+    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
+
+    references = plan("- ~~~\n~~~\n[code](secret.txt)\n~~~\n", tmp_path)
+
+    assert [reference.file for reference in references] == []
+
+
+def test_query_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
+    attachment = tmp_path / "manual.pdf"
+    attachment.write_bytes(b"pdf")
+
+    reference = plan("[manual](manual.pdf?download=1)", tmp_path)[0]
+
+    assert reference.file is None
+    assert (
+        "not uploaded (has a query string): manual.pdf?download=1"
+        in capsys.readouterr().err
+    )
+
+
+def test_missing_file_reference_warns_that_there_is_no_such_file(
+    tmp_path: Path, capsys
+):
+    reference = plan("![fig](figs/missing.png)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "not uploaded (no such file): figs/missing.png" in capsys.readouterr().err
+
+
+def test_dotfile_reference_is_not_uploaded_and_warns(tmp_path: Path, capsys):
+    (tmp_path / ".env").write_text("SECRET=value", encoding="utf-8")
+
+    reference = plan("[x](.env)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
+
+
+def test_file_in_hidden_directory_is_not_uploaded_and_warns(tmp_path: Path, capsys):
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("secret", encoding="utf-8")
+
+    reference = plan("[x](.git/config)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
+
+
+def test_file_through_hidden_symlink_is_not_uploaded_and_warns(tmp_path: Path, capsys):
+    (tmp_path / "shared" / "aws").mkdir(parents=True)
+    (tmp_path / "shared" / "aws" / "credentials").write_text("secret", encoding="utf-8")
+    (tmp_path / ".aws").symlink_to("shared/aws", target_is_directory=True)
+
+    reference = plan("[x](.aws/credentials)", tmp_path)[0]
+
+    assert reference.file is None
+    assert "local reference not uploaded (hidden path)" in capsys.readouterr().err
+
+
+def test_regular_file_reference_is_still_uploaded(tmp_path: Path):
+    attachment = tmp_path / "figure.png"
+    attachment.write_bytes(b"image")
+
+    reference = plan("[real](figure.png)", tmp_path)[0]
+
+    assert reference.file is not None
+
+
+def test_explicit_relative_file_reference_is_still_uploaded(tmp_path: Path):
+    attachment = tmp_path / "figure.png"
+    attachment.write_bytes(b"image")
+
+    reference = plan("[real](./figure.png)", tmp_path)[0]
+
+    assert reference.file is not None
+
+
+def test_existing_reference_definition_warns_that_it_is_not_uploaded(
+    tmp_path: Path, capsys
+):
+    (tmp_path / "results.png").write_bytes(b"image")
+
+    assert plan("[x][fig]\n\n[fig]: results.png\n", tmp_path) == []
+
+    assert "reference-style link not uploaded" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "definition",
+    ["[x]: https://example.org/a.png", "[y]: missing.png"],
+)
+def test_nonlocal_reference_definition_does_not_warn(
+    tmp_path: Path, capsys, definition: str
+):
+    plan(definition, tmp_path)
+
+    assert "reference-style link not uploaded" not in capsys.readouterr().err
+
+
+def test_reference_definition_inside_fence_does_not_warn(tmp_path: Path, capsys):
+    (tmp_path / "results.png").write_bytes(b"image")
+
+    plan("```markdown\n[fig]: results.png\n```\n", tmp_path)
+
+    assert "reference-style link not uploaded" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://example.test/a",
+        "https://example.test/a",
+        "data:image/png;base64,AA",
+        "mailto:user@example.test",
+        "#section",
+    ],
+)
+def test_scheme_and_anchor_references_are_not_uploads(tmp_path: Path, target: str):
+    reference = plan(f"[x]({target})", tmp_path)[0]
+    assert reference.file is None
+
+
+def test_only_existing_files_are_targets(tmp_path: Path):
+    existing = tmp_path / "data.csv"
+    existing.write_text("x")
+    references = plan("[yes](data.csv) [no](missing.csv)", tmp_path)
+    assert references[0].file == existing.resolve()
+    assert references[1].file is None
+
+
+def test_multiple_references_resolve_to_one_upload_target(tmp_path: Path):
+    file_path = tmp_path / "figure.png"
+    file_path.write_bytes(b"x")
+    references = plan('[a](figure.png) <img src="figure.png">', tmp_path)
+    assert len({reference.file for reference in references if reference.file}) == 1
+
+
+def test_basename_collision_is_an_error(tmp_path: Path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "x.dat").write_text("a")
+    (tmp_path / "b" / "x.dat").write_text("b")
+    with pytest.raises(ValueError, match="basename collision"):
+        plan("[a](a/x.dat) [b](b/x.dat)", tmp_path)
+
+
+def test_basename_collision_is_case_insensitive(tmp_path: Path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a" / "X.dat").write_text("a")
+    (tmp_path / "b" / "x.dat").write_text("b")
+
+    with pytest.raises(ValueError, match="basename collision"):
+        plan("[a](a/X.dat) [b](b/x.dat)", tmp_path)
+
+
+def test_absolute_parent_and_symlinked_files_outside_the_directory_are_planned(
+    tmp_path: Path,
+):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.write_text("data")
+    link = tmp_path / "link"
+    link.symlink_to(outside)
+    text = f"[absolute]({outside}) [parent](../{outside.name}) [link](link#part)"
+
+    references = plan(text, tmp_path)
+
+    assert [reference.file for reference in references] == [outside.resolve()] * 3
+    assert references[2].fragment == "#part"
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "../.secrets/key",
+        "{root}/.secrets/key",
+        "link",
+        "../shared/.env",
+        "../shared/.secrets/../plain.txt",
+    ],
+)
+def test_a_hidden_component_outside_the_directory_warns_and_is_rejected(
+    tmp_path: Path, capsys, written
+):
+    document_dir = tmp_path / "doc"
+    document_dir.mkdir()
+    (tmp_path / ".secrets").mkdir()
+    (tmp_path / ".secrets" / "key").write_text("secret")
+    (tmp_path / "shared").mkdir()
+    (tmp_path / "shared" / ".env").write_text("KEY=1")
+    (tmp_path / "shared" / ".secrets").mkdir()
+    (tmp_path / "shared" / "plain.txt").write_text("x")
+    (document_dir / "link").symlink_to(tmp_path / ".secrets" / "key")
+    written = written.format(root=tmp_path)
+
+    (reference,) = plan(f"[x]({written})", document_dir)
+
+    assert reference.file is None
+    assert written in capsys.readouterr().err
+
+
+def test_a_document_under_a_hidden_directory_reaches_its_neighbours(tmp_path: Path):
+    # Only components below the directory the file shares with the document count.
+    lab = tmp_path / ".lab"
+    (lab / "notes").mkdir(parents=True)
+    (lab / "data").mkdir()
+    raw = lab / "data" / "raw.csv"
+    raw.write_text("1,2")
+
+    references = plan(f"[a](../data/raw.csv) [b]({raw.as_posix()})", lab / "notes")
+
+    assert [reference.file for reference in references] == [raw.resolve()] * 2
+
+
+def test_invalid_local_references_warn_but_intentional_exclusions_do_not(
+    tmp_path: Path, capsys
+):
+    document_dir = tmp_path / "doc"
+    document_dir.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret", encoding="utf-8")
+    ignored = document_dir / "ignored.bin"
+    ignored.write_bytes(b"ignored")
+    link = document_dir / "link.txt"
+    link.symlink_to(outside)
+    text = (
+        "[missing](missing.txt) [absolute](/tmp/absolute.txt) "
+        "[parent](../outside.txt) [link](link.txt) "
+        "[web](https://example.test/x) [plain](http://example.test/x) "
+        "[mail](mailto:user@example.test) [data](data:text/plain,x) "
+        "[anchor](#part) [ignored](ignored.bin)"
+    )
+
+    plan(text, document_dir, [IgnoreLayer(["ignored.bin"])])
+
+    warning = capsys.readouterr().err
+    for path in ("missing.txt", "/tmp/absolute.txt"):
+        assert path in warning
+    assert "../outside.txt" not in warning
+    assert "link.txt" not in warning
+    assert "https://example.test/x" not in warning
+    assert "http://example.test/x" not in warning
+    assert "mailto:user@example.test" not in warning
+    assert "data:text/plain,x" not in warning
+    assert "#part" not in warning
+    assert "ignored.bin" not in warning
+
+
+def test_unlistable_directory_warns_instead_of_aborting(
+    tmp_path: Path, monkeypatch, capsys
+):
+    (tmp_path / "data.csv").write_text("data", encoding="utf-8")
+
+    def denied(path="."):
+        raise PermissionError(path)
+
+    monkeypatch.setattr(os, "listdir", denied)
+
+    assert plan("[x](data.csv)", tmp_path)[0].file is None
+    assert "data.csv" in capsys.readouterr().err
+
+
+def test_plan_lists_each_directory_once(tmp_path, monkeypatch):
+    # Listing a large folder once per reference made push quadratic.
+    for name in ("a.png", "b.png", "c.png"):
+        (tmp_path / name).write_bytes(b"x")
+    listed = []
+    real = os.listdir
+    monkeypatch.setattr(
+        transclude.os, "listdir", lambda path: listed.append(path) or real(path)
+    )
+
+    refs = transclude.plan("![](a.png) ![](b.png) ![](c.png)", tmp_path)
+
+    assert [ref.file.name for ref in refs] == ["a.png", "b.png", "c.png"]
+    assert len(listed) == 1
 
 
 @pytest.mark.parametrize("pattern", ["scratch/", "scratch/**"])
@@ -845,74 +954,6 @@ def test_root_anchored_ignore_patterns(tmp_path: Path, pattern: str, relative: s
     assert reference.file is None
 
 
-@pytest.mark.parametrize("ticks", ["`", "``"])
-def test_multiline_inline_code_is_masked(tmp_path: Path, ticks: str):
-    path = tmp_path / "secret.txt"
-    path.write_text("secret", encoding="utf-8")
-
-    references = plan(f"{ticks}example\n[secret](secret.txt)\ncode{ticks}", tmp_path)
-
-    assert references == []
-
-
-def test_absolute_parent_and_symlinked_files_outside_the_directory_are_planned(
-    tmp_path: Path,
-):
-    outside = tmp_path.parent / f"{tmp_path.name}-outside"
-    outside.write_text("data")
-    link = tmp_path / "link"
-    link.symlink_to(outside)
-    text = f"[absolute]({outside}) [parent](../{outside.name}) [link](link#part)"
-
-    references = plan(text, tmp_path)
-
-    assert [reference.file for reference in references] == [outside.resolve()] * 3
-    assert references[2].fragment == "#part"
-
-
-@pytest.mark.parametrize(
-    "written",
-    [
-        "../.secrets/key",
-        "{root}/.secrets/key",
-        "link",
-        "../shared/.env",
-        "../shared/.secrets/../plain.txt",
-    ],
-)
-def test_a_hidden_component_outside_the_directory_warns_and_is_rejected(
-    tmp_path: Path, capsys, written
-):
-    document_dir = tmp_path / "doc"
-    document_dir.mkdir()
-    (tmp_path / ".secrets").mkdir()
-    (tmp_path / ".secrets" / "key").write_text("secret")
-    (tmp_path / "shared").mkdir()
-    (tmp_path / "shared" / ".env").write_text("KEY=1")
-    (tmp_path / "shared" / ".secrets").mkdir()
-    (tmp_path / "shared" / "plain.txt").write_text("x")
-    (document_dir / "link").symlink_to(tmp_path / ".secrets" / "key")
-    written = written.format(root=tmp_path)
-
-    (reference,) = plan(f"[x]({written})", document_dir)
-
-    assert reference.file is None
-    assert written in capsys.readouterr().err
-
-
-def test_a_document_under_a_hidden_directory_reaches_its_neighbours(tmp_path: Path):
-    # Only components below the directory the file shares with the document count.
-    lab = tmp_path / ".lab"
-    (lab / "notes").mkdir(parents=True)
-    (lab / "data").mkdir()
-    raw = lab / "data" / "raw.csv"
-    raw.write_text("1,2")
-
-    references = plan(f"[a](../data/raw.csv) [b]({raw.as_posix()})", lab / "notes")
-
-    assert [reference.file for reference in references] == [raw.resolve()] * 2
-
-
 def test_ignore_rules_stay_inside_the_document_directory(tmp_path: Path):
     document_dir = tmp_path / "doc"
     document_dir.mkdir()
@@ -927,38 +968,204 @@ def test_ignore_rules_stay_inside_the_document_directory(tmp_path: Path):
     assert there.file == (tmp_path / "there.csv").resolve()
 
 
-def test_invalid_local_references_warn_but_intentional_exclusions_do_not(
-    tmp_path: Path, capsys
+@pytest.mark.parametrize("pattern", ["/work/private", "work/private", "work/*"])
+def test_directory_pattern_without_trailing_slash_excludes_descendants(
+    tmp_path: Path, pattern: str
 ):
-    document_dir = tmp_path / "doc"
-    document_dir.mkdir()
-    outside = tmp_path / "outside.txt"
-    outside.write_text("secret", encoding="utf-8")
-    ignored = document_dir / "ignored.bin"
-    ignored.write_bytes(b"ignored")
-    link = document_dir / "link.txt"
-    link.symlink_to(outside)
-    text = (
-        "[missing](missing.txt) [absolute](/tmp/absolute.txt) "
-        "[parent](../outside.txt) [link](link.txt) "
-        "[web](https://example.test/x) [plain](http://example.test/x) "
-        "[mail](mailto:user@example.test) [data](data:text/plain,x) "
-        "[anchor](#part) [ignored](ignored.bin)"
+    nested = tmp_path / "work" / "private" / "key.txt"
+    nested.parent.mkdir(parents=True)
+    nested.write_text("secret", encoding="utf-8")
+
+    reference = plan("[key](work/private/key.txt)", tmp_path, [IgnoreLayer([pattern])])[
+        0
+    ]
+
+    assert reference.file is None
+
+
+def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
+    # The layer sits one directory above the document, as a project-level
+    # .elportignore does for a document in a subdirectory.
+    nested = tmp_path / "private" / "key.txt"
+    nested.parent.mkdir()
+    nested.write_text("secret", encoding="utf-8")
+
+    reference = plan(
+        "[key](private/key.txt)", tmp_path, [IgnoreLayer(["/notes/private"], "notes")]
+    )[0]
+
+    assert reference.file is None
+
+
+def _insensitive_alias(monkeypatch, real: Path, alias: str) -> None:
+    """Make ``alias`` open ``real`` without being listed, as on APFS or NTFS."""
+    try:
+        os.link(real, real.with_name(alias))
+    except FileExistsError:
+        pass  # this filesystem already folds the spelling
+    listdir = os.listdir
+    monkeypatch.setattr(
+        os, "listdir", lambda path=".": [e for e in listdir(path) if e != alias]
     )
 
-    plan(text, document_dir, [IgnoreLayer(["ignored.bin"])])
 
-    warning = capsys.readouterr().err
-    for path in ("missing.txt", "/tmp/absolute.txt"):
-        assert path in warning
-    assert "../outside.txt" not in warning
-    assert "link.txt" not in warning
-    assert "https://example.test/x" not in warning
-    assert "http://example.test/x" not in warning
-    assert "mailto:user@example.test" not in warning
-    assert "data:text/plain,x" not in warning
-    assert "#part" not in warning
-    assert "ignored.bin" not in warning
+@pytest.mark.parametrize(
+    ("on_disk", "reference", "pattern"),
+    [
+        ("secret.txt", "SECRET.txt", "secret.txt"),
+        ("README.md", "readme.md", "[!a-z]*"),
+        (unicodedata.normalize("NFC", "café.txt"), "café.txt", "café.txt"),
+    ],
+)
+def test_ignore_matches_the_on_disk_name_of_a_respelled_reference(
+    tmp_path: Path, monkeypatch, on_disk: str, reference: str, pattern: str
+):
+    real = tmp_path / on_disk
+    real.write_text("secret", encoding="utf-8")
+    _insensitive_alias(monkeypatch, real, reference)
+
+    assert plan(f"[x]({reference})", tmp_path, [IgnoreLayer([pattern])])[0].file is None
+
+
+@pytest.mark.parametrize(
+    ("on_disk", "reference"),
+    [
+        ("data.csv", "Data.csv"),
+        (unicodedata.normalize("NFD", "データ.csv"), "データ.csv"),
+    ],
+)
+def test_respelled_reference_that_is_not_ignored_still_uploads(
+    tmp_path: Path, monkeypatch, on_disk: str, reference: str
+):
+    real = tmp_path / on_disk
+    real.write_text("data", encoding="utf-8")
+    _insensitive_alias(monkeypatch, real, reference)
+
+    assert plan(f"[x]({reference})", tmp_path, [IgnoreLayer(["*.txt"])])[0].file
+
+
+def test_plan_marks_a_link_to_an_elport_document_outside_the_directory(tmp_path):
+    target = elport_doc(tmp_path / "exp12" / "report.md", id=12)
+    here = tmp_path / "exp13"
+    here.mkdir()
+
+    (ref,) = plan("[prev](../exp12/report.md#method)", here)
+
+    assert ref.doc == target.resolve()
+    assert ref.file is None
+    assert ref.fragment == "#method"
+
+
+def test_plan_marks_a_link_to_an_elport_document_by_absolute_path(tmp_path):
+    target = elport_doc(tmp_path / "exp12" / "report.md", id=12)
+
+    (ref,) = plan(f"[prev]({target})", tmp_path / "exp12")
+
+    assert ref.doc == target.resolve()
+
+
+def test_plan_uploads_plain_markdown_as_an_attachment(tmp_path):
+    (tmp_path / "notes.md").write_text("# no front matter\n")
+
+    (ref,) = plan("[notes](notes.md)", tmp_path)
+
+    assert ref.doc is None
+    assert ref.file == (tmp_path / "notes.md").resolve()
+
+
+def test_plan_rejects_a_link_to_a_document_that_was_never_pushed(tmp_path):
+    (tmp_path / "draft.md").write_text(frontmatter.render({"title": "Draft"}, "x"))
+
+    with pytest.raises(ValueError, match="no id.*draft.md"):
+        plan("[draft](draft.md)", tmp_path)
+
+
+def test_plan_never_follows_a_hidden_path_to_a_document(tmp_path, capsys):
+    elport_doc(tmp_path / ".private" / "report.md", id=12)
+
+    (ref,) = plan("[x](.private/report.md)", tmp_path)
+
+    assert ref.doc is None and ref.file is None
+
+
+def test_plan_knows_a_document_by_front_matter_not_by_name(tmp_path):
+    target = elport_doc(tmp_path / "prev.markdown", id=12)
+    (tmp_path / "data.bin").write_bytes(b"\x00\xff" * 10)
+
+    doc_ref, data_ref = plan("[p](prev.markdown) [d](data.bin)", tmp_path)
+
+    assert doc_ref.doc == target.resolve() and doc_ref.file is None
+    assert data_ref.doc is None and data_ref.file == (tmp_path / "data.bin").resolve()
+
+
+BASE_URL = "https://e.example"
+
+
+def _upload(long_name: str, real_name: str, storage: int = 1) -> dict:
+    return {
+        "id": 1,
+        "long_name": long_name,
+        "real_name": real_name,
+        "storage": storage,
+    }
+
+
+def test_unmatched_download_url_names_a_foreign_attachment():
+    ours = _upload("aa/mine", "mine.png")
+    theirs = _upload("bb/theirs", "theirs.png")
+    body = (
+        f"[mine]({download_url(BASE_URL, ours)})\n"
+        f"[theirs]({download_url(BASE_URL, theirs)})\n"
+    )
+
+    assert unmatched_download_urls(body, [ours], BASE_URL) == ["theirs.png"]
+
+
+def test_unmatched_download_urls_ignores_matched_and_non_download_links():
+    ours = _upload("aa/mine", "mine.png")
+    body = (
+        f"[mine]({download_url(BASE_URL, ours)})\n"
+        "[web](https://elsewhere.example/app/download.php?f=x&name=y&storage=1)\n"
+        "[page](https://e.example/experiments.php?mode=view&id=3)\n"
+    )
+
+    assert unmatched_download_urls(body, [ours], BASE_URL) == []
+
+
+def test_unmatched_download_url_inside_code_fence_is_ignored():
+    theirs = _upload("bb/theirs", "theirs.png")
+    body = f"```\n{download_url(BASE_URL, theirs)}\n```\n"
+
+    assert unmatched_download_urls(body, [], BASE_URL) == []
+
+
+def test_unmatched_download_url_parses_html_escaped_query():
+    theirs = _upload("bb/theirs", "theirs.png")
+    escaped = download_url(BASE_URL, theirs).replace("&", "&amp;")
+    body = f'<img src="{escaped}">'
+
+    assert unmatched_download_urls(body, [], BASE_URL) == ["theirs.png"]
+
+
+def test_unmatched_download_urls_deduplicate_by_name():
+    theirs = _upload("bb/theirs", "theirs.png")
+    url = download_url(BASE_URL, theirs)
+    body = f"[a]({url})\n[b]({url})\n"
+
+    assert unmatched_download_urls(body, [], BASE_URL) == ["theirs.png"]
+
+
+def test_fragment_is_preserved_when_local_path_is_replaced(tmp_path: Path):
+    attachment = tmp_path / "manual.pdf"
+    attachment.write_bytes(b"pdf")
+    text = "[manual](manual.pdf#page=4)"
+
+    references = plan(text, tmp_path)
+
+    assert references[0].file == attachment.resolve()
+    assert replace_spans(text, references, {attachment: "URL"}) == (
+        "[manual](URL#page=4)"
+    )
 
 
 def test_download_url_percent_encoding_and_query_order_independence():
@@ -1184,6 +1391,39 @@ def test_reverse_does_not_replace_url_in_long_inline_code_span():
 
 
 @pytest.mark.parametrize(
+    ("template", "real_name"),
+    [
+        ("<img src={url}>", "figure 1.png"),
+        ("<img src='{url}'>", "O'Brien.png"),
+        pytest.param(
+            '<img src="{url}">',
+            'say "hi".png',
+            marks=pytest.mark.skipif(
+                transclude._WINDOWS, reason="Windows cannot store a quote"
+            ),
+        ),
+        ('<img src="{url}">', "a&copy;.png"),
+        ('<img src="  {url}  ">', "figure 1.png"),
+        ("<img src=' {url} '>", "figure 1.png"),
+    ],
+)
+def test_reverse_html_attribute_round_trips_through_push_parser(
+    tmp_path: Path, template: str, real_name: str
+):
+    upload = {"id": 4, "long_name": "x/y", "real_name": real_name, "storage": 1}
+    url = download_url("https://e.example", upload)
+    (tmp_path / real_name).write_bytes(b"data")
+
+    body, used = reverse(template.format(url=url), [upload], "https://e.example")
+
+    references = plan(body, tmp_path)
+    assert [reference.file for reference in references] == [
+        (tmp_path / real_name).resolve()
+    ]
+    assert used == [upload]
+
+
+@pytest.mark.parametrize(
     ("unsafe", "safe"),
     [
         ("../figure.png", "figure.png"),
@@ -1222,245 +1462,6 @@ def test_windows_only_characters_are_kept_elsewhere(monkeypatch):
 @pytest.mark.parametrize("unsafe", ["", ".", "..", "~.."])
 def test_dot_only_real_name_uses_attachment_fallback(unsafe: str):
     assert safe_name(unsafe) == "attachment"
-
-
-@pytest.mark.parametrize("pattern", ["/work/private", "work/private", "work/*"])
-def test_directory_pattern_without_trailing_slash_excludes_descendants(
-    tmp_path: Path, pattern: str
-):
-    nested = tmp_path / "work" / "private" / "key.txt"
-    nested.parent.mkdir(parents=True)
-    nested.write_text("secret", encoding="utf-8")
-
-    reference = plan("[key](work/private/key.txt)", tmp_path, [IgnoreLayer([pattern])])[
-        0
-    ]
-
-    assert reference.file is None
-
-
-def test_anchored_parent_directory_pattern_excludes_descendants(tmp_path: Path):
-    # The layer sits one directory above the document, as a project-level
-    # .elportignore does for a document in a subdirectory.
-    nested = tmp_path / "private" / "key.txt"
-    nested.parent.mkdir()
-    nested.write_text("secret", encoding="utf-8")
-
-    reference = plan(
-        "[key](private/key.txt)", tmp_path, [IgnoreLayer(["/notes/private"], "notes")]
-    )[0]
-
-    assert reference.file is None
-
-
-@pytest.mark.parametrize(
-    "block",
-    [
-        "> ~~~\n> [code](secret.txt)\n> ~~~\n",
-        "> ```\n> [code](secret.txt)\n> ```\n",
-        "> > ~~~\n> > [code](secret.txt)\n> > ~~~\n",
-        "1.  item\n\n    ~~~\n    [code](secret.txt)\n    ~~~\n",
-        "  ~~~\n    ~~~\n[code](secret.txt)\n~~~\n",
-        "- ```\n  [code](secret.txt)\n  ```\n",
-        "* ~~~\n  [code](secret.txt)\n  ~~~\n",
-        "1. ```\n   [code](secret.txt)\n   ```\n",
-        "10) ~~~\n    [code](secret.txt)\n    ~~~\n",
-        "> - ```\n>   [code](secret.txt)\n>   ```\n",
-        "- > ```\n  > [code](secret.txt)\n  > ```\n",
-    ],
-)
-def test_fence_inside_blockquote_or_list_is_masked(tmp_path: Path, block: str):
-    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
-    real = tmp_path / "real.txt"
-    real.write_text("real", encoding="utf-8")
-
-    references = plan(block + "\n[real](real.txt)\n", tmp_path)
-
-    assert [reference.file for reference in references] == [real.resolve()]
-
-
-@pytest.mark.parametrize("line", ["```code```", "- ```code```", "> ```a`b"])
-def test_backtick_line_with_backtick_info_is_not_a_fence(tmp_path: Path, line: str):
-    # A backtick fence's info string cannot contain backticks (CommonMark).
-    real = tmp_path / "real.txt"
-    real.write_text("real", encoding="utf-8")
-
-    references = plan(f"{line}\n\n[real](real.txt)\n", tmp_path)
-
-    assert [reference.file for reference in references] == [real.resolve()]
-
-
-def test_unindented_fence_after_list_item_fence_is_not_its_closer(tmp_path: Path):
-    # The dedented fence ends the list and opens a top-level code block.
-    (tmp_path / "secret.txt").write_text("secret", encoding="utf-8")
-
-    references = plan("- ~~~\n~~~\n[code](secret.txt)\n~~~\n", tmp_path)
-
-    assert [reference.file for reference in references] == []
-
-
-@pytest.mark.parametrize(
-    ("template", "real_name"),
-    [
-        ("<img src={url}>", "figure 1.png"),
-        ("<img src='{url}'>", "O'Brien.png"),
-        pytest.param(
-            '<img src="{url}">',
-            'say "hi".png',
-            marks=pytest.mark.skipif(
-                transclude._WINDOWS, reason="Windows cannot store a quote"
-            ),
-        ),
-        ('<img src="{url}">', "a&copy;.png"),
-        ('<img src="  {url}  ">', "figure 1.png"),
-        ("<img src=' {url} '>", "figure 1.png"),
-    ],
-)
-def test_reverse_html_attribute_round_trips_through_push_parser(
-    tmp_path: Path, template: str, real_name: str
-):
-    upload = {"id": 4, "long_name": "x/y", "real_name": real_name, "storage": 1}
-    url = download_url("https://e.example", upload)
-    (tmp_path / real_name).write_bytes(b"data")
-
-    body, used = reverse(template.format(url=url), [upload], "https://e.example")
-
-    references = plan(body, tmp_path)
-    assert [reference.file for reference in references] == [
-        (tmp_path / real_name).resolve()
-    ]
-    assert used == [upload]
-
-
-def test_plan_marks_a_link_to_an_elport_document_outside_the_directory(tmp_path):
-    target = elport_doc(tmp_path / "exp12" / "report.md", id=12)
-    here = tmp_path / "exp13"
-    here.mkdir()
-
-    (ref,) = plan("[prev](../exp12/report.md#method)", here)
-
-    assert ref.doc == target.resolve()
-    assert ref.file is None
-    assert ref.fragment == "#method"
-
-
-def test_plan_marks_a_link_to_an_elport_document_by_absolute_path(tmp_path):
-    target = elport_doc(tmp_path / "exp12" / "report.md", id=12)
-
-    (ref,) = plan(f"[prev]({target})", tmp_path / "exp12")
-
-    assert ref.doc == target.resolve()
-
-
-def test_plan_uploads_plain_markdown_as_an_attachment(tmp_path):
-    (tmp_path / "notes.md").write_text("# no front matter\n")
-
-    (ref,) = plan("[notes](notes.md)", tmp_path)
-
-    assert ref.doc is None
-    assert ref.file == (tmp_path / "notes.md").resolve()
-
-
-def test_plan_rejects_a_link_to_a_document_that_was_never_pushed(tmp_path):
-    (tmp_path / "draft.md").write_text(frontmatter.render({"title": "Draft"}, "x"))
-
-    with pytest.raises(ValueError, match="no id.*draft.md"):
-        plan("[draft](draft.md)", tmp_path)
-
-
-def test_plan_never_follows_a_hidden_path_to_a_document(tmp_path, capsys):
-    elport_doc(tmp_path / ".private" / "report.md", id=12)
-
-    (ref,) = plan("[x](.private/report.md)", tmp_path)
-
-    assert ref.doc is None and ref.file is None
-
-
-def test_plan_knows_a_document_by_front_matter_not_by_name(tmp_path):
-    target = elport_doc(tmp_path / "prev.markdown", id=12)
-    (tmp_path / "data.bin").write_bytes(b"\x00\xff" * 10)
-
-    doc_ref, data_ref = plan("[p](prev.markdown) [d](data.bin)", tmp_path)
-
-    assert doc_ref.doc == target.resolve() and doc_ref.file is None
-    assert data_ref.doc is None and data_ref.file == (tmp_path / "data.bin").resolve()
-
-
-def _insensitive_alias(monkeypatch, real: Path, alias: str) -> None:
-    """Make ``alias`` open ``real`` without being listed, as on APFS or NTFS."""
-    try:
-        os.link(real, real.with_name(alias))
-    except FileExistsError:
-        pass  # this filesystem already folds the spelling
-    listdir = os.listdir
-    monkeypatch.setattr(
-        os, "listdir", lambda path=".": [e for e in listdir(path) if e != alias]
-    )
-
-
-@pytest.mark.parametrize(
-    ("on_disk", "reference", "pattern"),
-    [
-        ("secret.txt", "SECRET.txt", "secret.txt"),
-        ("README.md", "readme.md", "[!a-z]*"),
-        (unicodedata.normalize("NFC", "café.txt"), "café.txt", "café.txt"),
-    ],
-)
-def test_ignore_matches_the_on_disk_name_of_a_respelled_reference(
-    tmp_path: Path, monkeypatch, on_disk: str, reference: str, pattern: str
-):
-    real = tmp_path / on_disk
-    real.write_text("secret", encoding="utf-8")
-    _insensitive_alias(monkeypatch, real, reference)
-
-    assert plan(f"[x]({reference})", tmp_path, [IgnoreLayer([pattern])])[0].file is None
-
-
-@pytest.mark.parametrize(
-    ("on_disk", "reference"),
-    [
-        ("data.csv", "Data.csv"),
-        (unicodedata.normalize("NFD", "データ.csv"), "データ.csv"),
-    ],
-)
-def test_respelled_reference_that_is_not_ignored_still_uploads(
-    tmp_path: Path, monkeypatch, on_disk: str, reference: str
-):
-    real = tmp_path / on_disk
-    real.write_text("data", encoding="utf-8")
-    _insensitive_alias(monkeypatch, real, reference)
-
-    assert plan(f"[x]({reference})", tmp_path, [IgnoreLayer(["*.txt"])])[0].file
-
-
-def test_unlistable_directory_warns_instead_of_aborting(
-    tmp_path: Path, monkeypatch, capsys
-):
-    (tmp_path / "data.csv").write_text("data", encoding="utf-8")
-
-    def denied(path="."):
-        raise PermissionError(path)
-
-    monkeypatch.setattr(os, "listdir", denied)
-
-    assert plan("[x](data.csv)", tmp_path)[0].file is None
-    assert "data.csv" in capsys.readouterr().err
-
-
-def test_plan_lists_each_directory_once(tmp_path, monkeypatch):
-    # Listing a large folder once per reference made push quadratic.
-    for name in ("a.png", "b.png", "c.png"):
-        (tmp_path / name).write_bytes(b"x")
-    listed = []
-    real = os.listdir
-    monkeypatch.setattr(
-        transclude.os, "listdir", lambda path: listed.append(path) or real(path)
-    )
-
-    refs = transclude.plan("![](a.png) ![](b.png) ![](c.png)", tmp_path)
-
-    assert [ref.file.name for ref in refs] == ["a.png", "b.png", "c.png"]
-    assert len(listed) == 1
 
 
 # Bodies written in the Web UI (ELABFTW-API, "Bodies written in the Web UI").
