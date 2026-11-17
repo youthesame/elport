@@ -177,6 +177,13 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   - Delete: `DELETE .../comments/{cid}` → **204**.
   - Note: the sub-id is server-assigned and **not 1-based per entity** (measured first comment got id 5). Read it
     from the POST `Location` / the GET list; do not assume `{id}/comments/1`.
+- **No bulk read of comments** (measured demo 6.0.9, 2026-11-17): list rows carry only `recent_comment`, even with
+  `full=1`; `GET /reports` answers `json (not implemented)` and its `csv` is Admin-only (403), with usage counts, not
+  comments; `/audit_logs` is Sysadmin-only and absent on the demo (400 invalid endpoint); `/exports` builds a file
+  on the server. Counting comments takes one `GET .../comments` per entity (median ~0.5 s on the demo). Rows whose
+  `recent_comment` is `null` or older than a date have no comment posted since then, so they can be skipped.
+  `recent_comment` is the newest remaining comment's `created_at`: deleting the newest moves it back, deleting an
+  older one leaves it unchanged.
 - **Comments are out-of-sync data → do not embed in the body** (AGENTS.md invariant). Surface via sidecar / terminal.
 
 ## Steps (task checklist; measured 5.6.12, 2026-08-11)
