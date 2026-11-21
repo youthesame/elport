@@ -51,8 +51,10 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
   exfiltrate local files: **a path that appears in a remote body is never uploaded unless listed in
   `attachments:`** ([ADR-0007](docs/adr/0007-references-may-leave-the-document-directory.md)); pull never writes
   outside the document directory; **never parse inside code fences, inline code, or HTML comments.**
-- Attachment identity uses the **server-returned hash first, else basename + size** (same-name entries can coexist,
-  so check against all of them). **Never auto-delete attachments during push.**
+- An upload is reused only when **its server-returned sha256 matches** the local file (name selects the candidates;
+  same-name entries can coexist, so check against all of them). Without a sha256 the file is uploaded again
+  ([ADR-0014](docs/adr/0014-only-a-matching-sha256-reuses-an-upload.md)). **Never auto-delete attachments during
+  push.**
 - **Keep secrets (API keys) out of the project tree.** OS keyring + home-dir config only. **Never log the key.**
 
 ## Non-obvious eLabFTW API traps (highlights; details in ELABFTW-API.md)

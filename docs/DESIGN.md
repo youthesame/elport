@@ -119,7 +119,8 @@ similar, **consult it and pull in only what is needed** when a missing feature b
 9. **Profiles / config**: multi-team support. A settings.json-style 3-layer configuration.
 10. **Metadata placement**: front matter = id + title/tags/category (+ optional profile). base = state
     (namespaced key, two forms remote/local + team ID). Attachment dedup prefers the remote hash, falling back to
-    size (hash is compared on the fly, never stored); no automatic attachment deletion during push.
+    size (hash is compared on the fly, never stored); no automatic attachment deletion during push. (The size
+    fallback was dropped; see [ADR-0014](adr/0014-only-a-matching-sha256-reuses-an-upload.md).)
 11. **File name**: not fixed (default `report.md`, any name allowed; sidecar `<name>.remote.md`).
 12. **Default entity kind**: `experiments` (overridable in front matter).
 13. **`status` / `diff` are MVP**: read-only, side-effect-free (`status` = preflight display, `diff` = source-form
