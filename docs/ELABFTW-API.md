@@ -110,7 +110,8 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - List: `GET /api/v2/{entity}/{id}/uploads` → each element (example measured values):
   - `real_name`: `"data.csv"` (= the upload basename. **Japanese, spaces, and parentheses are preserved verbatim**
     [measured: `図 1 (テスト).png` round-trips verbatim]. percent-encode required when placing into the download
-    URL `name=`).
+    URL `name=`). Characters a Markdown link cannot carry are stored verbatim too [measured demo 6.0.9,
+    2026-11-21: `x<y>.txt`, `a?b.txt`, `` `t`.txt ``, `#h.txt`, ` pad .txt`, `ratio:1.png`].
   - `long_name`: `"6f/6f177360-...-...csv"` … **contains `/` due to subdirectory sharding**. percent-encode
     required when placing into the download URL `f=`.
   - `storage`: `1`, `filesize`: `18`

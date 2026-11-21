@@ -1440,6 +1440,12 @@ def test_reverse_html_attribute_round_trips_through_push_parser(
         ("../../secret", "secret"),
         ("folder\\data.csv", "data.csv"),
         ("~/note.txt", "note.txt"),
+        ("x<y>.txt", "x_y_.txt"),
+        ("a?b.txt", "a_b.txt"),
+        ("`t`.txt", "_t_.txt"),
+        ("#h.txt", "_h.txt"),
+        (" pad .txt", "pad .txt"),
+        ("ratio:1.png", "ratio_1.png"),
     ],
 )
 def test_real_name_sanitization(unsafe: str, safe: str):

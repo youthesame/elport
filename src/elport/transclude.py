@@ -315,6 +315,8 @@ def extract(text: str) -> list[Reference]:
             start = tag.start() + value_start + len(raw) - len(raw.lstrip())
             end = start + len(value)
             out.append(Reference(html.unescape(value), start, end, kind="html"))
+    # A destination that runs into a code span or comment is not a path.
+    out = [r for r in out if masked[r.start : r.end] == text[r.start : r.end]]
     return sorted(out, key=lambda x: x.start)
 
 
@@ -772,11 +774,16 @@ def upload_name(upload: dict) -> str:
 
 
 def safe_name(name: str) -> str:
-    cleaned = Path(name.replace("\\", "/")).name.lstrip("~")
+    cleaned = Path(name.replace("\\", "/")).name.lstrip("~").strip()
+    if cleaned in ("", ".", ".."):
+        return "attachment"
+    # Characters a pulled link could not name again: a scheme, a query, a code
+    # span, a line break, an angle destination's delimiters, or a leading anchor.
+    cleaned = re.sub(r"[<>:?`\x00-\x1f]|^#", "_", cleaned)
     if _WINDOWS:
-        # Characters Windows cannot store, a trailing dot or space it would drop,
-        # and device names that would open a device instead of a file.
-        cleaned = re.sub(r'[<>:"|?*\x00-\x1f]', "_", cleaned).rstrip(". ")
+        # The rest of what Windows cannot store, a trailing dot or space it would
+        # drop, and device names that would open a device instead of a file.
+        cleaned = re.sub(r'["|*]', "_", cleaned).rstrip(". ")
         if cleaned.split(".")[0].upper() in _WINDOWS_RESERVED:
             cleaned = "_" + cleaned
     return cleaned if cleaned not in ("", ".", "..") else "attachment"
