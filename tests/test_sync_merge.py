@@ -109,7 +109,7 @@ def test_clean_merge_promotes_pending_remote_and_allows_regular_push(
     merged_body = "local first\nmiddle\nremote last\n"
     assert frontmatter.parse(doc.read_text(encoding="utf-8"))[1] == merged_body
     assert stored_state == {
-        "local_base": base_body,
+        "local_base": remote_body,
         "remote_base": remote_body,
     }
 
@@ -156,7 +156,7 @@ def test_resolved_merge_without_git_promotes_pending_remote_and_allows_regular_p
     sync.merge(doc, {}, resolved=True)
 
     assert stored_state == {
-        "local_base": base_body,
+        "local_base": remote_body,
         "remote_base": remote_body,
     }
     assert not (tmp_path / "report.base.md").exists()
@@ -167,6 +167,31 @@ def test_resolved_merge_without_git_promotes_pending_remote_and_allows_regular_p
 
     assert client.saved_payload is not None
     assert client.saved_payload["body"] == "resolved\n"
+
+
+def test_resolving_to_the_old_local_text_still_overwrites_the_remote(
+    tmp_path, monkeypatch, configured
+):
+    # Keeping the local side verbatim is a resolution too: the remote's Web
+    # edit must not survive it while status reports nothing to do.
+    doc = tmp_path / "report.md"
+    write_doc(doc, "base\n")
+    stored_state = saved_state(local="base\n", remote="base\n")
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+    monkeypatch.setattr(
+        sync.state,
+        "save",
+        lambda *args: stored_state.clear() or stored_state.update(args[3]),
+    )
+    client = FakeClient(remote_doc={"body": "remote\n", "content_type": 2})
+
+    with pytest.raises(RuntimeError, match="remote changed"):
+        sync.push(doc, client, {})
+    sync.merge(doc, {}, resolved=True)
+
+    assert sync.status(doc, client, {}) == "local dirty"
+    sync.push(doc, client, {})
+    assert client.saved_payload["body"] == "base\n"
 
 
 def test_resolved_merge_regular_push_reconflicts_if_remote_changed_again(
@@ -203,7 +228,7 @@ def test_resolved_merge_regular_push_reconflicts_if_remote_changed_again(
         sync.push(doc, client, {})
 
     assert stored_state == {
-        "local_base": base_body,
+        "local_base": remote_body,
         "remote_base": remote_body,
         "pending_remote": newer_remote_body,
     }
@@ -259,7 +284,7 @@ def test_conflicted_merge_promotes_pending_remote_and_allows_regular_push(
     assert not base.exists()
     assert not remote.exists()
     assert stored_state == {
-        "local_base": base_body,
+        "local_base": remote_body,
         "remote_base": remote_body,
     }
 
@@ -302,7 +327,7 @@ def test_conflicted_merge_regular_push_reconflicts_if_remote_changed_again(
         sync.push(doc, client, {})
 
     assert stored_state == {
-        "local_base": base_body,
+        "local_base": remote_body,
         "remote_base": remote_body,
         "pending_remote": newer_remote_body,
     }

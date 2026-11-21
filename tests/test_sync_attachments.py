@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
 from _sync_harness import FakeClient, saved_state, write_doc
 
 from elport import frontmatter, sync, transclude
@@ -64,40 +65,16 @@ def test_hash_match_reuses_upload(tmp_path, monkeypatch, configured):
     assert "aa%2Fexisting" in client.saved_payload["body"]
 
 
-def test_unsupported_remote_hash_falls_back_to_matching_size(tmp_path):
+@pytest.mark.parametrize(
+    "digest",
+    [{}, {"hash": "legacy-digest"}, {"hash": "x", "hash_algorithm": "md5"}],
+)
+def test_upload_without_a_sha256_is_never_reused(tmp_path, digest):
+    # Name and size cannot tell an edited file from its old upload (ADR-0014).
     attachment = tmp_path / "data.csv"
     attachment.write_bytes(b"same")
-    upload = {
-        "real_name": "data.csv",
-        "filesize": 4,
-        "hash": "unsupported-digest",
-        "hash_algorithm": "md5",
-    }
+    upload = {"real_name": "data.csv", "filesize": 4, **digest}
 
-    assert sync._matching_upload(attachment, [upload]) is upload
-
-    upload["filesize"] = 5
-    assert sync._matching_upload(attachment, [upload]) is None
-
-
-def test_hash_without_algorithm_falls_back_to_matching_size(tmp_path):
-    attachment = tmp_path / "data.csv"
-    attachment.write_bytes(b"same")
-    upload = {
-        "real_name": "data.csv",
-        "filesize": 4,
-        "hash": "legacy-digest",
-    }
-
-    assert sync._matching_upload(attachment, [upload]) is upload
-
-    upload.update(
-        {
-            "filesize": 4,
-            "hash": hashlib.sha256(b"different").hexdigest(),
-            "hash_algorithm": "sha256",
-        }
-    )
     assert sync._matching_upload(attachment, [upload]) is None
 
 
@@ -113,6 +90,8 @@ def test_pull_then_push_reuses_upload_with_markdown_unsafe_name(
         "real_name": real_name,
         "storage": 1,
         "filesize": 4,
+        "hash": hashlib.sha256(b"data").hexdigest(),
+        "hash_algorithm": "sha256",
     }
     url = sync.download_url("https://e.example", upload)
     remote = {"body": f"[file]({url})", "tags": ""}
@@ -152,6 +131,8 @@ def test_pull_then_push_reuses_upload_whose_name_windows_rewrote(
         "real_name": 'say "hi".png',
         "storage": 1,
         "filesize": 4,
+        "hash": hashlib.sha256(b"data").hexdigest(),
+        "hash_algorithm": "sha256",
     }
     url = sync.download_url("https://e.example", upload)
     remote = {"body": f"[file]({url})", "tags": ""}

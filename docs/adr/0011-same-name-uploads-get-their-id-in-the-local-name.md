@@ -1,5 +1,8 @@
 # Same-name uploads get their id in the local name
 
+> Superseded in part by [ADR-0014](0014-only-a-matching-sha256-reuses-an-upload.md): an upload without a
+> hash is no longer matched by name and size.
+
 eLabFTW names every image pasted into the editor `image.png`, so an ordinary note holds several
 uploads with the same `real_name` and different content. pull, fetch, merge, and `view -o` refused
 such an entity ("attachment basename collision with different content") and wrote no attachment at
