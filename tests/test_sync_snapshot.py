@@ -165,18 +165,15 @@ def test_snapshot_refuses_an_attachment_named_like_the_body(tmp_path):
     assert not (tmp_path / "out").exists()
 
 
-def test_snapshot_refuses_a_body_that_would_read_as_an_elport_document(tmp_path):
-    body = "---\nid: 9\nprofile: lab\n---\n\ntext\n"
-    client = FakeClient(remote_doc={"body": body})
-
-    with pytest.raises(RuntimeError, match="front matter"):
-        sync.snapshot(client, "experiments", 42, tmp_path / "out", BASE)
-
-    assert not (tmp_path / "out").exists()
-
-
-def test_snapshot_refuses_a_cr_delimited_elport_frontmatter_body(tmp_path):
-    body = "---\rid: 9\rprofile: lab\r---\r\rtext\r"
+@pytest.mark.parametrize(
+    "body",
+    [
+        "---\nid: 9\nprofile: lab\n---\n\ntext\n",
+        "---\rid: 9\rprofile: lab\r---\r\rtext\r",
+        "\ufeff---\nid: 9\nprofile: lab\n---\n\ntext\n",
+    ],
+)
+def test_snapshot_refuses_a_body_that_would_read_as_an_elport_document(tmp_path, body):
     client = FakeClient(remote_doc={"body": body})
 
     with pytest.raises(RuntimeError, match="front matter"):

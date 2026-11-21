@@ -16,10 +16,19 @@ from elport import frontmatter
         "---not-frontmatter\nBody\n",
         "---not-frontmatter\nkey: value\n---\nBody\n",
         "---\nkey: value\n----\nBody\n",
+        "\ufeffBody\n",
+        "\ufeff---\nIntroduction\n---\nBody\n",
+        "\ufeff---\nid: 5\n\ufeff---\nBody\n",
     ],
 )
 def test_non_mapping_or_non_delimiter_frontmatter_preserves_full_body(text):
     assert frontmatter.parse(text) == ({}, text)
+
+
+def test_bom_before_crlf_frontmatter_preserves_bom_in_body():
+    text = "\ufeff---\r\nid: 5\r\n---\r\n\r\n\ufeffBody\r\n"
+
+    assert frontmatter.parse(text) == ({"id": 5}, "\ufeffBody\r\n")
 
 
 @pytest.mark.parametrize("body", ["", "Body\n", "\nBody\n", "\n\nBody\n"])

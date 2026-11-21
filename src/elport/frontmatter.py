@@ -73,16 +73,25 @@ def parse_server_id(value: object) -> int:
         raise RuntimeError("server did not return a valid entity id") from error
 
 
+_UTF8_BOM = b"\xef\xbb\xbf"
+
+
+def has_opener(head: bytes) -> bool:
+    """Fast byte-prefix check before decoding a whole file for front matter."""
+    return head.removeprefix(_UTF8_BOM).startswith(b"---")
+
+
 def parse(text: str) -> tuple[dict, str]:
+    document = text.removeprefix("\ufeff")
     delimiter = re.compile(r"(?m)^---[ \t]*(?:\r?\n|$)")
-    opener = delimiter.match(text)
+    opener = delimiter.match(document)
     if opener is None:
         return {}, text
-    closer = delimiter.search(text, opener.end())
+    closer = delimiter.search(document, opener.end())
     if closer is None:
         return {}, text
     try:
-        data = yaml.load(text[opener.end() : closer.start()], Loader=_StrictLoader)
+        data = yaml.load(document[opener.end() : closer.start()], Loader=_StrictLoader)
     except yaml.YAMLError as error:
         raise ValueError(f"invalid frontmatter YAML: {error}") from error
     if not isinstance(data, dict):
@@ -121,7 +130,7 @@ def parse(text: str) -> tuple[dict, str]:
         ):
             raise ValueError("attachments must be a list of paths")
         data["attachments"] = [str(entry) for entry in entries]
-    body = text[closer.end() :]
+    body = document[closer.end() :]
     if body.startswith("\r\n"):
         body = body[2:]
     elif body.startswith(("\r", "\n")):

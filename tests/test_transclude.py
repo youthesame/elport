@@ -1098,6 +1098,16 @@ def test_plan_knows_a_document_by_front_matter_not_by_name(tmp_path):
     assert data_ref.doc is None and data_ref.file == (tmp_path / "data.bin").resolve()
 
 
+def test_plan_recognizes_a_link_to_a_bom_prefixed_elport_document(tmp_path):
+    target = tmp_path / "prev.md"
+    target.write_text("---\nid: 12\nprofile: test\n---\n\nbody\n", encoding="utf-8-sig")
+
+    (ref,) = plan("[p](prev.md)", tmp_path)
+
+    assert ref.doc == target.resolve()
+    assert ref.file is None
+
+
 BASE_URL = "https://e.example"
 
 
