@@ -11,10 +11,19 @@ import tempfile
 import unicodedata
 from pathlib import Path
 
+import pytest
+from _sync_harness import Store, elport_doc
 from hypothesis import assume, example, given
 from hypothesis import strategies as st
+from hypothesis.stateful import (
+    RuleBasedStateMachine,
+    invariant,
+    precondition,
+    rule,
+    run_state_machine_as_test,
+)
 
-from elport import frontmatter, transclude
+from elport import frontmatter, sync, transclude
 
 BASE = "https://e.example"
 nonempty = st.text(min_size=1)
@@ -220,3 +229,142 @@ def test_upload_names_are_distinct_files_and_stable(items, random):
         for upload_id, name in names.items():
             (Path(directory) / name).write_text(str(upload_id))
         assert len(os.listdir(directory)) == len(items)
+
+
+class Server:
+    """One entity on an eLabFTW that normalizes every saved body, and does not
+    converge: storing the stored form changes it again (ELABFTW-API)."""
+
+    def __init__(self, body: str):
+        self.body = body
+        self.patches = 0
+
+    @staticmethod
+    def normalize(body: str) -> str:
+        return body.replace("&", "&amp;")
+
+    def me(self):
+        return {"userid": 1, "team": 7}
+
+    def get(self, entity, eid):
+        return {"body": self.body, "content_type": 2, "userid": 1, "team": 7}
+
+    def uploads(self, entity, eid):
+        return []
+
+    def patch(self, entity, eid, payload):
+        self.patches += 1
+        if "body" in payload:
+            self.body = self.normalize(payload["body"])
+        return self.get(entity, eid)
+
+
+bodies = st.text("ab& \n", min_size=1, max_size=6).filter(str.strip)
+
+
+def test_sync_follows_the_two_form_base(configured):
+    """Random local edits, Web edits, push, pull, and conflict resolution keep
+    elport honest: status reports exactly what changed, a remote change is
+    never overwritten without --force, and push never rewrites the local file."""
+
+    class Sync(RuleBasedStateMachine):
+        def __init__(self):
+            super().__init__()
+            self.directory = tempfile.TemporaryDirectory()
+            self.doc = Path(self.directory.name) / "note.md"
+            self.monkeypatch = pytest.MonkeyPatch()
+            Store(self.monkeypatch)
+            # Cloned: both sides at the same stored form.
+            self.server = Server("a")
+            self.local_base = self.remote_base = self.local = "a"
+            self.pending = None  # remote body of an unresolved conflict
+            self.write(self.local)
+            sync.pull(self.doc, self.server, {})
+
+        def teardown(self):
+            self.monkeypatch.undo()
+            self.directory.cleanup()
+
+        def write(self, body):
+            elport_doc(self.doc, body)
+
+        def read(self):
+            return frontmatter.parse(self.doc.read_text(encoding="utf-8"))[1]
+
+        def conflicted(self):
+            return self.pending is not None
+
+        @rule(body=bodies)
+        def edit_locally(self, body):
+            self.write(body)
+            self.local = body
+
+        @rule(body=bodies)
+        def edit_on_the_web(self, body):
+            self.server.body = Server.normalize(body)
+
+        @precondition(lambda self: not self.conflicted())
+        @rule()
+        def push(self):
+            self.send(force=False)
+
+        @rule()
+        def force_push(self):
+            self.send(force=True)
+            for sidecar in self.doc.parent.glob("note.*.md"):
+                sidecar.unlink()
+            self.pending = None
+
+        def send(self, force):
+            before, remote = self.doc.read_bytes(), self.server.body
+            patches = self.server.patches
+            clean = self.local == self.local_base and remote == self.remote_base
+            try:
+                sync.push(self.doc, self.server, {}, force=force)
+            except RuntimeError as error:
+                assert "remote changed" in str(error)
+                assert not force and remote != self.remote_base
+                assert self.server.body == remote
+                self.pending = remote
+            else:
+                assert force or remote == self.remote_base
+                if clean:
+                    assert self.server.patches == patches  # nothing to send
+                else:
+                    assert self.server.body == Server.normalize(self.local)
+                self.local_base, self.remote_base = self.local, self.server.body
+            assert self.doc.read_bytes() == before
+
+        @precondition(lambda self: not self.conflicted())
+        @rule()
+        def pull(self):
+            dirty = self.local != self.local_base
+            remote_changed = self.server.body != self.remote_base
+            try:
+                sync.pull(self.doc, self.server, {})
+            except RuntimeError as error:
+                assert "local changes conflict" in str(error)
+                assert dirty and remote_changed
+                self.pending = self.server.body
+            else:
+                assert not (dirty and remote_changed)
+                if not dirty:
+                    self.local = self.local_base = self.server.body
+                    self.remote_base = self.server.body
+            assert self.read() == self.local
+
+        @precondition(lambda self: self.conflicted())
+        @rule()
+        def resolve(self):
+            sync.merge(self.doc, {}, resolved=True)
+            self.remote_base, self.pending = self.pending, None
+
+        @invariant()
+        def status_reports_both_sides(self):
+            summary = sync.status(self.doc, self.server, {})
+            assert ("local dirty" in summary) == (self.local != self.local_base)
+            assert ("remote changed" in summary) == (
+                self.server.body != self.remote_base
+            )
+
+    run_state_machine_as_test(Sync)
