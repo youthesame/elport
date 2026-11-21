@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
+
 import pytest
+from hypothesis import settings
 
 from elport import sync
+
+settings.register_profile("crosshair", backend="crosshair", deadline=None)
+if profile := os.getenv("HYPOTHESIS_PROFILE"):
+    settings.load_profile(profile)
 
 
 @pytest.fixture

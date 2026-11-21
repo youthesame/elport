@@ -159,7 +159,7 @@ def text_meta(text: str) -> dict | None:
 def render(meta: dict, body: str) -> str:
     return (
         "---\n"
-        + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False).rstrip()
+        + yaml.safe_dump(meta, allow_unicode=True, sort_keys=False).rstrip("\n")
         + "\n---\n\n"
         + body
     )
