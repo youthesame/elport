@@ -5,6 +5,7 @@ Run with ``HYPOTHESIS_PROFILE=crosshair`` to explore them symbolically.
 
 from __future__ import annotations
 
+import hashlib
 import html
 import os
 import tempfile
@@ -17,6 +18,7 @@ from hypothesis import assume, example, given
 from hypothesis import strategies as st
 from hypothesis.stateful import (
     RuleBasedStateMachine,
+    initialize,
     invariant,
     precondition,
     rule,
@@ -233,10 +235,14 @@ def test_upload_names_are_distinct_files_and_stable(items, random):
 
 class Server:
     """One entity on an eLabFTW that normalizes every saved body, and does not
-    converge: storing the stored form changes it again (ELABFTW-API)."""
+    converge: storing the stored form changes it again (ELABFTW-API). Old
+    instances list uploads without a sha256, leaving name and size to match."""
 
-    def __init__(self, body: str):
+    def __init__(self, body: str, hashes: bool):
         self.body = body
+        self.hashes = hashes
+        self.files: dict[int, bytes] = {}
+        self.listing: list[dict] = []
         self.patches = 0
 
     @staticmethod
@@ -250,7 +256,29 @@ class Server:
         return {"body": self.body, "content_type": 2, "userid": 1, "team": 7}
 
     def uploads(self, entity, eid):
-        return []
+        return [dict(upload) for upload in self.listing]
+
+    def add(self, real_name: str, data: bytes) -> dict:
+        upload_id = len(self.listing) + 1
+        upload = {
+            "id": upload_id,
+            "long_name": f"xx/{upload_id}",
+            "real_name": real_name,
+            "storage": 1,
+            "filesize": len(data),
+        }
+        if self.hashes:
+            upload["hash"] = hashlib.sha256(data).hexdigest()
+            upload["hash_algorithm"] = "sha256"
+        self.files[upload_id] = data
+        self.listing.append(upload)
+        return dict(upload)
+
+    def upload(self, entity, eid, path):
+        return self.add(path.name, path.read_bytes())
+
+    def download(self, entity, eid, upload_id):
+        return self.files[upload_id]
 
     def patch(self, entity, eid, payload):
         self.patches += 1
@@ -258,32 +286,69 @@ class Server:
             self.body = self.normalize(payload["body"])
         return self.get(entity, eid)
 
+    def edit(self, body: str):
+        """A Web UI save: the editor shows the decoded body and saves it."""
+        self.body = self.normalize(body)
 
-bodies = st.text("ab& \n", min_size=1, max_size=6).filter(str.strip)
+    def served(self, value: str) -> bytes | None:
+        """The bytes a download URL serves, if it names one of our uploads."""
+        parsed = transclude.parse_download_url(value)
+        for upload in self.listing:
+            if parsed and upload["long_name"] == parsed[0]:
+                return self.files[upload["id"]]
+        return None
+
+    def meaning(self) -> str:
+        """The body with each upload URL replaced by the bytes it serves."""
+        return _meaning(html.unescape(self.body), self.served)
+
+
+def _meaning(text: str, resolve) -> str:
+    out, pos = [], 0
+    for reference in transclude.extract(text):
+        data = resolve(reference.path)
+        if data is not None:
+            out += [text[pos : reference.start], f"<{data!r}>"]
+            pos = reference.end
+    return "".join(out) + text[pos:]
+
+
+# Same-size contents and names that sanitize alike are what a hashless match
+# could confuse.
+contents = st.sampled_from([b"1", b"22", b"33"])
+local_names = st.sampled_from(["a.txt", "b.txt", "a_b.txt"])
+remote_names = st.sampled_from(["a.txt", "a?b.txt", "a_b.txt"])
+texts = st.text("ab \n", min_size=1, max_size=4).filter(str.strip)
 
 
 def test_sync_follows_the_two_form_base(configured):
-    """Random local edits, Web edits, push, pull, and conflict resolution keep
-    elport honest: status reports exactly what changed, a remote change is
-    never overwritten without --force, and push never rewrites the local file."""
+    """Random local edits, Web edits and uploads, push, pull, and conflict
+    resolution keep elport honest: status reports exactly what changed, a
+    remote change is never overwritten without --force, push never rewrites
+    the local file or deletes an upload, and after every sync each link on
+    both sides serves the same bytes."""
 
     class Sync(RuleBasedStateMachine):
-        def __init__(self):
-            super().__init__()
+        @initialize(hashes=st.booleans())
+        def clone(self, hashes):
             self.directory = tempfile.TemporaryDirectory()
             self.doc = Path(self.directory.name) / "note.md"
             self.monkeypatch = pytest.MonkeyPatch()
-            Store(self.monkeypatch)
+            self.store = Store(self.monkeypatch)
             # Cloned: both sides at the same stored form.
-            self.server = Server("a")
+            self.server = Server("a", hashes)
             self.local_base = self.remote_base = self.local = "a"
             self.pending = None  # remote body of an unresolved conflict
+            self.synced = True  # both sides mean the same, files included
+            self.recorded: dict = {}  # push's link record when a pull adopted
+            self.changed: set[str] = set()  # files written since the last push
             self.write(self.local)
             sync.pull(self.doc, self.server, {})
 
         def teardown(self):
-            self.monkeypatch.undo()
-            self.directory.cleanup()
+            if hasattr(self, "directory"):
+                self.monkeypatch.undo()
+                self.directory.cleanup()
 
         def write(self, body):
             elport_doc(self.doc, body)
@@ -291,34 +356,96 @@ def test_sync_follows_the_two_form_base(configured):
         def read(self):
             return frontmatter.parse(self.doc.read_text(encoding="utf-8"))[1]
 
+        def local_meaning(self):
+            local = self.read()
+            # Pair each local link with the remote one it was pulled from: one
+            # whose URL push recorded came back as written, not downloaded, and
+            # means that upload (ADR-0007); any other is read from disk.
+            remote = transclude.extract(html.unescape(self.server.body))
+            references = transclude.extract(local)
+            if self.recorded:
+                assert len(references) == len(remote)
+            recorded = {
+                r.start: r_remote.path
+                for r, r_remote in zip(references, remote)
+                if r_remote.path in self.recorded
+            }
+            out, pos = [], 0
+            for r in references:
+                if r.start in recorded:
+                    written = self.recorded[recorded[r.start]]["markdown"]
+                    assert local[r.start : r.end] == written  # restored as written
+                    data = self.server.served(recorded[r.start])
+                else:
+                    file = self.doc.parent / r.path
+                    data = file.read_bytes() if file.is_file() else None
+                if data is not None:
+                    out += [local[pos : r.start], f"<{data!r}>"]
+                    pos = r.end
+            return "".join(out) + local[pos:]
+
         def conflicted(self):
             return self.pending is not None
 
-        @rule(body=bodies)
-        def edit_locally(self, body):
+        def resolved(self):
+            for leftover in [
+                *self.doc.parent.glob("note.*.md"),
+                *self.doc.parent.glob("*.remote"),
+                *self.doc.parent.glob("*.base"),
+            ]:
+                leftover.unlink()
+            self.pending = None
+
+        @rule(name=local_names, data=contents)
+        def write_file(self, name, data):
+            (self.doc.parent / name).write_bytes(data)
+            self.synced = False
+            self.changed.add(name)
+
+        @rule(text=texts, data=st.data())
+        def edit_locally(self, text, data):
+            # Only files that exist: pushing a missing one sends its bare path,
+            # which reads as a server-side link from then on (ADR-0007).
+            existing = sorted(p.name for p in self.doc.parent.glob("*.txt"))
+            links = (
+                data.draw(st.lists(st.sampled_from(existing), max_size=2))
+                if existing
+                else []
+            )
+            body = text + "".join(f"\n[{name}]({name})" for name in links)
             self.write(body)
-            self.local = body
+            self.local, self.synced = body, False
 
-        @rule(body=bodies)
-        def edit_on_the_web(self, body):
-            self.server.body = Server.normalize(body)
+        @rule(text=texts)
+        def edit_on_the_web(self, text):
+            self.server.edit(text)
+            self.synced = False
 
-        @precondition(lambda self: not self.conflicted())
+        @rule(name=remote_names, data=contents)
+        def attach_on_the_web(self, name, data):
+            url = transclude.download_url(BASE, self.server.add(name, data))
+            self.server.edit(f"{html.unescape(self.server.body)}\n[f]({url})")
+            self.synced = False
+
+        @precondition(lambda self: hasattr(self, "server") and not self.conflicted())
         @rule()
         def push(self):
             self.send(force=False)
 
+        @precondition(lambda self: hasattr(self, "server"))
         @rule()
         def force_push(self):
             self.send(force=True)
-            for sidecar in self.doc.parent.glob("note.*.md"):
-                sidecar.unlink()
-            self.pending = None
+            self.resolved()
 
         def send(self, force):
             before, remote = self.doc.read_bytes(), self.server.body
-            patches = self.server.patches
-            clean = self.local == self.local_base and remote == self.remote_base
+            patches, uploads = self.server.patches, list(self.server.listing)
+            recorded = self.store.data["1"].get("doc_links")
+            unchanged = self.local == self.local_base and remote == self.remote_base
+            # Without a sha256 every referenced file is uploaded again (ADR-0014).
+            clean = unchanged and self.server.hashes and not self.changed
+            linkless = unchanged and not recorded and "](" not in self.local
             try:
                 sync.push(self.doc, self.server, {}, force=force)
             except RuntimeError as error:
@@ -328,14 +455,16 @@ def test_sync_follows_the_two_form_base(configured):
                 self.pending = remote
             else:
                 assert force or remote == self.remote_base
-                if clean:
-                    assert self.server.patches == patches  # nothing to send
-                else:
-                    assert self.server.body == Server.normalize(self.local)
+                if clean:  # nothing to send: the stored body must not churn
+                    assert self.server.body == remote
+                if linkless:
+                    assert self.server.patches == patches
                 self.local_base, self.remote_base = self.local, self.server.body
+                self.synced, self.changed, self.recorded = True, set(), {}
             assert self.doc.read_bytes() == before
+            assert self.server.listing[: len(uploads)] == uploads  # none deleted
 
-        @precondition(lambda self: not self.conflicted())
+        @precondition(lambda self: hasattr(self, "server") and not self.conflicted())
         @rule()
         def pull(self):
             dirty = self.local != self.local_base
@@ -343,24 +472,40 @@ def test_sync_follows_the_two_form_base(configured):
             try:
                 sync.pull(self.doc, self.server, {})
             except RuntimeError as error:
-                assert "local changes conflict" in str(error)
-                assert dirty and remote_changed
-                self.pending = self.server.body
+                if "attachment conflicts" in str(error):
+                    # The user takes the server's copy of each, then pulls again.
+                    for copy in self.doc.parent.glob("*.remote"):
+                        copy.replace(copy.with_suffix(""))
+                        self.changed.add(copy.stem)
+                else:
+                    assert "local changes conflict" in str(error)
+                    assert dirty and remote_changed
+                    self.pending = self.server.body
             else:
                 assert not (dirty and remote_changed)
                 if not dirty:
-                    self.local = self.local_base = self.server.body
+                    self.local = self.local_base = self.read()
                     self.remote_base = self.server.body
+                    self.recorded = self.store.data["1"].get("doc_links", {})
+                    self.synced = True
             assert self.read() == self.local
 
-        @precondition(lambda self: self.conflicted())
+        @precondition(lambda self: hasattr(self, "server") and self.conflicted())
         @rule()
         def resolve(self):
+            sidecar = self.doc.with_name("note.remote.md").read_text(encoding="utf-8")
             sync.merge(self.doc, {}, resolved=True)
-            self.remote_base, self.pending = self.pending, None
+            # Both bases move to the remote side; the local text is the resolution.
+            self.local_base = frontmatter.parse(sidecar)[1]
+            self.remote_base = self.pending
+            self.resolved()
 
         @invariant()
-        def status_reports_both_sides(self):
+        def both_sides_agree(self):
+            if not hasattr(self, "server"):
+                return
+            if self.synced:
+                assert self.local_meaning() == self.server.meaning()
             summary = sync.status(self.doc, self.server, {})
             assert ("local dirty" in summary) == (self.local != self.local_base)
             assert ("remote changed" in summary) == (

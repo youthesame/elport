@@ -130,6 +130,8 @@ def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
         if path.name
         in (upload_name(upload), safe_name(str(upload.get("real_name", ""))))
     ]
+    # Only the hash: name and size cannot tell an edited file from its old
+    # upload, so one without a sha256 is uploaded again (ADR-0014).
     local_hash = None
     for upload in candidates:
         remote_hash = _remote_sha256(upload)
@@ -137,12 +139,6 @@ def _matching_upload(path: Path, uploads: list[dict]) -> dict | None:
             local_hash = local_hash or _sha256(path)
             if remote_hash == local_hash:
                 return upload
-    for upload in candidates:
-        if (
-            _remote_sha256(upload) is None
-            and upload.get("filesize") == path.stat().st_size
-        ):
-            return upload
     return None
 
 
@@ -869,12 +865,20 @@ def _base_sidecar_path(path: Path) -> Path:
     return path.with_name(path.stem + ".base.md")
 
 
-def _promote_pending_remote(base_url: str | None, entity: str, eid: object) -> None:
+def _promote_pending_remote(
+    base_url: str | None, entity: str, eid: object, remote_source: str
+) -> None:
     if not eid or base_url is None:
         return
     saved = state.load(base_url, entity, str(eid))
     if saved is not None and "pending_remote" in saved:
-        updated = {**saved, "remote_base": saved["pending_remote"]}
+        # Both bases move to the remote side, in their own forms: the resolution
+        # is a local edit of it, so keeping the old local text still pushes.
+        updated = {
+            **saved,
+            "remote_base": saved["pending_remote"],
+            "local_base": remote_source,
+        }
         del updated["pending_remote"]
         # The promoted base is a real GET'd body, so the creation is no longer
         # provisional and normal conflict detection applies again.
@@ -909,8 +913,9 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
     base_url = None
     if eid:
         _, base_url, _ = config_module.base_target(config, profile, meta)
+    remote_source = frontmatter.parse(remote.read_text(encoding="utf-8"))[1]
     if resolved:
-        _promote_pending_remote(base_url, entity, eid)
+        _promote_pending_remote(base_url, entity, eid, remote_source)
         base.unlink()
         remote.unlink()
         print(f"marked resolved: {path}; run 'elport push'")
@@ -950,7 +955,7 @@ def merge(path: Path, config: dict, profile=None, resolved=False) -> None:
     )
     if result.returncode < 0 or result.returncode >= 128:
         raise RuntimeError(result.stderr.strip() or "git merge-file failed")
-    _promote_pending_remote(base_url, entity, eid)
+    _promote_pending_remote(base_url, entity, eid, remote_source)
     base.unlink()
     remote.unlink()
     if result.returncode == 0:

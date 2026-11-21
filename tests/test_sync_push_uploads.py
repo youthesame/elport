@@ -30,6 +30,8 @@ def test_dry_run_prints_each_original_reference_path(
         "real_name": "figure.png",
         "storage": 1,
         "filesize": 5,
+        "hash": hashlib.sha256(b"image").hexdigest(),
+        "hash_algorithm": "sha256",
     }
     client = FakeClient(gets=[{"body": "remote"}], uploads=[upload])
     monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
