@@ -1143,7 +1143,7 @@ def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None
 
 
 def _has_elport_frontmatter(data: bytes) -> bool:
-    if not data.startswith(b"---"):
+    if not frontmatter.has_opener(data):
         return False
     try:
         return frontmatter.text_meta(data.decode("utf-8")) is not None

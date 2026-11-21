@@ -438,7 +438,7 @@ def _linked_document(doc_dir: Path, value: str) -> tuple[Path, str] | None:
     # A document is known by its front matter, whatever its name; peek first so
     # a large data file is never read whole.
     with target.open("rb") as stream:
-        if stream.read(3) != b"---":
+        if not frontmatter.has_opener(stream.read(6)):
             return None
     try:
         meta = frontmatter.parse(target.read_text(encoding="utf-8"))[0]

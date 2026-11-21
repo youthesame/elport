@@ -16,6 +16,24 @@ from _sync_harness import (
 from elport import frontmatter, sync
 
 
+def test_push_bom_prefixed_note_updates_existing_entity(
+    tmp_path, configured, monkeypatch, capsys
+):
+    doc = tmp_path / "report.md"
+    doc.write_text(
+        "---\nid: 5\nentity: experiments\nprofile: default\n---\n\nhello\n",
+        encoding="utf-8-sig",
+    )
+    client = FakeClient(remote_doc={"body": "old\n", "content_type": 2})
+    Store(monkeypatch, {"5": saved_state(local="old\n", remote="old\n")})
+
+    sync.push(doc, client, {})
+
+    assert "pushed experiments/5: report" in capsys.readouterr().out
+    assert "create" not in client.calls
+    assert client.saved_payload["body"] == "hello\n"
+
+
 @pytest.mark.parametrize(
     "body",
     [

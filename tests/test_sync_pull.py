@@ -1331,15 +1331,20 @@ def test_pull_names_what_the_body_does_not_show(
 
 
 @pytest.mark.parametrize(
-    ("name", "newline"), [("planted.md", "\n"), ("planted.txt", "\r")]
+    ("name", "newline", "prefix"),
+    [
+        ("planted.md", "\n", b""),
+        ("planted.txt", "\r", b""),
+        ("bom.md", "\n", b"\xef\xbb\xbf"),
+    ],
 )
 def test_pull_refuses_an_attachment_with_elport_frontmatter(
-    tmp_path, monkeypatch, configured, name, newline
+    tmp_path, monkeypatch, configured, name, newline, prefix
 ):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
     before = doc.read_text()
-    planted = newline.join(
+    planted = prefix + newline.join(
         [
             "---",
             "id: 99",
