@@ -7,12 +7,19 @@ from elport import frontmatter, sync
 
 class FakeClient:
     def __init__(
-        self, gets=None, uploads=None, comments=None, remote_doc=None, identity=None
+        self,
+        gets=None,
+        uploads=None,
+        comments=None,
+        remote_doc=None,
+        identity=None,
+        downloads=None,
     ):
         self.gets = list(gets or [])
         self.upload_list = list(uploads or [])
         self.comment_list = list(comments or [])
         self.remote_doc = dict(remote_doc or {})
+        self.downloads = dict(downloads or {})
         self.identity = {
             "team": 7,
             "default_read_base": 30,
@@ -81,7 +88,7 @@ class FakeClient:
 
     def download(self, entity, eid, upload_id):
         self.calls.append("download")
-        return b"data"
+        return self.downloads.get(upload_id, b"data")
 
 
 def write_doc(path: Path, body: str, **extra):

@@ -1328,3 +1328,107 @@ def test_pull_names_what_the_body_does_not_show(
         "not shown in the body: 1 attachment(s) (drawing.png), 1 step(s); "
         "see https://e.example/experiments.php?mode=view&id=1\n"
     )
+
+
+@pytest.mark.parametrize(
+    ("name", "newline"), [("planted.md", "\n"), ("planted.txt", "\r")]
+)
+def test_pull_refuses_an_attachment_with_elport_frontmatter(
+    tmp_path, monkeypatch, configured, name, newline
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    before = doc.read_text()
+    planted = newline.join(
+        [
+            "---",
+            "id: 99",
+            "profile: default",
+            "attachments: [../../thesis/draft.docx]",
+            "---",
+            "",
+            "body",
+        ]
+    ).encode("utf-8")
+    upload = {"id": 3, "long_name": "aa/planted", "real_name": name, "storage": 1}
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(
+        gets=[{"body": f"[note]({url})"}],
+        uploads=[upload],
+        downloads={3: planted},
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(
+        sync.state, "save", lambda *args: pytest.fail("state must not be saved")
+    )
+
+    with pytest.raises(RuntimeError, match="front matter"):
+        sync.pull(doc, client, {})
+
+    assert not (tmp_path / name).exists()
+    assert doc.read_text() == before
+
+
+def test_pull_refuses_an_elport_frontmatter_attachment_as_conflict_copy(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    existing = tmp_path / "planted.md"
+    existing.write_text("mine")
+    planted = (
+        b"---\nid: 99\nprofile: default\nattachments: [../../secret]\n---\n\nbody\n"
+    )
+    upload = {
+        "id": 3,
+        "long_name": "aa/planted",
+        "real_name": "planted.md",
+        "storage": 1,
+    }
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(
+        gets=[{"body": f"[note]({url})"}],
+        uploads=[upload],
+        downloads={3: planted},
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(
+        sync.state, "save", lambda *args: pytest.fail("state must not be saved")
+    )
+
+    with pytest.raises(RuntimeError, match="front matter"):
+        sync.pull(doc, client, {})
+
+    assert existing.read_text() == "mine"
+    assert not (tmp_path / "planted.md.remote").exists()
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        b"# Plain notes\n",
+        b"---\nlayout: post\ntitle: Blog\n---\n\nBody\n",
+        b"---\n1: a\nlayout: post\n---\n\nBody\n",
+        b"---\n[1]: a\n---\n\nBody\n",
+        b"---\ntitle: Protocol\n---\n\nBody\n",
+        b"---\xff\xfe",
+    ],
+)
+def test_pull_places_attachments_without_elport_frontmatter(
+    tmp_path, monkeypatch, configured, content
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    upload = {"id": 3, "long_name": "aa/notes", "real_name": "notes.md", "storage": 1}
+    url = sync.download_url("https://e.example", upload)
+    client = FakeClient(
+        gets=[{"body": f"[notes]({url})"}],
+        uploads=[upload],
+        downloads={3: content},
+    )
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.pull(doc, client, {})
+
+    assert (tmp_path / "notes.md").read_bytes() == content

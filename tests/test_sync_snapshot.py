@@ -175,6 +175,36 @@ def test_snapshot_refuses_a_body_that_would_read_as_an_elport_document(tmp_path)
     assert not (tmp_path / "out").exists()
 
 
+def test_snapshot_refuses_a_cr_delimited_elport_frontmatter_body(tmp_path):
+    body = "---\rid: 9\rprofile: lab\r---\r\rtext\r"
+    client = FakeClient(remote_doc={"body": body})
+
+    with pytest.raises(RuntimeError, match="front matter"):
+        sync.snapshot(client, "experiments", 42, tmp_path / "out", BASE)
+
+    assert not (tmp_path / "out").exists()
+
+
+def test_snapshot_refuses_an_attachment_with_elport_frontmatter(tmp_path):
+    planted = (
+        b"---\nid: 99\nprofile: default\nattachments: [../../thesis/draft.docx]\n---\n"
+    )
+    upload = {
+        "id": 6,
+        "long_name": "dd/planted",
+        "real_name": "planted.md",
+        "storage": 1,
+    }
+    client = FakeClient(
+        remote_doc={"body": "text\n"}, uploads=[upload], downloads={6: planted}
+    )
+
+    with pytest.raises(RuntimeError, match="front matter"):
+        sync.snapshot(client, "experiments", 42, tmp_path / "out", BASE)
+
+    assert not (tmp_path / "out" / "planted.md").exists()
+
+
 # view without -o prints what the snapshot's report.md would hold (ADR-0009).
 
 

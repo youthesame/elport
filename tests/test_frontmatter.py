@@ -158,3 +158,28 @@ def test_atomic_write_works_without_fchmod(tmp_path, monkeypatch):
     frontmatter.atomic_write(path, "after")
 
     assert path.read_text(encoding="utf-8") == "after"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n", "\r"])
+def test_text_meta_matches_document_meta_for_all_line_endings(tmp_path, newline):
+    raw = newline.join(["---", "id: 9", "profile: lab", "---", "", "body"]) + newline
+    path = tmp_path / "note.md"
+    path.write_bytes(raw.encode("utf-8"))
+
+    assert (
+        frontmatter.text_meta(raw)
+        == frontmatter.document_meta(path)
+        == {
+            "id": 9,
+            "profile": "lab",
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "text", ["---\n1: a\nlayout: post\n---\nBody\n", "---\n[1]: a\n---\nBody\n"]
+)
+def test_non_string_and_unhashable_keys_raise_value_error(text):
+    with pytest.raises(ValueError):
+        frontmatter.parse(text)
+    assert frontmatter.text_meta(text) is None
