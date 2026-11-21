@@ -247,3 +247,20 @@ def test_fetch_holds_at_most_one_hashless_duplicate_in_memory(tmp_path, configur
     sync.fetch(doc, Client(uploads=uploads), {})
 
     assert (tmp_path / "raw_data.csv").read_bytes() == b"data"
+
+
+def test_fetch_refuses_an_attachment_with_elport_frontmatter(tmp_path, configured):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body")
+    planted = (
+        b"---\nid: 99\nprofile: default\nattachments: [../../thesis/draft.docx]\n---\n"
+    )
+    client = FakeClient(
+        uploads=[_upload(3, "planted.md", planted)],
+        downloads={3: planted},
+    )
+
+    with pytest.raises(RuntimeError, match="front matter"):
+        sync.fetch(doc, client, {})
+
+    assert not (tmp_path / "planted.md").exists()

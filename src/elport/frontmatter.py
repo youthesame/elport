@@ -39,7 +39,13 @@ def _forbid_duplicate_keys(loader, node):
     mapping = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=True)
-        if key in mapping:
+        try:
+            duplicate = key in mapping
+        except TypeError as error:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"found unhashable key {key!r}", key_node.start_mark
+            ) from error
+        if duplicate:
             raise yaml.constructor.ConstructorError(
                 None, None, f"found duplicate key {key!r}", key_node.start_mark
             )
@@ -81,7 +87,7 @@ def parse(text: str) -> tuple[dict, str]:
         raise ValueError(f"invalid frontmatter YAML: {error}") from error
     if not isinstance(data, dict):
         return {}, text
-    unknown = sorted(set(data) - ALLOWED)
+    unknown = sorted(str(key) for key in set(data) - ALLOWED)
     if unknown:
         raise ValueError(f"unknown front matter key(s): {', '.join(unknown)}")
     if "id" in data:
@@ -135,7 +141,7 @@ def document_meta(path: Path) -> dict | None:
 def text_meta(text: str) -> dict | None:
     """``document_meta`` for text not yet on disk."""
     try:
-        meta = parse(text)[0]
+        meta = parse(text.replace("\r\n", "\n").replace("\r", "\n"))[0]
     except ValueError:
         return None
     return meta if "id" in meta and meta.get("profile") else None

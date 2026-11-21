@@ -1142,6 +1142,15 @@ def _place_conflict_attachment(target: Path, data: bytes, doc_dir: Path) -> None
         Path(temporary).unlink(missing_ok=True)
 
 
+def _has_elport_frontmatter(data: bytes) -> bool:
+    if not data.startswith(b"---"):
+        return False
+    try:
+        return frontmatter.text_meta(data.decode("utf-8")) is not None
+    except UnicodeDecodeError:
+        return False
+
+
 def _place_attachments(
     path: Path,
     remote: Remote,
@@ -1164,6 +1173,10 @@ def _place_attachments(
             continue  # already in place; the download would change nothing
         data = remote.download(upload["id"])
         _validate_attachment_target(target, path.parent)
+        if _has_elport_frontmatter(data):
+            raise RuntimeError(
+                f"refusing to place attachment with elport front matter: {name}"
+            )
         try:
             _write_attachment(target, data, path.parent)
             continue
