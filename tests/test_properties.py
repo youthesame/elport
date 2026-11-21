@@ -6,7 +6,9 @@ Run with ``HYPOTHESIS_PROFILE=crosshair`` to explore them symbolically.
 from __future__ import annotations
 
 import html
+import os
 import tempfile
+import unicodedata
 from pathlib import Path
 
 from hypothesis import assume, example, given
@@ -171,3 +173,50 @@ def test_pull_then_push_then_pull_is_stable(real_name, form, fragment, before, a
         ]
         pushed = transclude.replace_spans(local, references, {file: url})
     assert transclude.reverse(pushed, [upload], BASE) == (local, [upload])
+
+
+uploads = st.lists(
+    st.fixed_dictionaries(
+        {
+            "real_name": st.sampled_from(
+                # Names a case- and normalization-insensitive disk (APFS, NTFS)
+                # may hold as one file.
+                [
+                    "image.png",
+                    "Image.PNG",
+                    "data",
+                    "é",
+                    "e\u0301",
+                    "ß",
+                    "SS",
+                    "\u212a",
+                    "k",
+                ]
+            )
+            | st.text(st.characters(exclude_categories=["Cs", "Cn"]), max_size=8)
+        }
+    ),
+    max_size=8,
+).map(lambda items: [{**item, "id": i + 1} for i, item in enumerate(items)])
+
+
+def _names(items: list[dict]) -> dict[int, str]:
+    # Fresh copies: name_uploads stores its answer on the dicts it is given.
+    named = transclude.name_uploads([dict(u) for u in items])
+    return {u["id"]: u["elport_name"] for u in named}
+
+
+@given(uploads, st.randoms())
+def test_upload_names_are_distinct_files_and_stable(items, random):
+    """Every upload gets its own file beside the note, whatever the listing
+    order, and a newer upload never renames an older one's file."""
+    names = _names(items)
+    assert sorted(names) == [u["id"] for u in items]
+    folded = {unicodedata.normalize("NFC", n).casefold() for n in names.values()}
+    assert len(folded) == len(items)
+    assert _names(random.sample(items, len(items))) == names
+    assert _names(items[:-1]) == {u["id"]: names[u["id"]] for u in items[:-1]}
+    with tempfile.TemporaryDirectory() as directory:
+        for upload_id, name in names.items():
+            (Path(directory) / name).write_text(str(upload_id))
+        assert len(os.listdir(directory)) == len(items)
