@@ -5,11 +5,16 @@ Run with ``HYPOTHESIS_PROFILE=crosshair`` to explore them symbolically.
 
 from __future__ import annotations
 
-from hypothesis import example, given
+import html
+import tempfile
+from pathlib import Path
+
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from elport import frontmatter, transclude
 
+BASE = "https://e.example"
 nonempty = st.text(min_size=1)
 plain = st.text(st.characters(categories=["L", "N"]) | st.sampled_from(" \n"))
 path = st.from_regex(
@@ -70,3 +75,99 @@ def test_masking_only_blanks(text):
 def test_code_and_comments_hide_references(before, after, target, wrapper):
     link = wrapper.format(f"![x]({target}) <img src='{target}'>")
     assert transclude.extract(f"{before}\n\n{link}\n\n{after}") == []
+
+
+# Markdown/HTML built from the tokens the parsers care about, so generated text
+# actually exercises links, tags, fences, and code spans.
+markup = st.lists(
+    st.sampled_from(
+        [
+            "[x](",
+            "![x](",
+            "](",
+            "(",
+            ")",
+            "<",
+            ">",
+            "<img src=",
+            "<a href=",
+            '"',
+            "'",
+            "`",
+            "```\n",
+            "~~~\n",
+            "<!--",
+            "-->",
+            "\\",
+            " ",
+            "\n",
+            "#s",
+            "a.png",
+            "b c.txt",
+            "&amp;",
+            "> ",
+            "- ",
+        ]
+    )
+    | st.text(max_size=3),
+).map("".join)
+
+
+@given(markup)
+@example('<img src="a<!--x-->b">')
+def test_references_point_at_unmasked_destinations(text):
+    masked = transclude._masked(text)
+    references = transclude.extract(text)
+    assert [r.start for r in references] == sorted(r.start for r in references)
+    for r in references:
+        assert 0 <= r.start <= r.end <= len(text)
+        assert masked[r.start : r.end] == text[r.start : r.end]
+        raw = text[r.start : r.end]
+        if r.kind == "html":
+            assert r.path == html.unescape(raw)
+        elif r.kind == "angle":
+            assert raw[0] + raw[-1] == "<>" and r.path == raw[1:-1].strip()
+        else:
+            assert r.path == transclude._unescape_markdown_destination(raw)
+
+
+# Remote angle destinations are left out: push writes a plain destination, so
+# that notation changes once, harmlessly.
+notation = st.sampled_from(
+    ["[f]({})", "![f]({})", '<img src="{}">', "<a href='{}'>f</a>"]
+)
+
+
+@given(
+    st.text(
+        st.characters(exclude_categories=["Cs", "Cn"]),
+        min_size=1,
+        max_size=12,
+    ),
+    notation,
+    st.sampled_from(["", "#sec"]),
+    plain,
+    plain,
+)
+def test_pull_then_push_then_pull_is_stable(real_name, form, fragment, before, after):
+    """A pulled body pushes back to the same URLs, so pulling again changes
+    nothing, and every localized reference names the downloaded file."""
+    name = transclude.safe_name(real_name)
+    assume(not name.startswith("."))  # pull refuses hidden attachments
+    assume(not ("#" in name and fragment))
+    upload = {"id": 4, "long_name": "aa/bb.png", "real_name": real_name, "storage": 1}
+    url = transclude.download_url(BASE, upload)
+    remote = f"{before}\n\n{form.format(html.escape(url) + fragment)}\n\n{after}"
+
+    local, placed = transclude.reverse(remote, [upload], BASE)
+    assert placed == [upload]
+    with tempfile.TemporaryDirectory() as directory:
+        doc_dir = Path(directory)
+        file = doc_dir / name
+        file.write_bytes(b"data")
+        references = [r for r in transclude.plan(local, doc_dir) if r.file]
+        assert [(r.file, r.fragment) for r in references] == [
+            (file.resolve(), fragment)
+        ]
+        pushed = transclude.replace_spans(local, references, {file: url})
+    assert transclude.reverse(pushed, [upload], BASE) == (local, [upload])
