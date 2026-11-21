@@ -73,6 +73,8 @@ added features **thin** (YAGNI); prefer read-only, single-endpoint features.
 - The core engine (reference scan/replace, path safety, reverse transclusion) and the sync semantics are
   unit-tested **without network** (the API layer is mocked). These tests are the authority for behavior, so
   **changes go test-first.**
+- Property tests live in `tests/test_properties.py` (hypothesis). `HYPOTHESIS_PROFILE=crosshair uv run pytest
+  tests/test_properties.py` explores them symbolically (minutes; local only, not a CI gate).
 - When live API behavior needs confirming, use **only the public demo <https://demo.elabftw.net>** (public,
   periodically reset, disposable). Never use any other instance. Record the demo version a fact was measured on;
   version-dependent behavior is confirmed on the demo's current version only.

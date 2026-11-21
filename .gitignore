@@ -27,6 +27,7 @@ __pycache__/
 *.py[oc]
 .ruff_cache/
 .pytest_cache/
+.hypothesis/
 build/
 dist/
 wheels/
