@@ -27,6 +27,13 @@ def test_documents_finds_only_elport_documents(tmp_path):
     assert skipped == 4
 
 
+def test_documents_finds_bom_prefixed_elport_document(tmp_path):
+    doc = tmp_path / "report.md"
+    doc.write_text("---\nid: 5\nprofile: test\n---\n\nBody\n", encoding="utf-8-sig")
+
+    assert cli._documents(tmp_path) == ([doc], 0)
+
+
 def test_expand_keeps_order_and_drops_duplicates(tmp_path):
     a = elport_doc(tmp_path / "x" / "a.md")
     b = elport_doc(tmp_path / "b.md")
