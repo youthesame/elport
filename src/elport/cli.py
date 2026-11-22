@@ -111,7 +111,7 @@ def _parser() -> argparse.ArgumentParser:
 
     help_parser = commands.add_parser(
         "help",
-        help="print a help topic (read-only)",
+        help="print a help topic",
         description="print a bundled help topic (read-only)",
         epilog="example: elport help agents",
     )
@@ -153,7 +153,7 @@ def _parser() -> argparse.ArgumentParser:
 
     pull_parser = commands.add_parser(
         "pull",
-        help="download the remote body and attachments (writes locally)",
+        help="download the remote body and attachments",
         description=(
             "fetch the remote body, metadata, and referenced attachments into "
             "the local document (remote read-only)"
@@ -168,7 +168,7 @@ def _parser() -> argparse.ArgumentParser:
 
     fetch_parser = commands.add_parser(
         "fetch",
-        help="download all remote attachments locally (remote read-only)",
+        help="download all remote attachments locally",
         description=(
             "download every attachment on the entity without changing the body "
             "or base (remote read-only, writes locally)"
@@ -183,7 +183,7 @@ def _parser() -> argparse.ArgumentParser:
 
     status_parser = commands.add_parser(
         "status",
-        help="show local/remote sync state (read-only)",
+        help="show local/remote sync state",
         description="show local/remote sync state, uploads, mode, and locks (read-only)",
         epilog="example: elport status. inspect changes with `elport diff` or `elport push -n`",
     )
@@ -192,7 +192,7 @@ def _parser() -> argparse.ArgumentParser:
 
     comments_parser = commands.add_parser(
         "comments",
-        help="show the remote comment thread (read-only)",
+        help="show the remote comment thread",
         description="print the remote comment thread to the terminal (read-only)",
         epilog="example: elport comments 357. post a reply with `elport comment`",
     )
@@ -206,7 +206,7 @@ def _parser() -> argparse.ArgumentParser:
 
     comment_parser = commands.add_parser(
         "comment",
-        help="post a remote comment (writes remotely)",
+        help="post a remote comment",
         description=(
             "post one comment to the document's remote entity "
             "(edit or delete in the Web UI)"
@@ -224,7 +224,7 @@ def _parser() -> argparse.ArgumentParser:
 
     diff_parser = commands.add_parser(
         "diff",
-        help="show changes against remote or base (read-only)",
+        help="show changes against remote or base",
         description="diff the local document against remote, or against the last sync with --base (read-only)",
         epilog="example: elport diff --base. preview upload changes with `elport push -n`",
     )
@@ -238,7 +238,7 @@ def _parser() -> argparse.ArgumentParser:
 
     merge_parser = commands.add_parser(
         "merge",
-        help="merge local and remote sidecars using git merge-file (local-only)",
+        help="merge local and remote sidecars using git merge-file",
         description=(
             "3-way merge .base.md and .remote.md into the local document "
             "using git merge-file (local-only; never pushes)"
@@ -263,7 +263,7 @@ def _parser() -> argparse.ArgumentParser:
 
     new_parser = commands.add_parser(
         "new",
-        help="create a new remote entity and local document (writes remotely and locally)",
+        help="create a new remote entity and local document",
         description=(
             "create a new remote entity (with your server's default visibility) "
             "and write a local document scaffold"
@@ -287,7 +287,7 @@ def _parser() -> argparse.ArgumentParser:
 
     list_parser = commands.add_parser(
         "list",
-        help="list remote entities (read-only)",
+        help="list remote entities",
         description="list remote entities (read-only)",
         epilog="what moved in the team: --scope team --order lastchange, then "
         "--order comment (a new comment does not count as a change). "
@@ -303,7 +303,8 @@ def _parser() -> argparse.ArgumentParser:
         "--scope",
         choices=tuple(browse.SCOPES),
         default="self",
-        help="whose entities to list (default: self)",
+        help="whose entities to list: self (yours), team (active team), "
+        "all (every visible team) (default: self)",
     )
     list_parser.add_argument(
         "-q",
@@ -344,7 +345,7 @@ def _parser() -> argparse.ArgumentParser:
 
     activity_parser = commands.add_parser(
         "activity",
-        help="heatmap of entities created per day, up to a year (read-only)",
+        help="heatmap of entities created per day, up to a year",
         description="print a terminal heatmap of entities created per day, up to a year (read-only)",
         epilog="raw rows as JSON: elport list --all --json [--scope team]",
     )
@@ -358,14 +359,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     activity_parser.add_argument("--profile", help="config profile to use")
 
-    view_help = (
-        "read a remote entity (read-only; -o DIR writes a local snapshot, "
-        "not a working copy)"
-    )
     view_parser = commands.add_parser(
         "view",
-        help=view_help,
-        description=view_help,
+        help="read a remote entity (-o DIR saves a local snapshot)",
+        description=(
+            "read a remote entity (read-only; -o DIR writes a local snapshot, "
+            "not a working copy)"
+        ),
         epilog=(
             "stdout holds the body (or saved paths with -o DIR); "
             "links and items outside the body print to stderr. "
@@ -387,14 +387,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     view_parser.add_argument("--profile", help="config profile to use")
 
-    clone_help = (
-        "start a local document to edit and push an existing remote entity "
-        "(writes locally; to only read one, use view)"
-    )
     clone_parser = commands.add_parser(
         "clone",
-        help=clone_help,
-        description=clone_help,
+        help="start a local document from an existing entity (to read, use view)",
+        description=(
+            "start a local document to edit and push an existing remote entity "
+            "(writes locally; to only read one, use view)"
+        ),
         epilog=(
             "example: elport clone 357 (or: elport clone --all backup/ to mirror). "
             "HTML entities are read-only; read them with `elport view <id> -o DIR`"
@@ -406,7 +405,7 @@ def _parser() -> argparse.ArgumentParser:
         dest="all_root",
         metavar="ROOT",
         help="clone every entity not yet under ROOT into "
-        "ROOT/<entity>/<id>-<title>/report.md",
+        "ROOT/<entity>/<id>-<title>/report.md (HTML entities become read-only snapshots)",
     )
     clone_parser.add_argument(
         "--entity",
@@ -429,7 +428,7 @@ def _parser() -> argparse.ArgumentParser:
 
     whoami_parser = commands.add_parser(
         "whoami",
-        help="show the authenticated user and active team (read-only)",
+        help="show the authenticated user and active team",
         description="check authentication, team, key permissions, server version, and scopes (read-only)",
         epilog="if unauthenticated, run `elport login` or set ELABFTW_BASE_URL and ELABFTW_API_KEY",
     )
@@ -437,7 +436,7 @@ def _parser() -> argparse.ArgumentParser:
 
     login_parser = commands.add_parser(
         "login",
-        help="store base_url and api_key for a profile (writes local config/keyring)",
+        help="store base_url and api_key for a profile",
         description=(
             "interactively store base_url in config.toml and api_key in the OS "
             "keyring (falling back to config.toml without a keyring)"
@@ -449,7 +448,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     logout_parser = commands.add_parser(
         "logout",
-        help="remove the stored api_key for a profile (writes local config/keyring)",
+        help="remove the stored api_key for a profile",
         description=(
             "remove the stored api_key from the OS keyring and config.toml, "
             "clearing default_profile if it names this profile (keeps base_url)"
@@ -461,7 +460,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     profile_parser = commands.add_parser(
         "profile",
-        help="list profiles (read-only) or select the default with 'use'",
+        help="list profiles or select the default with 'use'",
         description="list configured profiles (read-only), or set the default profile with `profile use <name>`",
         epilog="example: elport profile use labA",
     )
