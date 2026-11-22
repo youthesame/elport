@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import hashlib
 import html
+import io
 import os
 import tempfile
 import unicodedata
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
@@ -65,6 +67,7 @@ def test_frontmatter_round_trips(data, body, bom):
     assert frontmatter.parse("\ufeff" * bom + text) == (data, body)
 
 
+@pytest.mark.symbolic
 @given(st.text())
 def test_safe_name_is_one_plain_component(name):
     result = transclude.safe_name(name)
@@ -72,6 +75,7 @@ def test_safe_name_is_one_plain_component(name):
     assert result not in ("", ".", "..")
 
 
+@pytest.mark.symbolic
 @given(st.text())
 def test_masking_only_blanks(text):
     masked = transclude._masked(text)
@@ -142,6 +146,148 @@ def test_references_point_at_unmasked_destinations(text):
             assert raw[0] + raw[-1] == "<>" and r.path == raw[1:-1].strip()
         else:
             assert r.path == transclude._unescape_markdown_destination(raw)
+
+
+segment = st.text("abc01_-", min_size=1, max_size=5)
+rel_path = st.lists(segment, min_size=1, max_size=3).map("/".join)
+ignore_part = segment | st.sampled_from(["*", "**", "*.tmp", "a*"])
+ignore_pattern = st.builds(
+    lambda lead, parts, trail: f"{lead}{'/'.join(parts)}{trail}",
+    st.sampled_from(["", "/"]),
+    st.lists(ignore_part, min_size=1, max_size=3),
+    st.sampled_from(["", "/"]),
+)
+
+
+@pytest.mark.symbolic
+@given(rel_path, segment, st.lists(ignore_pattern, max_size=3), segment)
+def test_ignore_is_monotonic_and_trailing_slash_matches_dirs_only(
+    relative, child, patterns, name
+):
+    if transclude._matches(relative, patterns):
+        assert transclude._matches(f"{relative}/{child}", patterns)
+
+    # Trailing slash excludes descendants of a directory, never a file of that name.
+    assert not transclude._matches(name, [f"{name}/"])
+    assert not transclude._matches(name, [f"/{name}/"])
+    assert not transclude._matches(f"work/{name}", [f"work/{name}/"])
+    assert not transclude._matches(f"work/{name}", [f"**/{name}/"])
+    assert transclude._matches(f"{name}/{child}", [f"/{name}/"])
+    assert transclude._matches(f"work/{name}/{child}", [f"work/{name}/"])
+    assert transclude._matches(f"work/{name}/{child}", [f"**/{name}/"])
+
+    layer = transclude.IgnoreLayer(patterns, child)
+    assert transclude._ignored(relative, [layer]) == transclude._matches(
+        f"{child}/{relative}", patterns
+    )
+
+
+@pytest.mark.symbolic
+@given(
+    st.sampled_from(["", "a", "a/b"]),
+    segment,
+    st.sampled_from(["", "x", "../ok", "./ok"]),
+    st.sampled_from(["/", "\\"]),
+)
+def test_hidden_relative_paths_are_always_rejected(before, secret, after, sep):
+    doc_dir = Path("/work/notes")
+    parts = [p for p in (before, f".{secret}", after) if p]
+    assert transclude._hidden_as_written(doc_dir, sep.join(parts))
+
+    plain_parts = [p for p in (before, secret, after) if p]
+    assert not transclude._hidden_as_written(doc_dir, sep.join(plain_parts))
+
+
+@pytest.mark.symbolic
+@given(segment, segment, segment)
+def test_hidden_ancestor_allows_neighbours_but_rejects_new_hidden_components(
+    ancestor, sibling, secret
+):
+    assume(secret != ancestor)
+    # Resolve once so target and doc_dir share a drive/anchor on Windows too.
+    root = Path(f"/root/.{ancestor}").resolve()
+    doc_dir = root / "notes"
+    neighbour = doc_dir / f"{sibling}.txt"
+    assert not transclude._exposes_hidden(doc_dir, f"{sibling}.txt", neighbour)
+    assert not transclude._exposes_hidden(doc_dir, str(neighbour), neighbour)
+
+    in_hidden = doc_dir / f".{secret}" / f"{sibling}.txt"
+    assert transclude._exposes_hidden(doc_dir, f"{sibling}.txt", in_hidden)
+    other_hidden = root.parent / f".{secret}" / f"{sibling}.txt"
+    assert transclude._exposes_hidden(doc_dir, str(other_hidden), other_hidden)
+
+
+meta_text = st.sampled_from(["None", "Exp 1", "5", ""])
+catalog_value = st.integers(min_value=1, max_value=12) | st.sampled_from(
+    ["5", "None", "Synthesis"]
+)
+synced_meta = st.fixed_dictionaries(
+    {},
+    optional={
+        "id": st.integers(min_value=1, max_value=9),
+        "title": meta_text,
+        "category": catalog_value,
+        "read": st.sampled_from(sorted(frontmatter.PERMISSION_LEVELS)),
+        "tags": st.lists(st.sampled_from(["a", "b"]), max_size=2),
+    },
+)
+remote_meta_doc = st.fixed_dictionaries(
+    {},
+    optional={
+        "title": meta_text,
+        "category": st.integers(min_value=1, max_value=12),
+        "category_title": st.sampled_from(["", "5", "Synthesis", "Analysis"]),
+        "canread_base": st.sampled_from(list(frontmatter.PERMISSION_LEVELS.values())),
+        "tags": st.sampled_from(["", "a", "a,b", "b|c"]),
+    },
+)
+
+
+def _same_value(a, b) -> bool:
+    return (a is None and b is None) or (
+        a is not None and b is not None and str(a) == str(b)
+    )
+
+
+@pytest.mark.symbolic
+@given(synced_meta, synced_meta)
+def test_edited_meta_selects_only_changed_synced_keys(local_meta, base_meta):
+    assert sync._edited_meta(local_meta, None) == local_meta
+    edited = sync._edited_meta(local_meta, {"meta_base": base_meta})
+    for key, val in local_meta.items():
+        if key not in sync.SYNCED_META:
+            assert edited[key] == val
+        elif _same_value(val, base_meta.get(key)):
+            assert key not in edited
+        else:
+            assert edited[key] == val
+
+
+@pytest.mark.symbolic
+@given(synced_meta, synced_meta, remote_meta_doc)
+@example(
+    {"category": 5}, {"category": "5"}, {"category": 9, "category_title": "Analysis"}
+)
+@example({"category": "5"}, {}, {"category": 5, "category_title": "5"})
+def test_merge_meta_preserves_local_edits_and_is_idempotent(
+    local_meta, base_meta, remote_doc
+):
+    merged, new_base = sync._merge_meta(local_meta, base_meta, remote_doc)
+    remote_values = sync._remote_meta(remote_doc)
+    for key, remote_val in remote_values.items():
+        assert new_base.get(key) == remote_val
+        if _same_value(local_meta.get(key), base_meta.get(key)):
+            assert _same_value(merged.get(key), remote_val)
+        else:
+            assert merged.get(key) == local_meta.get(key)
+    if "tags" in remote_doc:
+        expected_tags = sorted(
+            sync._remote_tags(remote_doc)
+            | {str(t) for t in local_meta.get("tags") or []}
+        )
+        assert (merged.get("tags") or []) == expected_tags
+    # Pulling the same remote again is a no-op and still keeps local edits.
+    assert sync._merge_meta(merged, new_base, remote_doc) == (merged, new_base)
 
 
 # Remote angle destinations are left out: push writes a plain destination, so
@@ -335,6 +481,9 @@ def test_sync_follows_the_two_form_base(configured):
             self.doc = Path(self.directory.name) / "note.md"
             self.monkeypatch = pytest.MonkeyPatch()
             self.store = Store(self.monkeypatch)
+            # A local file the user never links: only the remote side plants it,
+            # so push must never upload it without attachments: (ADR-0007).
+            (self.doc.parent / "secret.txt").write_bytes(b"secret")
             # Cloned: both sides at the same stored form.
             self.server = Server("a", hashes)
             self.local_base = self.remote_base = self.local = "a"
@@ -376,6 +525,9 @@ def test_sync_follows_the_two_form_base(configured):
                     written = self.recorded[recorded[r.start]]["markdown"]
                     assert local[r.start : r.end] == written  # restored as written
                     data = self.server.served(recorded[r.start])
+                elif r.path == "secret.txt":
+                    # Remote-planted path: never uploaded, stays literal on both sides.
+                    data = None
                 else:
                     file = self.doc.parent / r.path
                     data = file.read_bytes() if file.is_file() else None
@@ -402,23 +554,35 @@ def test_sync_follows_the_two_form_base(configured):
             self.synced = False
             self.changed.add(name)
 
-        @rule(text=texts, data=st.data())
-        def edit_locally(self, text, data):
-            # Only files that exist: pushing a missing one sends its bare path,
-            # which reads as a server-side link from then on (ADR-0007).
-            existing = sorted(p.name for p in self.doc.parent.glob("*.txt"))
+        @rule(text=texts, keep_planted=st.booleans(), data=st.data())
+        def edit_locally(self, text, keep_planted, data):
+            # Only files that exist (never secret.txt): pushing a missing one sends
+            # its bare path, which reads as a server-side link from then on (ADR-0007).
+            existing = sorted(
+                p.name for p in self.doc.parent.glob("*.txt") if p.name != "secret.txt"
+            )
             links = (
                 data.draw(st.lists(st.sampled_from(existing), max_size=2))
                 if existing
                 else []
             )
-            body = text + "".join(f"\n[{name}]({name})" for name in links)
+            planted = (
+                "\n[r](secret.txt)"
+                if keep_planted and "[r](secret.txt)" in self.local
+                else ""
+            )
+            body = text + planted + "".join(f"\n[{name}]({name})" for name in links)
             self.write(body)
             self.local, self.synced = body, False
 
         @rule(text=texts)
         def edit_on_the_web(self, text):
             self.server.edit(text)
+            self.synced = False
+
+        @rule()
+        def plant_link_on_the_web(self):
+            self.server.edit(f"{html.unescape(self.server.body)}\n[r](secret.txt)")
             self.synced = False
 
         @rule(name=remote_names, data=contents)
@@ -504,9 +668,15 @@ def test_sync_follows_the_two_form_base(configured):
         def both_sides_agree(self):
             if not hasattr(self, "server"):
                 return
+            assert b"secret" not in self.server.files.values()
             if self.synced:
                 assert self.local_meaning() == self.server.meaning()
-            summary = sync.status(self.doc, self.server, {})
+            out = io.StringIO()
+            with redirect_stdout(out):
+                summary = sync.status(self.doc, self.server, {})
+            for line in out.getvalue().splitlines():
+                if line.startswith(("uploads new:", "uploads reuse:")):
+                    assert "secret.txt" not in line
             assert ("local dirty" in summary) == (self.local != self.local_base)
             assert ("remote changed" in summary) == (
                 self.server.body != self.remote_base

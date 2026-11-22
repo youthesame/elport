@@ -105,6 +105,7 @@ def _path_matches(relative: str, pattern: str) -> bool:
     pattern_parts = tuple(pattern.split("/"))
     path_parts = tuple(relative.split("/"))
 
+    @functools.cache
     def matches(pattern_index: int, path_index: int) -> bool:
         if pattern_index == len(pattern_parts):
             return path_index == len(path_parts)
@@ -126,32 +127,27 @@ def _matches(relative: str, patterns: list[str]) -> bool:
     Patterns use fnmatch syntax; ``**/`` may span zero or more directories.
     A trailing slash matches that directory and every file below it.
     """
+    parts = relative.split("/")
     for pattern in patterns:
         pattern = pattern.replace("\\", "/")
         rooted = pattern.startswith("/")
         pattern = pattern.removeprefix("/")
         directory_only = pattern.endswith("/")
-        if directory_only:
-            pattern = pattern.removesuffix("/")
-            if not rooted and "/" not in pattern:
-                if any(
-                    fnmatchcase(segment, pattern)
-                    for segment in relative.split("/")[:-1]
-                ):
-                    return True
-                continue
-            pattern += "/**"
+        pattern = pattern.removesuffix("/")
+        if not pattern:
+            continue
 
         if not rooted and "/" not in pattern:
-            if any(fnmatchcase(segment, pattern) for segment in relative.split("/")):
+            segments = parts[:-1] if directory_only else parts
+            if any(fnmatchcase(segment, pattern) for segment in segments):
                 return True
             continue
 
-        # A pattern that names a directory excludes everything below it too.
-        parts = relative.split("/")
+        # A pattern that names a directory excludes everything below it too;
+        # a trailing slash requires at least one component below the match.
+        limit = len(parts) if directory_only else len(parts) + 1
         if any(
-            _path_matches("/".join(parts[:count]), pattern)
-            for count in range(1, len(parts) + 1)
+            _path_matches("/".join(parts[:count]), pattern) for count in range(1, limit)
         ):
             return True
     return False
@@ -528,12 +524,24 @@ def listed_files(
     return files
 
 
-def local_files(
-    text: str, doc_dir: Path, ignore: list[IgnoreLayer] | None = None
+def bare_paths(text: str) -> list[str]:
+    """Reference destinations in ``text`` that could name a local file."""
+    return [
+        ref.path
+        for ref in extract(text)
+        if ref.path
+        and not ref.path.startswith("#")
+        and "?" not in ref.path
+        and not _has_scheme(ref.path)
+    ]
+
+
+def resolve_local_paths(
+    paths: list[str], doc_dir: Path, ignore: list[IgnoreLayer] | None = None
 ) -> set[Path]:
-    """The files plan() would upload for text, quietly: no warnings, no collisions."""
+    """The files ``_candidate`` accepts among ``paths``, quietly."""
     _listing.cache_clear()
-    files = (_candidate(doc_dir, ref.path, ignore or [])[0] for ref in extract(text))
+    files = (_candidate(doc_dir, value, ignore or [])[0] for value in paths)
     return {file for file in files if file is not None}
 
 

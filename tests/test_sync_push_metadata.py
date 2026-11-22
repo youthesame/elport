@@ -290,3 +290,46 @@ def test_dry_run_previews_declared_status_without_mutation(
 
     assert "status: Running\n" in capsys.readouterr().out
     assert client.calls == ["me", "get", "statuses"]
+
+
+def test_pull_adopts_remote_category_after_pushing_numeric_category(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "body", category=9)
+    stored_state = saved_state(local="body", remote="body")
+    monkeypatch.setattr(sync.state, "load", lambda *args: stored_state)
+    monkeypatch.setattr(sync.state, "save", lambda *args: stored_state.update(args[-1]))
+    push_client = FakeClient(
+        gets=[{"body": "body"}, {"body": "body", "content_type": 2}]
+    )
+
+    sync.push(doc, push_client, {})
+    sync.pull(
+        doc,
+        FakeClient(
+            gets=[{"body": "body", "category": 10, "category_title": "Analysis"}]
+        ),
+        {},
+    )
+
+    assert "category: Analysis\n" in doc.read_text(encoding="utf-8")
+
+
+def test_push_sends_literal_none_title_when_base_has_no_title(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local", title="None")
+    client = FakeClient(
+        gets=[{"body": "remote"}, {"body": "stored", "content_type": 2}]
+    )
+    monkeypatch.setattr(
+        sync.state, "load", lambda *args: {**saved_state(), "meta_base": {}}
+    )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    sync.push(doc, client, {})
+
+    assert client.saved_payload is not None
+    assert client.saved_payload["title"] == "None"
