@@ -1499,6 +1499,36 @@ def _list_links(remote_doc: dict) -> None:
                 )
 
 
+def _step_order(step: dict, index: int) -> tuple[int, int, int]:
+    raw = step.get("ordering")
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return (0, raw, index)
+    if isinstance(raw, str):
+        text = raw.strip()
+        if text.isascii() and (
+            text.isdigit() or (text.startswith("-") and text[1:].isdigit())
+        ):
+            return (0, int(text), index)
+    return (1, 0, index)
+
+
+def _list_steps(remote_doc: dict) -> None:
+    """Print each step's completion state and text on stderr."""
+    steps = remote_doc.get("steps")
+    if not isinstance(steps, list):
+        return
+    indexed = [
+        (index, step)
+        for index, step in enumerate(steps)
+        if isinstance(step, dict) and str(step.get("body") or "").strip()
+    ]
+    indexed.sort(key=lambda pair: _step_order(pair[1], pair[0]))
+    for _, step in indexed:
+        mark = "x" if step.get("finished") in (1, True, "1") else " "
+        body = " ".join(str(step.get("body") or "").split())
+        print(f"step [{mark}] {body}", file=sys.stderr)
+
+
 def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict], list[dict]]:
     """The body as a reader wants it (ADR-0009), the uploads it shows, and every
     upload elport may place."""
@@ -1509,6 +1539,7 @@ def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict], list[d
     uploads = remote.uploads(remote_doc)
     _name_what_is_aside(remote, remote_doc, uploads)
     _list_links(remote_doc)
+    _list_steps(remote_doc)
     # A one-off read, unlike pull and push (#16): say what the reader will miss.
     _warn_unmatched_attachments(body, uploads, remote.base_url)
     attachments = _reversible_uploads(uploads)
