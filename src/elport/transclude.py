@@ -617,7 +617,7 @@ def _download_query(value: str) -> dict[str, list[str]]:
     return parse_qs(urlparse(html.unescape(value)).query)
 
 
-_UNSAFE_MARKDOWN_NAME = re.compile(r"[\s()#]")
+_UNSAFE_MARKDOWN_NAME = re.compile(r"[\s()]")
 
 
 def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[dict]]:
@@ -640,20 +640,21 @@ def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[di
             # rewrite, or a URL merely embedded in a larger destination:
             # localizing it here would not survive the round trip.
             continue
-        value = text[match.start() : match.end()]
-        fragment = "#" + value.split("#", 1)[1] if "#" in value else ""
         name = upload_name(upload)
+        if "#" in name or "#" in text[match.start() : match.end()]:
+            # The server side wrote the fragment and the name. Beside a file
+            # name a "#" is ambiguous on the next push: "run#12.csv" may be a
+            # file itself, and "name#/../x" resolves to x. It stays a URL.
+            continue
         if destination.kind == "markdown" and _UNSAFE_MARKDOWN_NAME.search(name):
-            name = f"<{name}{fragment}>"
+            name = f"<{name}>"
         elif destination.kind == "html":
-            name = html.escape(name) + fragment
+            name = html.escape(name)
             prev = match.start() - 1
             while prev >= 0 and text[prev].isspace():
                 prev -= 1
             if prev < 0 or text[prev] not in ('"', "'"):
                 name = f'"{name}"'
-        else:
-            name += fragment
         pieces.append(text[pos : match.start()])
         pieces.append(name)
         pos = match.end()

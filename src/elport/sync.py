@@ -1313,6 +1313,8 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     _reject_attachment_conflict_name_collisions(
         used, [(upload, ".remote") for upload in used]
     )
+    names = sorted({upload_name(upload) for upload in used})
+    new = [name for name in names if not (path.parent / name).exists()]
     attachment_conflicts = _place_attachments(path, remote, used)
     if attachment_conflicts:
         raise RuntimeError(
@@ -1341,10 +1343,13 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     state.save(base_url, entity, str(eid), record)
     title = meta.get("title") or remote_doc.get("title") or path.stem
     print(f"pulled {entity}/{eid}: {title}")
-    print(f"  wrote {path.name}")
+    # A file appearing beside the note is named: someone else chose its name.
+    print("  wrote " + ", ".join([path.name, *new]))
     url = remote_doc.get("sharelink")
     if url:
         print(f"  → {url}")
+    if new:
+        return f"pulled ({len(new)} new attachment(s))"
     return UP_TO_DATE if up_to_date else "pulled"
 
 

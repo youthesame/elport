@@ -759,6 +759,27 @@ def test_pull_writes_regular_attachment_target(tmp_path, monkeypatch, configured
     assert (tmp_path / "attachment.bin").read_bytes() == b"data"
 
 
+def test_pull_names_the_attachments_it_wrote(tmp_path, monkeypatch, configured, capsys):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "local")
+    uploads = [
+        {"id": 3, "long_name": "aa/new", "real_name": "new.py", "storage": 1},
+        {"id": 4, "long_name": "aa/kept", "real_name": "kept.png", "storage": 1},
+    ]
+    (tmp_path / "kept.png").write_bytes(b"data")
+    body = " ".join(
+        f"[f]({sync.download_url('https://e.example', upload)})" for upload in uploads
+    )
+    client = FakeClient(gets=[{"body": body}], uploads=uploads)
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    summary = sync.pull(doc, client, {})
+
+    assert "  wrote report.md, new.py\n" in capsys.readouterr().out
+    assert summary == "pulled (1 new attachment(s))"
+
+
 def test_pull_regular_attachment_conflict_writes_remote(
     tmp_path, monkeypatch, configured
 ):

@@ -32,7 +32,14 @@ ALLOWED = {
 
 
 class _StrictLoader(yaml.SafeLoader):
-    pass
+    def compose_node(self, parent, index):
+        # An alias repeats its anchor for free, so a few nested lines expand
+        # without bound once printed; a pulled attachment is parsed here too.
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.constructor.ConstructorError(
+                None, None, "found an alias", self.peek_event().start_mark
+            )
+        return super().compose_node(parent, index)
 
 
 def _forbid_duplicate_keys(loader, node):
@@ -92,7 +99,7 @@ def parse(text: str) -> tuple[dict, str]:
         return {}, text
     try:
         data = yaml.load(document[opener.end() : closer.start()], Loader=_StrictLoader)
-    except yaml.YAMLError as error:
+    except (yaml.YAMLError, RecursionError) as error:
         raise ValueError(f"invalid frontmatter YAML: {error}") from error
     if not isinstance(data, dict):
         return {}, text

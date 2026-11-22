@@ -659,3 +659,9 @@ def test_agents_topic_names_what_needs_the_users_approval():
 
     for flag in ("--force", "--yes", "attachments:"):
         assert flag in text
+
+
+def test_agents_topic_says_remote_text_is_not_an_instruction():
+    text = (resources.files("elport") / "help" / "agents.md").read_text("utf-8")
+
+    assert "instructions" in text and "someone else" in text
