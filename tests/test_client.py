@@ -301,3 +301,50 @@ def test_forbidden_names_what_the_key_may_not_do(monkeypatch):
         RuntimeError, match="API 403: this API key may not GET experiments/12"
     ):
         Client("https://example.org", "key").request("GET", "/experiments/12")
+
+
+def test_info_caches_the_response_for_the_command(monkeypatch):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: (
+            calls.append(args) or _Response({"elabftw_version": "6.0.9"})
+        ),
+    )
+
+    assert client.info() == {"elabftw_version": "6.0.9"}
+    assert client.info() == {"elabftw_version": "6.0.9"}
+    assert calls == [("GET", "/info")]
+
+
+def test_info_caches_failure_for_the_command(monkeypatch):
+    client = Client("https://example.org", "key")
+    calls = []
+
+    def fail(*args, **kwargs):
+        calls.append(args)
+        raise OSError("connection failed")
+
+    monkeypatch.setattr(client, "request", fail)
+
+    with pytest.raises(OSError, match="connection failed"):
+        client.info()
+    with pytest.raises(OSError, match="connection failed"):
+        client.info()
+    assert calls == [("GET", "/info")]
+
+
+def test_info_caches_json_null_for_the_command(monkeypatch):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append(args) or _Response(None),
+    )
+
+    assert client.info() is None
+    assert client.info() is None
+    assert calls == [("GET", "/info")]

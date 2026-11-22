@@ -711,3 +711,89 @@ def test_push_fills_an_empty_html_entity(tmp_path, monkeypatch, configured):
     sync.push(doc, client, {})
 
     assert client.saved_payload["content_type"] == 2
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_push_warns_on_raw_html_against_elabftw_6(
+    tmp_path, monkeypatch, configured, capsys, dry_run
+):
+    doc = tmp_path / "report.md"
+    body = "<figure><img src='missing.png'></figure>"
+    write_doc(doc, body)
+    Store(monkeypatch, {"1": saved_state(local="old", remote="remote")})
+    client = FakeClient(
+        gets=[
+            {"body": "remote", "content_type": 2},
+            {"body": body, "content_type": 2},
+        ]
+    )
+    client.info = lambda: client.calls.append("info") or {"elabftw_version": "6.0.9"}
+
+    sync.push(doc, client, {}, dry_run=dry_run)
+
+    assert "eLabFTW 6.x strips raw HTML" in capsys.readouterr().err
+    assert "info" in client.calls
+
+
+def test_push_of_unchanged_raw_html_body_skips_info_and_warning(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    body = "<b>same</b>"
+    write_doc(doc, body)
+    Store(monkeypatch, {"1": saved_state(local=body, remote="remote")})
+    client = FakeClient(
+        remote_doc={"body": "remote", "title": "Test", "content_type": 2}
+    )
+    client.info = lambda: client.calls.append("info") or {"elabftw_version": "6.0.9"}
+
+    assert sync.push(doc, client, {}) == "pushed (body unchanged)"
+
+    assert "info" not in client.calls
+    assert "eLabFTW 6.x" not in capsys.readouterr().err
+
+
+def test_push_stays_quiet_on_raw_html_against_elabftw_5(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    body = "<b>ok</b>"
+    write_doc(doc, body)
+    Store(monkeypatch, {"1": saved_state(local="old", remote="remote")})
+    client = FakeClient(
+        gets=[
+            {"body": "remote", "content_type": 2},
+            {"body": body, "content_type": 2},
+        ]
+    )
+    client.info = lambda: client.calls.append("info") or {"elabftw_version": "5.6.12"}
+
+    sync.push(doc, client, {})
+
+    assert "eLabFTW 6.x" not in capsys.readouterr().err
+
+
+def test_push_saves_base_before_calling_info_for_raw_html_warning(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    body = "<b>updated</b>"
+    write_doc(doc, body)
+    store = Store(monkeypatch, {"1": saved_state(local="old", remote="remote")})
+    client = FakeClient(
+        gets=[
+            {"body": "remote", "content_type": 2},
+            {"body": body, "content_type": 2},
+        ]
+    )
+    saved_before_info = []
+
+    def check_info():
+        saved_before_info.append(store.data["1"].get("local_base"))
+        return {"elabftw_version": "6.0.9"}
+
+    client.info = check_info
+
+    sync.push(doc, client, {})
+
+    assert saved_before_info == [body]

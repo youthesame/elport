@@ -22,6 +22,7 @@ from .transclude import (
     bare_paths,
     download_url,
     extract,
+    has_raw_html,
     listed_files,
     name_uploads,
     plan,
@@ -107,6 +108,26 @@ def _warn_unmatched_attachments(body: str, uploads: list[dict], base_url: str) -
         print(
             "warning: attachment not found among this entity's uploads, "
             f"kept as a URL (not downloaded, not localized): {name}",
+            file=sys.stderr,
+        )
+
+
+def _warn_raw_html_on_v6(client, body: str) -> None:
+    if not has_raw_html(body):
+        return
+    info_fn = getattr(client, "info", None)
+    if info_fn is None:
+        return
+    try:
+        info = info_fn()
+    except (OSError, RuntimeError, ValueError):
+        return
+    version = info.get("elabftw_version") if isinstance(info, dict) else None
+    match = re.match(r"^\s*(\d+)", str(version or ""))
+    if match and int(match.group(1)) >= 6:
+        print(
+            "warning: eLabFTW 6.x strips raw HTML from rendered Markdown; "
+            "use standard Markdown such as ![alt](fig.png)",
             file=sys.stderr,
         )
 
@@ -734,6 +755,7 @@ def push(
         for ref in refs:
             if ref.doc is not None:
                 print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
+        _warn_raw_html_on_v6(client, body)
         return "dry run"
 
     _confirm_large_uploads(new_uploads, assume_yes)
@@ -847,6 +869,8 @@ def push(
     if remembered:
         record["remote_paths"] = remembered
     state.save(base_url, entity, str(eid), record)
+    if not unchanged:
+        _warn_raw_html_on_v6(client, body)
 
     existing_tags = _remote_tags(remote_doc)
     for tag in meta.get("tags", []) or []:
@@ -1529,6 +1553,8 @@ def status(path: Path, client, config: dict, profile=None) -> str:
         return "remote unavailable (offline?)"
 
     _warn_unmatched_attachments(body, uploads, remote.base_url)
+    if not _is_html(remote_doc):
+        _warn_raw_html_on_v6(client, body)
     seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
     _skip_remote_linked(
         path,
