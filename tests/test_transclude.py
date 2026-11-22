@@ -1640,3 +1640,44 @@ def test_name_uploads_never_gives_two_uploads_one_name():
     names = [u["elport_name"] for u in transclude.name_uploads(uploads)]
 
     assert names == ["image.png", "image-3.png", "image-3-3.png"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '<figure><img src="fig.png" width="80%"><figcaption>c</figcaption></figure>',
+        "<table><tr><td>1</td></tr></table>",
+        "text with <b>bold</b>",
+        "line<br>break",
+        "<pre>raw</pre>",
+        "<code>inline</code>",
+        "<!--\n```\n-->\n\n<figure><img src='a.png'></figure>",
+        "unmatched `\n~~~\ncode\n~~~\nactual <br> and `",
+        '<img alt="<!--" src="image.png">',
+        "[<b>bold</b>](https://example.org '<br>')",
+    ],
+)
+def test_has_raw_html_detects_html_tags(text):
+    assert transclude.has_raw_html(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "# Title\n\n![alt](fig.png)\n\n[data](data.csv)\n",
+        "inline `<figure>` code",
+        "```html\n<figure><img src='a.png'></figure>\n```",
+        "<!-- <figure>commented out</figure> -->",
+        "link with angle destination [a](<fig 1.png>)",
+        'link with html in title [example](https://example.org "<br>")',
+        'angle link with html in title [example](<https://example.org> "<br>")',
+        "[ref]: <fig 1.png>",
+        '[ref]: https://example.org "<br>"',
+        '```\ncode\n```\n[ref]: https://example.org "<br>"',
+        "autolink <https://example.com/a/b> and <mailto:a@b.example>",
+        r"escaped \<br> tag",
+        "inequality a < b and c > d",
+    ],
+)
+def test_has_raw_html_ignores_markdown_code_comments_and_links(text):
+    assert not transclude.has_raw_html(text)

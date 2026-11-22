@@ -58,8 +58,28 @@ _RAW_TEXT = re.compile(
 )
 
 
+_AUTOLINK = re.compile(r"^<[A-Za-z][A-Za-z0-9+.-]*:[^\s<>]*>$")
+_REFERENCE_DEF_WITH_TITLE = re.compile(
+    r"(?m)^ {0,3}\[[^\]\n]+\]:[ \t]*(?:<[^>\n]*>|\S+)"
+    r"""(?:[ \t]+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\)))?[ \t]*$"""
+)
+
+
 def _blank(match: re.Match[str]) -> str:
     return " " * len(match[0])
+
+
+def _fence_end(text: str, opener: re.Match[str]) -> int:
+    prefix, marker = opener.groups()
+    items = list(re.finditer(_LIST_ITEM, prefix))
+    split = items[-1].end() if items else 0
+    container = re.sub(_LIST_ITEM, _blank, prefix[:split])
+    container += re.sub(r" {0,3}$", "", prefix[split:])
+    closer = re.compile(
+        rf"(?m)^{re.escape(container)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
+        r"[ \t]*(?:\r?\n|$)"
+    ).search(text, opener.end())
+    return closer.end() if closer else len(text)
 
 
 def _masked(text: str) -> str:
@@ -67,16 +87,7 @@ def _masked(text: str) -> str:
     pos = 0
     while opener := _FENCE_OPENER.search(text, pos):
         parts.append(text[pos : opener.start()])
-        prefix, marker = opener.groups()
-        items = list(re.finditer(_LIST_ITEM, prefix))
-        split = items[-1].end() if items else 0
-        container = re.sub(_LIST_ITEM, _blank, prefix[:split])
-        container += re.sub(r" {0,3}$", "", prefix[split:])
-        closer = re.compile(
-            rf"(?m)^{re.escape(container)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
-            r"[ \t]*(?:\r?\n|$)"
-        ).search(text, opener.end())
-        pos = closer.end() if closer else len(text)
+        pos = _fence_end(text, opener)
         parts.append(" " * (pos - opener.start()))
     masked = _CODE_SPAN.sub(_blank, "".join(parts) + text[pos:])
     masked = _COMMENT.sub(_blank, masked)
@@ -329,6 +340,106 @@ def _extract(text: str, masked: str) -> list[Reference]:
 
 def extract(text: str) -> list[Reference]:
     return _extract(text, _masked(text))
+
+
+def _blank_lines(text: str) -> str:
+    return re.sub(r"[^\r\n]", " ", text)
+
+
+_NO_MATCH = object()
+
+
+def _mask_for_raw_html(text: str) -> str:
+    parts = []
+    pos = 0
+    fence: re.Match[str] | None | object = _NO_MATCH
+    code: re.Match[str] | None | object = _NO_MATCH
+    comment: re.Match[str] | None | object = _NO_MATCH
+    tag: re.Match[str] | None | object = _NO_MATCH
+    while True:
+        if fence is _NO_MATCH or (isinstance(fence, re.Match) and fence.start() < pos):
+            fence = _FENCE_OPENER.search(text, pos)
+            code = _NO_MATCH
+        if code is _NO_MATCH or (isinstance(code, re.Match) and code.start() < pos):
+            code = (
+                _CODE_SPAN.search(text, pos, fence.start())
+                if isinstance(fence, re.Match)
+                else _CODE_SPAN.search(text, pos)
+            )
+        if comment is _NO_MATCH or (
+            isinstance(comment, re.Match) and comment.start() < pos
+        ):
+            comment = _COMMENT.search(text, pos)
+        if tag is _NO_MATCH or (isinstance(tag, re.Match) and tag.start() < pos):
+            tag = _HTML_TAG.search(text, pos)
+        candidates = [
+            (match.start(), kind, match)
+            for kind, match in (
+                ("fence", fence),
+                ("code", code),
+                ("comment", comment),
+                ("tag", tag),
+            )
+            if isinstance(match, re.Match)
+        ]
+        if not candidates:
+            parts.append(text[pos:])
+            break
+        start, kind, match = min(candidates, key=lambda item: item[0])
+        parts.append(text[pos:start])
+        end = _fence_end(text, match) if kind == "fence" else match.end()
+        if kind == "tag":
+            parts.append(text[start:end])
+        else:
+            parts.append(_blank_lines(text[start:end]))
+        pos = end
+    masked = "".join(parts)
+    masked = _REFERENCE_DEF_WITH_TITLE.sub(lambda m: _blank_lines(m[0]), masked)
+    chars = list(masked)
+    for match in _ANGLE_DESTINATION.finditer(masked):
+        chars[match.start(1) : match.end()] = [" "] * (match.end() - match.start(1))
+    masked = "".join(chars)
+    chars = list(masked)
+    consumed_until = 0
+    for opener in _MARKDOWN_OPENER.finditer(masked):
+        if opener.start() < consumed_until:
+            continue
+        start = opener.end()
+        if start == len(masked) or masked[start] == "<":
+            continue
+        depth = 0
+        cursor = start
+        while cursor < len(masked):
+            char = masked[cursor]
+            if char == "\\" and cursor + 1 < len(masked):
+                cursor += 2
+                continue
+            if char == "(":
+                depth += 1
+            elif char == ")":
+                if depth == 0:
+                    chars[start:cursor] = [" "] * (cursor - start)
+                    consumed_until = cursor + 1
+                    break
+                depth -= 1
+            elif char in "<>\n" or (char.isspace() and depth == 0):
+                title = _MARKDOWN_TITLE.match(masked, cursor)
+                if title:
+                    chars[start : title.end()] = [" "] * (title.end() - start)
+                    consumed_until = title.end()
+                break
+            cursor += 1
+    return "".join(chars)
+
+
+def has_raw_html(text: str) -> bool:
+    """True when the Markdown body contains an unmasked raw HTML tag."""
+    masked = _mask_for_raw_html(text)
+    return any(
+        not _AUTOLINK.match(tag.group())
+        and (tag.start() - len(masked[: tag.start()].rstrip("\\"))) % 2 == 0
+        for tag in _HTML_TAG.finditer(masked)
+    )
 
 
 def _fold(name: str) -> str:

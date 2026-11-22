@@ -291,3 +291,69 @@ def test_status_names_an_html_entity_as_read_only(
     sync.status(doc, client, {})
 
     assert "mode: html (elport only reads it)" in capsys.readouterr().out
+
+
+def test_status_warns_on_raw_html_against_elabftw_6(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "<table><tr><td>1</td></tr></table>")
+    client = FakeClient(gets=[{"body": "remote", "content_type": 2}])
+    client.info = lambda: client.calls.append("info") or {"elabftw_version": "6.0.9"}
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "eLabFTW 6.x strips raw HTML" in capsys.readouterr().err
+    assert "info" in client.calls
+
+
+def test_status_stays_quiet_on_raw_html_against_elabftw_5(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "<b>ok on 5</b>")
+    client = FakeClient(gets=[{"body": "remote", "content_type": 2}])
+    client.info = lambda: client.calls.append("info") or {"elabftw_version": "5.6.12"}
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "eLabFTW 6.x" not in capsys.readouterr().err
+
+
+def test_status_skips_info_without_raw_html_or_without_id(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "![alt](fig.png)")
+    client = FakeClient(gets=[{"body": "remote", "content_type": 2}])
+    client.info = lambda: client.calls.append("info") or {"elabftw_version": "6.0.9"}
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+    assert "info" not in client.calls
+
+    no_id = tmp_path / "draft.md"
+    no_id.write_text("---\ntitle: Draft\n---\n\n<b>raw</b>\n", encoding="utf-8")
+    sync.status(no_id, client, {})
+    assert "info" not in client.calls
+    assert "eLabFTW 6.x" not in capsys.readouterr().err
+
+
+def test_status_ignores_info_failure_when_checking_raw_html(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    write_doc(doc, "<b>raw</b>")
+    client = FakeClient(gets=[{"body": "remote", "content_type": 2}])
+
+    def broken():
+        raise OSError("network down")
+
+    client.info = broken
+    monkeypatch.setattr(sync.state, "load", lambda *args: saved_state())
+
+    sync.status(doc, client, {})
+
+    assert "eLabFTW 6.x" not in capsys.readouterr().err

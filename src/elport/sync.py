@@ -13,6 +13,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from . import config as config_module
 from . import frontmatter, state
@@ -22,6 +23,7 @@ from .transclude import (
     bare_paths,
     download_url,
     extract,
+    has_raw_html,
     listed_files,
     name_uploads,
     plan,
@@ -111,6 +113,26 @@ def _warn_unmatched_attachments(body: str, uploads: list[dict], base_url: str) -
         )
 
 
+def _warn_raw_html_on_v6(client, body: str) -> None:
+    if not has_raw_html(body):
+        return
+    info_fn = getattr(client, "info", None)
+    if info_fn is None:
+        return
+    try:
+        info = info_fn()
+    except (OSError, RuntimeError, ValueError):
+        return
+    version = info.get("elabftw_version") if isinstance(info, dict) else None
+    match = re.match(r"^\s*(\d+)", str(version or ""))
+    if match and int(match.group(1)) >= 6:
+        print(
+            "warning: eLabFTW 6.x strips raw HTML from rendered Markdown; "
+            "use standard Markdown such as ![alt](fig.png)",
+            file=sys.stderr,
+        )
+
+
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -173,6 +195,45 @@ def _can_prompt() -> bool:
 
 def entity_url(base_url: str, entity: str, eid: object) -> str:
     return f"{base_url.rstrip('/')}/{ENTITY_PAGES[entity]}?mode=view&id={eid}"
+
+
+def parse_entity_url(url: str, base_url: str) -> tuple[str, int]:
+    """Parse an eLabFTW entity view URL against the configured server root."""
+    try:
+        parsed = urlsplit(url)
+        parsed_port = 443 if parsed.port is None else parsed.port
+    except ValueError:
+        raise ValueError("invalid entity URL") from None
+    base = urlsplit(base_url)
+    if parsed.scheme.casefold() != "https" or base.scheme.casefold() != "https":
+        raise ValueError("entity URL must use https://")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("entity URL must not include credentials")
+    base_port = 443 if base.port is None else base.port
+    if (
+        not parsed.hostname
+        or not base.hostname
+        or parsed.hostname != base.hostname
+        or parsed_port != base_port
+    ):
+        raise ValueError(f"URL does not match configured server {base_url}")
+    prefix = f"{base.path.rstrip('/')}/"
+    if not parsed.path.startswith(prefix):
+        raise ValueError(f"URL does not match configured server {base_url}")
+    page = parsed.path[len(prefix) :]
+    page_entities = {name: entity for entity, name in ENTITY_PAGES.items()}
+    entity = page_entities.get(page)
+    if entity is None:
+        raise ValueError("unsupported entity URL")
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if set(query) != {"mode", "id"}:
+        raise ValueError("unsupported entity URL")
+    if query.get("mode") != ["view"]:
+        raise ValueError("unsupported entity URL (expected mode=view)")
+    ids = query.get("id")
+    if not ids or len(ids) != 1 or not (ids[0].isascii() and ids[0].isdigit()):
+        raise ValueError("unsupported entity URL (expected one positive id)")
+    return entity, frontmatter.validate_id(int(ids[0]))
 
 
 def _document_links(refs):
@@ -734,6 +795,7 @@ def push(
         for ref in refs:
             if ref.doc is not None:
                 print(f"{ref.path} -> {link_urls[ref.doc]}{ref.fragment}")
+        _warn_raw_html_on_v6(client, body)
         return "dry run"
 
     _confirm_large_uploads(new_uploads, assume_yes)
@@ -847,6 +909,8 @@ def push(
     if remembered:
         record["remote_paths"] = remembered
     state.save(base_url, entity, str(eid), record)
+    if not unchanged:
+        _warn_raw_html_on_v6(client, body)
 
     existing_tags = _remote_tags(remote_doc)
     for tag in meta.get("tags", []) or []:
@@ -1529,6 +1593,8 @@ def status(path: Path, client, config: dict, profile=None) -> str:
         return "remote unavailable (offline?)"
 
     _warn_unmatched_attachments(body, uploads, remote.base_url)
+    if not _is_html(remote_doc):
+        _warn_raw_html_on_v6(client, body)
     seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
     _skip_remote_linked(
         path,

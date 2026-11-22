@@ -230,6 +230,143 @@ def test_view_command_honors_the_entity_config_key(monkeypatch):
     assert gets == ["items"]
 
 
+@pytest.mark.parametrize(
+    ("base_url", "url", "expected"),
+    [
+        (
+            "https://e.example",
+            "https://e.example/experiments.php?mode=view&id=42",
+            ("experiments", 42),
+        ),
+        (
+            "https://e.example",
+            "https://E.EXAMPLE:443/database.php?mode=view&id=7#comments",
+            ("items", 7),
+        ),
+        (
+            "https://e.example/elab",
+            "https://e.example/elab/experiments.php?mode=view&id=9",
+            ("experiments", 9),
+        ),
+    ],
+)
+def test_view_command_accepts_matching_entity_url(
+    monkeypatch, capsys, base_url, url, expected
+):
+    client = BrowseClient(body="url body\n")
+    client.root = base_url
+    gets = []
+    _stub_browse_client(monkeypatch, client)
+    monkeypatch.setattr(
+        client,
+        "get",
+        lambda entity, eid: gets.append((entity, eid)) or {"body": "ok\n"},
+    )
+
+    assert cli.main(["view", url]) == 0
+
+    assert gets == [expected]
+    assert capsys.readouterr().out == "ok\n"
+
+
+@pytest.mark.parametrize(
+    ("base_url", "url", "extra"),
+    [
+        (
+            "https://e.example",
+            "https://other.example/experiments.php?mode=view&id=1",
+            [],
+        ),
+        (
+            "https://e.example",
+            "https://e.example:0/experiments.php?mode=view&id=1",
+            [],
+        ),
+        (
+            "https://e.example",
+            "https://e.example:8443/experiments.php?mode=view&id=1",
+            [],
+        ),
+        (
+            "https://e.example/elab",
+            "https://e.example/experiments.php?mode=view&id=1",
+            [],
+        ),
+        ("https://e.example", "http://e.example/experiments.php?mode=view&id=1", []),
+        (
+            "https://e.example",
+            "https://u:secretpass@e.example/experiments.php?mode=view&id=1",
+            [],
+        ),
+        (
+            "https://e.example",
+            "http://u:secretpass@e.example/experiments.php?mode=view&id=1",
+            [],
+        ),
+        (
+            "https://e.example",
+            "https://u:secretpass@e.example\uff1a443/experiments.php?mode=view&id=1",
+            [],
+        ),
+        (
+            "https://e.example",
+            "//u:secretpass@e.example/experiments.php?mode=view&id=1",
+            [],
+        ),
+        (
+            "https://e.example",
+            "https://e.example/experiments.php?mode=view&id=1&+id=2",
+            [],
+        ),
+        (
+            "https://e.example",
+            "https://e.example/experiments.php?mode=view&id=1&id%5B%5D=2",
+            [],
+        ),
+        (
+            "https://e.example",
+            "https://e.example/experiments.php?mode=view&mode%5B%5D=edit&id=1",
+            [],
+        ),
+        (
+            "https://fass.example",
+            "https://faß.example/experiments.php?mode=view&id=1",
+            [],
+        ),
+        ("https://e.example", "https://e.example/experiments.php?mode=edit&id=1", []),
+        ("https://e.example", "https://e.example/experiments.php?id=1", []),
+        (
+            "https://e.example",
+            "https://e.example/experiments.php?mode=view&id=1&id=2",
+            [],
+        ),
+        ("https://e.example", "https://e.example/users.php?mode=view&id=1", []),
+        (
+            "https://e.example",
+            "https://e.example/database.php?mode=view&id=7",
+            ["--entity", "experiments"],
+        ),
+    ],
+)
+def test_view_command_rejects_mismatched_or_invalid_entity_url(
+    monkeypatch, capsys, base_url, url, extra
+):
+    client = BrowseClient()
+    client.root = base_url
+    gets = []
+    _stub_browse_client(monkeypatch, client)
+    monkeypatch.setattr(
+        client, "get", lambda entity, eid: gets.append((entity, eid)) or {}
+    )
+
+    assert cli.main(["view", url, *extra]) == 1
+
+    assert gets == []
+    err = capsys.readouterr().err
+    assert err != ""
+    assert "secretpass" not in err
+
+
 class ActivityClient:
     def __init__(self, rows):
         self.rows = rows

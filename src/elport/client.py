@@ -8,6 +8,7 @@ import requests
 from .frontmatter import validate_id
 
 REQUEST_TIMEOUT = (10, 120)
+_UNSET = object()
 
 
 def _entity_path(entity: str, eid: object, suffix: str = "") -> str:
@@ -43,6 +44,8 @@ class Client:
         # about as much as the request itself.
         self.session = requests.Session()
         self._identity = None
+        self._info: object = _UNSET
+        self._info_error: Exception | None = None
         self._catalogs: dict[tuple[object, str], list] = {}
 
     def request(self, method, path, **kwargs):
@@ -76,7 +79,15 @@ class Client:
         return self._identity
 
     def info(self):
-        return self.request("GET", "/info").json()
+        if self._info_error is not None:
+            raise self._info_error
+        if self._info is _UNSET:
+            try:
+                self._info = self.request("GET", "/info").json()
+            except Exception as exc:
+                self._info_error = exc
+                raise
+        return self._info
 
     def apikeys(self):
         return self.request("GET", "/apikeys").json()
