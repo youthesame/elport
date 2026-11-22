@@ -140,3 +140,70 @@ def test_force_push_skips_a_link_from_an_unmerged_conflicting_remote(
     sync.push(doc, client, {}, force=True)
 
     assert "upload" not in client.calls
+
+
+def test_push_skips_a_remote_link_after_conflict_merge_drops_it_remotely(
+    tmp_path, monkeypatch, configured
+):
+    doc, pulled = _pulled_link_doc(tmp_path, monkeypatch)
+    write_doc(doc, f"{pulled}\n\nlocal edit")
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, FakeClient(gets=[{"body": "the link is gone"}]), {})
+    sync.merge(doc, {}, resolved=True)
+    client = FakeClient(remote_doc={"body": "the link is gone", "content_type": 2})
+
+    sync.push(doc, client, {})
+
+    assert "upload" not in client.calls
+    assert "[x](private.txt)" in client.saved_payload["body"]
+
+
+def test_push_skips_a_remote_link_from_an_overwritten_pending_conflict(
+    tmp_path, monkeypatch, configured
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "private.txt").write_text("secret")
+    write_doc(doc, "local edit")
+    Store(monkeypatch, {"1": saved_state()})
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, FakeClient(gets=[{"body": "see [x](private.txt)"}]), {})
+    (tmp_path / "report.remote.md").unlink()
+    (tmp_path / "report.base.md").unlink()
+    write_doc(doc, "local edit\nsee [x](private.txt)")
+    with pytest.raises(RuntimeError, match="local changes conflict"):
+        sync.pull(doc, FakeClient(gets=[{"body": "the link is gone"}]), {})
+    sync.merge(doc, {}, resolved=True)
+    client = FakeClient(remote_doc={"body": "the link is gone", "content_type": 2})
+
+    sync.push(doc, client, {})
+
+    assert "upload" not in client.calls
+    assert "[x](private.txt)" in client.saved_payload["body"]
+
+
+def test_push_and_status_keep_skipping_a_remote_link_after_server_normalizes_it(
+    tmp_path, monkeypatch, configured, capsys
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "a&b.txt").write_text("secret")
+    write_doc(doc, "local")
+    Store(monkeypatch, {"1": saved_state()})
+    sync.pull(doc, FakeClient(gets=[{"body": '<a href="a&amp;b.txt">x</a>'}]), {})
+    write_doc(doc, "see [x](a&b.txt)")
+
+    # First push sends the bare path and the server normalizes '&' to '&amp;'.
+    first = FakeClient(
+        gets=[
+            {"body": '<a href="a&amp;b.txt">x</a>', "content_type": 2},
+            {"body": "see [x](a&amp;b.txt)", "content_type": 2},
+        ]
+    )
+    sync.push(doc, first, {})
+    assert "upload" not in first.calls
+
+    # Second status/push sees only the normalized stored body, yet must still skip.
+    second = FakeClient(remote_doc={"body": "see [x](a&amp;b.txt)", "content_type": 2})
+    sync.status(doc, second, {})
+    assert "uploads new: none" in capsys.readouterr().out
+    sync.push(doc, second, {})
+    assert "upload" not in second.calls

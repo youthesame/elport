@@ -19,15 +19,16 @@ from . import frontmatter, state
 from .client import NotFoundError
 from .transclude import (
     absolute_links,
+    bare_paths,
     download_url,
     extract,
     listed_files,
-    local_files,
     name_uploads,
     plan,
     readable_html,
     relink,
     replace_spans,
+    resolve_local_paths,
     reverse,
     safe_name,
     unmatched_download_urls,
@@ -251,8 +252,24 @@ def _confirm_large_uploads(paths: list[Path], assume_yes: bool) -> None:
         _confirm("large upload", names, f"upload large file(s) {names}?", assume_yes)
 
 
+def _remember_remote_paths(saved: dict | None, *bodies: str) -> list[str]:
+    """Accumulate bare local paths seen in discarded remote bodies so push,
+    pull, and merge cycles never forget what the remote side linked (ADR-0007)."""
+    seen = list((saved or {}).get("remote_paths", []))
+    for body in bodies:
+        for value in bare_paths(body):
+            if value not in seen:
+                seen.append(value)
+    return seen
+
+
 def _skip_remote_linked(
-    path: Path, ignore, refs, listed: set[Path], remote_bodies: list[str]
+    path: Path,
+    ignore,
+    refs,
+    listed: set[Path],
+    remote_bodies: list[str],
+    remote_paths: list[str] | tuple[str, ...] = (),
 ) -> None:
     """push rewrites every local file reference to its upload URL, so a bare
     path in a remote body was written by someone else (and came in on a pull or
@@ -260,9 +277,11 @@ def _skip_remote_linked(
     attachments:, which never comes from the server (ADR-0007). Links match by
     the file they resolve to, so respelling one locally (./x, x#top) does not
     count."""
-    linked = set().union(
-        *(local_files(body, path.parent, ignore) for body in remote_bodies)
-    )
+    paths = [
+        *remote_paths,
+        *(value for body in remote_bodies for value in bare_paths(body)),
+    ]
+    linked = resolve_local_paths(paths, path.parent, ignore)
     for ref in refs:
         if ref.file in linked and ref.file not in listed:
             print(
@@ -315,6 +334,13 @@ def _synced_meta(meta: dict) -> dict:
     return {key: meta[key] for key in SYNCED_META if key in meta}
 
 
+def _same_meta(local, base) -> bool:
+    if local is None or base is None:
+        return local is None and base is None
+    # str: push reads category and status as strings, pull may store an id.
+    return str(local) == str(base)
+
+
 def _edited_meta(meta: dict, saved: dict | None) -> dict:
     """The front matter push sends: all of it without a metadata base (a new
     entity), else only the synced keys edited since the last sync, so a Web-side
@@ -325,8 +351,7 @@ def _edited_meta(meta: dict, saved: dict | None) -> dict:
     return {
         key: value
         for key, value in meta.items()
-        # str: push reads category and status as strings, pull may store an id.
-        if key not in SYNCED_META or str(value) != str(base.get(key))
+        if key not in SYNCED_META or not _same_meta(value, base.get(key))
     }
 
 
@@ -371,7 +396,9 @@ def _merge_meta(meta: dict, base: dict, remote_doc: dict) -> tuple[dict, dict]:
     new_base = dict(base)
     for key, value in _remote_meta(remote_doc).items():
         _set_meta(new_base, key, value)
-        if meta.get(key) == base.get(key):
+        if _same_meta(meta.get(key), base.get(key)) and not _same_meta(
+            meta.get(key), value
+        ):
             _set_meta(merged, key, value)
     if "tags" in remote_doc:
         # Tags are add-only on both sides, so the union needs no base.
@@ -666,6 +693,7 @@ def push(
         refs,
         listed,
         [remote_doc.get("body", ""), *seen],
+        (saved or {}).get("remote_paths", ()),
     )
     files = _upload_files(refs, listed)
     uploads = remote.uploads() if remote is not None and files else []
@@ -806,6 +834,14 @@ def push(
         record["doc_links"] = doc_links
     if registered:
         record["links"] = registered
+    remembered = _remember_remote_paths(
+        saved,
+        (saved or {}).get("remote_base", ""),
+        (saved or {}).get("pending_remote", ""),
+        remote_doc.get("body", ""),
+    )
+    if remembered:
+        record["remote_paths"] = remembered
     state.save(base_url, entity, str(eid), record)
 
     existing_tags = _remote_tags(remote_doc)
@@ -884,6 +920,9 @@ def _promote_pending_remote(
         # provisional and normal conflict detection applies again.
         updated.pop("pending_create", None)
         updated.pop("body_sent", None)
+        remembered = _remember_remote_paths(saved, saved.get("remote_base", ""))
+        if remembered:
+            updated["remote_paths"] = remembered
         state.save(base_url, entity, str(eid), updated)
 
 
@@ -1058,11 +1097,15 @@ def _raise_conflict(
         f"{shlex.quote(str(_sidecar_path(path)))}",
         file=sys.stderr,
     )
+    updated = {**saved, "pending_remote": remote_body}
+    remembered = _remember_remote_paths(saved, saved.get("pending_remote", ""))
+    if remembered:
+        updated["remote_paths"] = remembered
     state.save(
         remote.base_url,
         remote.entity,
         str(remote.eid),
-        {**saved, "pending_remote": remote_body},
+        updated,
     )
     raise RuntimeError(message)
 
@@ -1277,18 +1320,21 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
 
     meta, new_base = _merge_meta(meta, base_meta, remote_doc)
     frontmatter.atomic_write(path, frontmatter.render(meta, source))
-    state.save(
-        base_url,
-        entity,
-        str(eid),
-        {
-            "remote_base": remote_doc.get("body", ""),
-            "local_base": source,
-            "meta_base": new_base,
-            "path": str(path.resolve()),
-            **_carried(saved),
-        },
+    record = {
+        "remote_base": remote_doc.get("body", ""),
+        "local_base": source,
+        "meta_base": new_base,
+        "path": str(path.resolve()),
+        **_carried(saved),
+    }
+    remembered = _remember_remote_paths(
+        saved,
+        (saved or {}).get("remote_base", ""),
+        (saved or {}).get("pending_remote", ""),
     )
+    if remembered:
+        record["remote_paths"] = remembered
+    state.save(base_url, entity, str(eid), record)
     title = meta.get("title") or remote_doc.get("title") or path.stem
     print(f"pulled {entity}/{eid}: {title}")
     print(f"  wrote {path.name}")
@@ -1475,7 +1521,14 @@ def status(path: Path, client, config: dict, profile=None) -> str:
 
     _warn_unmatched_attachments(body, uploads, remote.base_url)
     seen = [(saved or {}).get(key, "") for key in ("remote_base", "pending_remote")]
-    _skip_remote_linked(path, ignore, refs, listed, [remote_doc.get("body", ""), *seen])
+    _skip_remote_linked(
+        path,
+        ignore,
+        refs,
+        listed,
+        [remote_doc.get("body", ""), *seen],
+        (saved or {}).get("remote_paths", ()),
+    )
     files = _upload_files(refs, listed)
     reused = [path.name for path in files if _matching_upload(path, uploads)]
     new = [path.name for path in files if path.name not in reused]

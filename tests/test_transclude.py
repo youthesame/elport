@@ -954,6 +954,26 @@ def test_root_anchored_ignore_patterns(tmp_path: Path, pattern: str, relative: s
     assert reference.file is None
 
 
+@pytest.mark.parametrize(
+    ("pattern", "relative"),
+    [
+        ("scratch/", "scratch"),
+        ("/scratch/", "scratch"),
+        ("work/scratch/", "work/scratch"),
+    ],
+)
+def test_trailing_slash_ignore_does_not_exclude_a_file_of_that_name(
+    tmp_path: Path, pattern: str, relative: str
+):
+    path = tmp_path / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("keep", encoding="utf-8")
+
+    reference = plan(f"[data]({relative})", tmp_path, [IgnoreLayer([pattern])])[0]
+
+    assert reference.file == path.resolve()
+
+
 def test_ignore_rules_stay_inside_the_document_directory(tmp_path: Path):
     document_dir = tmp_path / "doc"
     document_dir.mkdir()

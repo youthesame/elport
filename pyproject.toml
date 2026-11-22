@@ -46,3 +46,8 @@ line-length = 88
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest.ini_options]
+markers = [
+  "symbolic: pure-Python property tests suited to fast CrossHair exploration",
+]
