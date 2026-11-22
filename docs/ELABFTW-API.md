@@ -185,7 +185,7 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   `recent_comment` is `null` or older than a date have no comment posted since then, so they can be skipped.
   `recent_comment` is the newest remaining comment's `created_at`: deleting the newest moves it back, deleting an
   older one leaves it unchanged.
-- **Comments are out-of-sync data → do not embed in the body** (AGENTS.md invariant). Surface via sidecar / terminal.
+- **Comments are out-of-sync data → do not embed in the body** (AGENTS.md invariant). Surface in the terminal.
 
 ## Steps (task checklist; measured 5.6.12, 2026-08-11)
 
