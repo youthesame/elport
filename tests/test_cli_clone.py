@@ -115,6 +115,67 @@ def test_clone_rejects_a_non_positive_id(tmp_path, monkeypatch):
     assert not output.exists()
 
 
+def test_clone_accepts_a_matching_entity_url(tmp_path, monkeypatch):
+    output = tmp_path / "report.md"
+    client = CloneClient()
+    _clone_env(monkeypatch, tmp_path, client)
+
+    assert (
+        cli.main(
+            [
+                "clone",
+                "https://e.example/database.php?mode=view&id=19",
+                "-o",
+                str(output),
+            ]
+        )
+        == 0
+    )
+
+    meta, _ = frontmatter.parse(output.read_text())
+    assert meta["entity"] == "items"
+    assert meta["id"] == 19
+
+
+def test_clone_rejects_url_for_another_server_or_entity_before_writing(
+    tmp_path, monkeypatch, capsys
+):
+    output = tmp_path / "report.md"
+    client = CloneClient()
+    gets = []
+    client.get = lambda entity, eid: gets.append((entity, eid)) or {}
+    _clone_env(monkeypatch, tmp_path, client)
+
+    assert (
+        cli.main(
+            [
+                "clone",
+                "https://other.example/experiments.php?mode=view&id=19",
+                "-o",
+                str(output),
+            ]
+        )
+        == 1
+    )
+    assert (
+        cli.main(
+            [
+                "clone",
+                "https://e.example/database.php?mode=view&id=19",
+                "--entity",
+                "experiments",
+                "-o",
+                str(output),
+            ]
+        )
+        == 1
+    )
+
+    assert not output.exists()
+    assert gets == []
+    assert capsys.readouterr().err != ""
+
+
 def test_clone_removes_the_stub_when_the_pull_fails(tmp_path, monkeypatch):
     output = tmp_path / "report.md"
     _clone_env(monkeypatch, tmp_path, CloneClient())
