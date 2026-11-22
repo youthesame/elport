@@ -200,7 +200,7 @@ def _parser() -> argparse.ArgumentParser:
         "doc",
         nargs="?",
         default="report.md",
-        help="local document, or the id of a remote entity (default: report.md)",
+        help="local document, or the id or eLabFTW URL of a remote entity (default: report.md)",
     )
     _add_target_options(comments_parser)
 
@@ -372,7 +372,11 @@ def _parser() -> argparse.ArgumentParser:
             "example: elport view 357 -o e357/"
         ),
     )
-    view_parser.add_argument("id", type=int, help="id of the remote entity")
+    view_parser.add_argument(
+        "id",
+        metavar="ID_OR_URL",
+        help="id or eLabFTW URL of the remote entity",
+    )
     view_parser.add_argument(
         "--entity",
         choices=ENTITIES,
@@ -400,7 +404,12 @@ def _parser() -> argparse.ArgumentParser:
             "HTML entities are read-only; read them with `elport view <id> -o DIR`"
         ),
     )
-    clone_parser.add_argument("id", type=int, nargs="?", help="id of the remote entity")
+    clone_parser.add_argument(
+        "id",
+        nargs="?",
+        metavar="ID_OR_URL",
+        help="id or eLabFTW URL of the remote entity",
+    )
     clone_parser.add_argument(
         "--all",
         dest="all_root",
@@ -584,7 +593,7 @@ def _clone(args) -> int:
         raise ValueError("clone needs exactly one of <id> or --all")
     if args.all_root is not None:
         return _clone_all(args)
-    _clone_to(args.id, args.entity or "experiments", Path(args.output), args.profile)
+    _clone_to(args.id, args.entity, Path(args.output), args.profile)
     return 0
 
 
@@ -646,16 +655,41 @@ def _where(saved: dict) -> str:
     return saved.get("path") or "an unrecorded path"
 
 
-def _clone_to(eid, entity: str, path: Path, profile: str | None) -> str:
-    eid = frontmatter.validate_id(eid)
+def _is_remote_target(text: str) -> bool:
+    return text.isdigit() or "://" in text or text.lstrip().startswith("//")
+
+
+def _parse_remote_target(
+    raw: object, explicit_entity: str | None, default_entity: str, client
+) -> tuple[str, int]:
+    text = str(raw)
+    if "://" in text:
+        entity, eid = sync.parse_entity_url(text, client.root)
+        if explicit_entity and explicit_entity != entity:
+            raise ValueError(
+                f"entity mismatch between URL ({entity}) and --entity ({explicit_entity})"
+            )
+        return entity, eid
+    try:
+        eid = frontmatter.validate_id(int(text))
+    except ValueError as error:
+        if text.lstrip("-").isdigit():
+            raise
+        raise ValueError("invalid entity id or URL") from error
+    return explicit_entity or default_entity, eid
+
+
+def _clone_to(
+    target, explicit_entity: str | None, path: Path, profile: str | None
+) -> str:
     if path.exists():
         raise RuntimeError(f"output already exists: {path}")
     if not path.parent.is_dir():
         raise RuntimeError(f"output parent does not exist: {path.parent}")
-    meta = {"id": eid, "entity": entity}
     data = config.load(Path.cwd(), path.parent)
-    resolved_profile, client = _resolved_client(data, profile, meta)
-    meta["profile"] = resolved_profile
+    resolved_profile, client = _resolved_client(data, profile, {})
+    entity, eid = _parse_remote_target(target, explicit_entity, "experiments", client)
+    meta = {"id": eid, "entity": entity, "profile": resolved_profile}
     # The base is keyed by entity, not by file: a second clone would reset the
     # base of whatever working copy already holds it, so refuse instead.
     base = state.path(client.root, entity, str(eid))
@@ -977,9 +1011,12 @@ def main(argv=None) -> int:
             print(browse.activity(rows, entity, today, _colors(), width), end="")
             return 0
         if args.cmd == "view":
-            entity, client = _browse_target(args)
+            default_entity, client = _browse_target(args)
+            entity, eid = _parse_remote_target(
+                args.id, args.entity, default_entity, client
+            )
             output = Path(args.output) if args.output else None
-            sync.view(client, entity, args.id, client.root, output)
+            sync.view(client, entity, eid, client.root, output)
             return 0
         if args.cmd == "whoami":
             _whoami(args.profile)
@@ -990,9 +1027,12 @@ def main(argv=None) -> int:
             merge(path, data, args.profile, args.resolved)
             return 0
 
-        if args.cmd == "comments" and args.doc.isdigit():
-            entity, client = _browse_target(args)
-            sync.show_comments(client, entity, frontmatter.validate_id(int(args.doc)))
+        if args.cmd == "comments" and _is_remote_target(args.doc):
+            default_entity, client = _browse_target(args)
+            entity, eid = _parse_remote_target(
+                args.doc, args.entity, default_entity, client
+            )
+            sync.show_comments(client, entity, eid)
             return 0
         if args.cmd in ("comments", "comment"):
             path = Path(args.doc)

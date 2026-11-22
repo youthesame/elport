@@ -13,6 +13,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from . import config as config_module
 from . import frontmatter, state
@@ -194,6 +195,45 @@ def _can_prompt() -> bool:
 
 def entity_url(base_url: str, entity: str, eid: object) -> str:
     return f"{base_url.rstrip('/')}/{ENTITY_PAGES[entity]}?mode=view&id={eid}"
+
+
+def parse_entity_url(url: str, base_url: str) -> tuple[str, int]:
+    """Parse an eLabFTW entity view URL against the configured server root."""
+    try:
+        parsed = urlsplit(url)
+        parsed_port = 443 if parsed.port is None else parsed.port
+    except ValueError:
+        raise ValueError("invalid entity URL") from None
+    base = urlsplit(base_url)
+    if parsed.scheme.casefold() != "https" or base.scheme.casefold() != "https":
+        raise ValueError("entity URL must use https://")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("entity URL must not include credentials")
+    base_port = 443 if base.port is None else base.port
+    if (
+        not parsed.hostname
+        or not base.hostname
+        or parsed.hostname != base.hostname
+        or parsed_port != base_port
+    ):
+        raise ValueError(f"URL does not match configured server {base_url}")
+    prefix = f"{base.path.rstrip('/')}/"
+    if not parsed.path.startswith(prefix):
+        raise ValueError(f"URL does not match configured server {base_url}")
+    page = parsed.path[len(prefix) :]
+    page_entities = {name: entity for entity, name in ENTITY_PAGES.items()}
+    entity = page_entities.get(page)
+    if entity is None:
+        raise ValueError("unsupported entity URL")
+    query = parse_qs(parsed.query, keep_blank_values=True)
+    if set(query) != {"mode", "id"}:
+        raise ValueError("unsupported entity URL")
+    if query.get("mode") != ["view"]:
+        raise ValueError("unsupported entity URL (expected mode=view)")
+    ids = query.get("id")
+    if not ids or len(ids) != 1 or not (ids[0].isascii() and ids[0].isdigit()):
+        raise ValueError("unsupported entity URL (expected one positive id)")
+    return entity, frontmatter.validate_id(int(ids[0]))
 
 
 def _document_links(refs):

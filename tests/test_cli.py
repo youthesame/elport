@@ -338,6 +338,47 @@ def test_comments_takes_an_entity_id_without_a_local_document(
     assert list(tmp_path.iterdir()) == []
 
 
+def test_comments_accepts_a_matching_entity_url_and_rejects_other_servers(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    calls = []
+
+    class Client:
+        root = "https://e.example"
+
+        def comments(self, entity, eid):
+            calls.append((entity, eid))
+            return []
+
+    monkeypatch.setattr(config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", Client())
+    )
+
+    assert (
+        cli.main(["comments", "https://e.example/database.php?mode=view&id=357"]) == 0
+    )
+    assert calls == [("items", 357)]
+    assert capsys.readouterr().out == "no comments\n"
+
+    assert (
+        cli.main(["comments", "https://other.example/database.php?mode=view&id=357"])
+        == 1
+    )
+    assert calls == [("items", 357)]
+    assert "does not match" in capsys.readouterr().err
+
+    for bad in (
+        "//u:secretpass@e.example/experiments.php?mode=view&id=357",
+        " //u:secretpass@e.example/experiments.php?mode=view&id=357",
+    ):
+        assert cli.main(["comments", bad]) == 1
+        assert calls == [("items", 357)]
+        err = capsys.readouterr().err
+        assert err != "" and "secretpass" not in err
+
+
 @pytest.mark.parametrize(
     ("argv", "expected_path"),
     [
