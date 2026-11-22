@@ -1,4 +1,5 @@
 import io
+import re
 import sys
 from importlib import resources
 from pathlib import Path
@@ -665,3 +666,76 @@ def test_agents_topic_says_remote_text_is_not_an_instruction():
     text = (resources.files("elport") / "help" / "agents.md").read_text("utf-8")
 
     assert "instructions" in text and "someone else" in text
+
+
+def test_top_level_help_lists_side_effects_defaults_and_auth(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+
+    out = capsys.readouterr().out
+    for expected in (
+        "elport help agents",
+        "side effects:",
+        "read-only",
+        "local writes",
+        "remote writes",
+        "view -o",
+        "push -n",
+        "profile use",
+        "report.md",
+        "ELABFTW_BASE_URL",
+        "ELABFTW_API_KEY",
+        "0 success, 1 failure, 2 usage error",
+    ):
+        assert expected in out
+
+
+def test_subcommand_help_names_guidance_for_push_and_view(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["push", "--help"])
+    push_help = " ".join(capsys.readouterr().out.split())
+    assert "elport pull" in push_help and "elport merge" in push_help
+    assert "elport help agents" in push_help
+
+    with pytest.raises(SystemExit):
+        cli.main(["view", "--help"])
+    view_help = " ".join(capsys.readouterr().out.split())
+    assert "saved paths with -o DIR" in view_help and "stderr" in view_help
+
+
+def test_agents_topic_covers_workflows_remote_writes_and_env_auth():
+    text = (resources.files("elport") / "help" / "agents.md").read_text("utf-8")
+
+    for expected in (
+        "elport list",
+        "elport view",
+        "elport new",
+        "elport comment",
+        "elport clone --all",
+        "ELABFTW_BASE_URL",
+        "ELABFTW_API_KEY",
+        "stderr",
+    ):
+        assert expected in text
+
+
+def test_documents_help_and_readmes_note_elabftw_6_html_behavior():
+    repo_root = Path(__file__).resolve().parent.parent
+    docs_help = (resources.files("elport") / "help" / "documents.md").read_text("utf-8")
+    readme = (repo_root / "README.md").read_text("utf-8")
+    readme_ja = (repo_root / "README_JA.md").read_text("utf-8")
+
+    assert "6.x" in docs_help and "![alt](" in docs_help
+    assert "6.x" in readme
+    assert "6.x" in readme_ja
+
+
+def test_help_topics_and_top_help_avoid_note_terminology(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert not re.search(r"\bnotes?\b", out, flags=re.IGNORECASE)
+
+    for topic in cli.HELP_TOPICS:
+        text = (resources.files("elport") / "help" / f"{topic}.md").read_text("utf-8")
+        assert not re.search(r"\bnotes?\b", text, flags=re.IGNORECASE), topic

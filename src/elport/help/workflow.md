@@ -9,7 +9,7 @@ checking that nobody changed it since your last sync.
 elport status        # what would sync, and the entity's mode; sends nothing
 elport diff          # local against remote, in source form; sends nothing
 elport diff --base   # what you changed since the last sync
-elport push -n       # the uploads, the path-to-URL plan, and why push would stop; sends nothing
+elport push -n       # the uploads, the path-to-URL plan, and why push would stop; sends nothing and skips prompts
 elport push
 ```
 
@@ -30,7 +30,7 @@ elport merge         # 3-way merge into the document; needs git
 elport push
 ```
 
-elport keeps no history of its own. To keep one, `git init` your notes folder.
+elport keeps no history of its own. To keep one, `git init` your documents folder.
 
 ## pull and fetch
 

@@ -2,7 +2,7 @@
 
 [English](https://github.com/youthesame/elport/blob/main/README.md) | [日本語](https://github.com/youthesame/elport/blob/main/README_JA.md)
 
-Write lab notes locally in Markdown, with inline HTML like `<figure>` where you want it. Then `push`/`pull` them,
+Write lab documents locally in Markdown (with inline HTML like `<figure>` on eLabFTW 5.x). Then `push`/`pull` them,
 along with every figure and data file the body references, to eLabFTW entities. **Local is the source of truth.**
 
 ## Install
@@ -29,12 +29,14 @@ pip install elport        # upgrade: pip install -U elport
 
 ## The core idea
 
-One local file maps to one eLabFTW entry: Markdown with a YAML front matter block, inline HTML allowed.
+One local file maps to one eLabFTW entity: Markdown with a YAML front matter block.
 
 On `push`, elport uploads every real local file the body references, in any notation and anywhere on disk
 (`../data/raw.csv` and absolute paths work; hidden files never go up), and swaps each path for its real eLabFTW
-URL. The body goes up as raw Markdown, so `<figure>` and `$...$` render as-is. To link another entry
-instead of uploading, write its eLabFTW URL or its local document's path. Code fences, inline code, and HTML comments are never parsed.
+URL. The body goes up as raw Markdown, so `$...$` renders as-is; inline HTML such as `<figure>` renders on eLabFTW
+5.x, whereas eLabFTW 6.x strips raw HTML from rendered Markdown (use `![alt](fig.png)` on 6.x). To link another
+entity instead of uploading, write its eLabFTW URL or its local document's path. Code fences, inline code, and HTML
+comments are never parsed.
 
 ## Quick start
 
@@ -71,7 +73,7 @@ push uploads them. `elport help documents` lists every front matter key and refe
 
 Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works. Sync commands
 also take a directory: every elport document under it, one line each.
-Exit code `0` on success, `1` on failure. Run `elport <command> --help` for the full flags.
+Exit code `0` on success, `1` on failure, `2` on usage error. Run `elport <command> --help` for the full flags.
 
 ### Sync
 
@@ -133,7 +135,7 @@ refuse it, and `view -o` is the way to read it with its figures.
 
 The details ship with the CLI, so they match the version you installed:
 
-- `elport help documents`: front matter, references, attachments, links between notes ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/documents.md))
+- `elport help documents`: front matter, references, attachments, links between documents ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/documents.md))
 - `elport help workflow`: the status, diff, push loop, conflicts, pull and fetch ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/workflow.md))
 - `elport help agents`: what an AI agent asks its user before acting ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/agents.md))
 
