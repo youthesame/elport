@@ -179,11 +179,16 @@ def _unescape_markdown_destination(value: str) -> str:
     return "".join(out)
 
 
+_MARKDOWN_OPENER = re.compile(r"!?(?<!\\)(?:\[[^\]\n]*\])\(\s*")
+_MARKDOWN_TITLE = re.compile(
+    r"""\s+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\((?:\\.|[^)\\])*\))\s*\)"""
+)
+
+
 def _markdown_destinations(text: str, masked: str) -> list[Reference]:
-    opener_pattern = re.compile(r"!?(?<!\\)(?:\[[^\]\n]*\])\(\s*")
     references = []
     consumed_until = 0
-    for opener in opener_pattern.finditer(masked):
+    for opener in _MARKDOWN_OPENER.finditer(masked):
         if opener.start() < consumed_until:
             continue  # opener lies inside an already-consumed link title
         start = opener.end()
@@ -207,17 +212,13 @@ def _markdown_destinations(text: str, masked: str) -> list[Reference]:
                     break
                 depth -= 1
             elif char in "<>\n" or (char.isspace() and depth == 0):
-                title = re.match(
-                    r"""\s+(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|"""
-                    r"\((?:\\.|[^)\\])*\))\s*\)",
-                    masked[pos:],
-                )
+                title = _MARKDOWN_TITLE.match(masked, pos)
                 if title:
                     raw = text[start:pos]
                     references.append(
                         Reference(_unescape_markdown_destination(raw), start, pos)
                     )
-                    consumed_until = pos + title.end()
+                    consumed_until = title.end()
                 break
             pos += 1
     return references
@@ -270,30 +271,40 @@ def _html_attributes(tag: str) -> list[tuple[str, int, int]]:
     return attributes
 
 
-def extract(text: str) -> list[Reference]:
-    masked = _masked(text)
+def _extract(text: str, masked: str) -> list[Reference]:
     angle_matches = list(_ANGLE_DESTINATION.finditer(masked))
     all_tags = list(_HTML_TAG.finditer(masked))
-    angle_matches = [
-        match
-        for match in angle_matches
-        if not any(
-            tag.start() <= match.start() and match.end() <= tag.end()
-            for tag in all_tags
-        )
-    ]
+    if all_tags and angle_matches:
+        filtered = []
+        tag_index = 0
+        for match in angle_matches:
+            while (
+                tag_index < len(all_tags) and all_tags[tag_index].end() <= match.start()
+            ):
+                tag_index += 1
+            inside = (
+                tag_index < len(all_tags)
+                and all_tags[tag_index].start() <= match.start()
+                and match.end() <= all_tags[tag_index].end()
+            )
+            if not inside:
+                filtered.append(match)
+        angle_matches = filtered
     angle_spans = {match.span(1) for match in angle_matches}
     tags = [tag for tag in all_tags if tag.span() not in angle_spans]
-    markdown_mask = list(masked)
-    for tag in tags:
-        markdown_mask[tag.start() : tag.end()] = [" "] * (tag.end() - tag.start())
-    for match in angle_matches:
-        # Blank the whole angle link (label, destination, and title) so a fake
-        # link embedded in its title is not rescanned as a bare reference.
-        markdown_mask[match.start() : match.end()] = [" "] * (
-            match.end() - match.start()
-        )
-    markdown_masked = "".join(markdown_mask)
+    if tags or angle_matches:
+        markdown_mask = list(masked)
+        for tag in tags:
+            markdown_mask[tag.start() : tag.end()] = [" "] * (tag.end() - tag.start())
+        for match in angle_matches:
+            # Blank the whole angle link (label, destination, and title) so a fake
+            # link embedded in its title is not rescanned as a bare reference.
+            markdown_mask[match.start() : match.end()] = [" "] * (
+                match.end() - match.start()
+            )
+        markdown_masked = "".join(markdown_mask)
+    else:
+        markdown_masked = masked
 
     out = _markdown_destinations(text, markdown_masked)
     for match in angle_matches:
@@ -314,6 +325,10 @@ def extract(text: str) -> list[Reference]:
     # A destination that runs into a code span or comment is not a path.
     out = [r for r in out if masked[r.start : r.end] == text[r.start : r.end]]
     return sorted(out, key=lambda x: x.start)
+
+
+def extract(text: str) -> list[Reference]:
+    return _extract(text, _masked(text))
 
 
 def _fold(name: str) -> str:
@@ -452,9 +467,9 @@ def _linked_document(doc_dir: Path, value: str) -> tuple[Path, str] | None:
 
 
 def _warn_reference_definitions(
-    text: str, doc_dir: Path, ignore: list[IgnoreLayer]
+    masked: str, doc_dir: Path, ignore: list[IgnoreLayer]
 ) -> None:
-    for match in _REFERENCE_DEFINITION.finditer(_masked(text)):
+    for match in _REFERENCE_DEFINITION.finditer(masked):
         destination = (match.group(1) or match.group(2) or "").strip()
         if not destination:
             continue
@@ -472,8 +487,9 @@ def plan(
 ) -> list[Reference]:
     ignore = ignore or []
     _listing.cache_clear()
-    _warn_reference_definitions(text, doc_dir, ignore)
-    refs = extract(text)
+    masked = _masked(text)
+    _warn_reference_definitions(masked, doc_dir, ignore)
+    refs = _extract(text, masked)
     names: dict[str, Path] = {}
     for ref in refs:
         linked = _linked_document(doc_dir, ref.path)
@@ -601,49 +617,51 @@ def _download_query(value: str) -> dict[str, list[str]]:
     return parse_qs(urlparse(html.unescape(value)).query)
 
 
+_UNSAFE_MARKDOWN_NAME = re.compile(r"[\s()#]")
+
+
 def reverse(text: str, uploads: list[dict], base_url: str) -> tuple[str, list[dict]]:
     masked = _masked(text)
-    destinations = extract(text)
+    by_span = {_destination_span(text, ref): ref for ref in _extract(text, masked)}
     # f alone identifies an upload: a pasted image's URL carries nothing else.
     by_f = {str(upload.get("long_name", "")): upload for upload in uploads}
-    replacements: list[tuple[int, int, str]] = []
+    pieces: list[str] = []
+    pos = 0
     placed: list[dict] = []
+    placed_ids: set[int] = set()
     for match in _download_pattern(base_url).finditer(masked):
         f = _download_query(text[match.start() : match.end()]).get("f", [""])[0]
         upload = by_f.get(f) if f else None
         if upload is None:
             continue
-        value = text[match.start() : match.end()]
-        fragment = "#" + value.split("#", 1)[1] if "#" in value else ""
-        destination = next(
-            (
-                reference
-                for reference in destinations
-                if _destination_span(text, reference) == match.span()
-            ),
-            None,
-        )
+        destination = by_span.get(match.span())
         if destination is None:
             # Prose, an unrelated attribute, a reference form push does not
             # rewrite, or a URL merely embedded in a larger destination:
             # localizing it here would not survive the round trip.
             continue
+        value = text[match.start() : match.end()]
+        fragment = "#" + value.split("#", 1)[1] if "#" in value else ""
         name = upload_name(upload)
-        if destination.kind == "markdown" and re.search(r"[\s()#]", name):
+        if destination.kind == "markdown" and _UNSAFE_MARKDOWN_NAME.search(name):
             name = f"<{name}{fragment}>"
         elif destination.kind == "html":
             name = html.escape(name) + fragment
-            if text[: match.start()].rstrip()[-1:] not in ('"', "'"):
+            prev = match.start() - 1
+            while prev >= 0 and text[prev].isspace():
+                prev -= 1
+            if prev < 0 or text[prev] not in ('"', "'"):
                 name = f'"{name}"'
         else:
             name += fragment
-        replacements.append((match.start(), match.end(), name))
-        if upload not in placed:
+        pieces.append(text[pos : match.start()])
+        pieces.append(name)
+        pos = match.end()
+        if id(upload) not in placed_ids:
+            placed_ids.add(id(upload))
             placed.append(upload)
-    result = text
-    for start, end, name in reversed(replacements):
-        result = result[:start] + name + result[end:]
-    return result, placed
+    pieces.append(text[pos:])
+    return "".join(pieces), placed
 
 
 _ENTITY_PAGE = re.compile(r"(?:experiments|database)\.php\?")
@@ -653,12 +671,16 @@ def absolute_links(text: str, base_url: str) -> str:
     """Complete the relative entity pages the Web UI writes (ELABFTW-API), so a
     reader outside the instance can follow them."""
     root = base_url.rstrip("/") + "/"
-    result = text
-    for reference in reversed(extract(text)):
+    pieces: list[str] = []
+    pos = 0
+    for reference in extract(text):
         if _ENTITY_PAGE.match(reference.path):
             start = _destination_span(text, reference)[0]
-            result = result[:start] + root + result[start:]
-    return result
+            pieces.append(text[pos:start])
+            pieces.append(root)
+            pos = start
+    pieces.append(text[pos:])
+    return "".join(pieces)
 
 
 _KEPT_ATTRIBUTES = {"href", "src", "colspan", "rowspan"}
@@ -719,13 +741,19 @@ def relink(text: str, doc_links: dict[str, dict[str, str]]) -> str:
     Any other URL, such as one pasted in the Web UI, stays a URL."""
     if not doc_links:
         return text
-    result = text
-    for reference in reversed(extract(text)):
+    pieces: list[str] = []
+    pos = 0
+    for reference in extract(text):
+        if reference.start < pos:
+            continue
         family = "html" if reference.kind == "html" else "markdown"
         written = doc_links.get(html.unescape(reference.path), {}).get(family)
         if written is not None:
-            result = result[: reference.start] + written + result[reference.end :]
-    return result
+            pieces.append(text[pos : reference.start])
+            pieces.append(written)
+            pos = reference.end
+    pieces.append(text[pos:])
+    return "".join(pieces)
 
 
 def unmatched_download_urls(text: str, uploads: list[dict], base_url: str) -> list[str]:

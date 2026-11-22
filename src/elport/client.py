@@ -43,6 +43,7 @@ class Client:
         # about as much as the request itself.
         self.session = requests.Session()
         self._identity = None
+        self._catalogs: dict[tuple[object, str], list] = {}
 
     def request(self, method, path, **kwargs):
         headers = kwargs.pop("headers", {})
@@ -146,17 +147,25 @@ class Client:
             json={"comment": text},
         )
 
+    def _catalog(self, team_id, resource: str):
+        key = (team_id, resource)
+        if key not in self._catalogs:
+            self._catalogs[key] = self.request(
+                "GET", f"/teams/{team_id}/{resource}"
+            ).json()
+        return self._catalogs[key]
+
     def categories(self, team_id, entity):
         resource = (
             "experiments_categories"
             if entity == "experiments"
             else "resources_categories"
         )
-        return self.request("GET", f"/teams/{team_id}/{resource}").json()
+        return self._catalog(team_id, resource)
 
     def statuses(self, team_id, entity):
         resource = "experiments_status" if entity == "experiments" else "items_status"
-        return self.request("GET", f"/teams/{team_id}/{resource}").json()
+        return self._catalog(team_id, resource)
 
     def search(self, entity, params):
         return self.request("GET", f"/{entity}", params=params).json()

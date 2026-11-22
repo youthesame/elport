@@ -32,8 +32,8 @@ def _clone_env(monkeypatch, tmp_path, client):
     monkeypatch.setattr(cli, "_resolved_client", lambda *args: ("test", client))
     monkeypatch.setattr(
         sync.config_module,
-        "resolve",
-        lambda *args: ("test", "https://e.example", "secret", True),
+        "base_target",
+        lambda *args: ("test", "https://e.example", True),
     )
     monkeypatch.setattr(cli.state, "_dir", lambda create=False: tmp_path / "state")
     (tmp_path / "state").mkdir()

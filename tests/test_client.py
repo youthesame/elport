@@ -264,6 +264,29 @@ def test_me_is_fetched_once_per_client(monkeypatch):
     assert calls == [("GET", "/users/me")]
 
 
+def test_categories_and_statuses_are_fetched_once_per_team_and_entity(monkeypatch):
+    client = Client("https://example.org", "key")
+    calls = []
+    monkeypatch.setattr(
+        client,
+        "request",
+        lambda *args, **kwargs: calls.append(args) or _Response([{"id": 1}]),
+    )
+
+    assert client.categories(7, "experiments") == [{"id": 1}]
+    assert client.categories(7, "experiments") == [{"id": 1}]
+    assert client.categories(8, "experiments") == [{"id": 1}]
+    assert client.statuses(7, "experiments") == [{"id": 1}]
+    assert client.statuses(7, "experiments") == [{"id": 1}]
+    assert client.statuses(7, "items") == [{"id": 1}]
+    assert calls == [
+        ("GET", "/teams/7/experiments_categories"),
+        ("GET", "/teams/8/experiments_categories"),
+        ("GET", "/teams/7/experiments_status"),
+        ("GET", "/teams/7/items_status"),
+    ]
+
+
 def test_forbidden_names_what_the_key_may_not_do(monkeypatch):
     class Forbidden:
         ok = False

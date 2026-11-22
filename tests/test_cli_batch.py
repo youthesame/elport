@@ -192,7 +192,13 @@ def test_a_batch_shares_one_client_per_server(tmp_path, monkeypatch, capsys):
             "profiles": {"test": {"base_url": "https://e.example"}},
         },
     )
-    monkeypatch.setattr(cli.config.keyring, "get_password", lambda *args: "secret")
+    keyring_calls = []
+
+    def get_password(*args):
+        keyring_calls.append(args)
+        return "secret"
+
+    monkeypatch.setattr(cli.config.keyring, "get_password", get_password)
     elport_doc(tmp_path / "a.md", id=1)
     elport_doc(tmp_path / "b.md", id=2)
     sessions = []
@@ -205,3 +211,28 @@ def test_a_batch_shares_one_client_per_server(tmp_path, monkeypatch, capsys):
 
     assert cli.main(["push", str(tmp_path)]) == 0
     assert len(sessions) == 2 and sessions[0] is sessions[1]
+    assert keyring_calls == [("elport", "test")]
+
+
+@pytest.mark.parametrize("action", ["push", "pull", "fetch"])
+def test_sync_commands_reuse_base_target_without_reading_keyring(
+    tmp_path, monkeypatch, action
+):
+    from _sync_harness import FakeClient, saved_state
+
+    doc = elport_doc(tmp_path / "report.md", body="body")
+    cfg = {"profiles": {"test": {"base_url": "https://e.example"}}}
+    monkeypatch.setattr(
+        sync.config_module,
+        "resolve",
+        lambda *args: pytest.fail("sync should not touch keyring via config.resolve"),
+    )
+    monkeypatch.setattr(
+        sync.state,
+        "load",
+        lambda *args: saved_state(local="body", remote="body"),
+    )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+    client = FakeClient(remote_doc={"body": "body", "content_type": 2})
+
+    getattr(sync, action)(doc, client, cfg)

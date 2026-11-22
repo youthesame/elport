@@ -156,3 +156,56 @@ def test_pull_then_push_reuses_upload_whose_name_windows_rewrote(
     assert client.saved_payload is not None
     assert client.saved_payload["body"] == f"[file]({url})"
     assert "upload" not in client.calls
+
+
+@pytest.mark.parametrize("action", ["status", "pull", "push", "diff", "view"])
+def test_embedded_uploads_avoid_a_second_uploads_request(
+    tmp_path, monkeypatch, configured, capsys, action
+):
+    doc = tmp_path / "report.md"
+    (tmp_path / "data.csv").write_bytes(b"same")
+    upload = {
+        "id": 3,
+        "long_name": "aa/existing",
+        "real_name": "data.csv",
+        "storage": 1,
+        "hash": hashlib.sha256(b"same").hexdigest(),
+        "hash_algorithm": "sha256",
+    }
+    url = sync.download_url("https://e.example", upload)
+    write_doc(doc, "[data](data.csv)")
+    remote = {
+        "body": f"[data]({url})",
+        "content_type": 2,
+        "uploads": [upload],
+    }
+    client = FakeClient(
+        gets=[remote, remote, remote],
+        downloads={3: b"same"},
+    )
+    monkeypatch.setattr(
+        sync.state,
+        "load",
+        lambda *args: saved_state(local="[data](data.csv)", remote=remote["body"]),
+    )
+    monkeypatch.setattr(sync.state, "save", lambda *args: None)
+
+    if action == "status":
+        sync.status(doc, client, {})
+        assert "uploads reuse: data.csv" in capsys.readouterr().out
+    elif action == "pull":
+        sync.pull(doc, client, {})
+        assert frontmatter.parse(doc.read_text(encoding="utf-8"))[1] == (
+            "[data](data.csv)"
+        )
+    elif action == "push":
+        sync.push(doc, client, {})
+        assert "upload" not in client.calls
+    elif action == "diff":
+        sync.diff(doc, client, {})
+        assert capsys.readouterr().out == ""
+    else:
+        sync.view(client, "experiments", 1, "https://e.example")
+        assert capsys.readouterr().out == "[data](data.csv)"
+
+    assert "uploads" not in client.calls

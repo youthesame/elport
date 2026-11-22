@@ -142,7 +142,12 @@ def document_meta(path: Path) -> dict | None:
     """Front matter of an elport document (one holding ``id`` and ``profile``,
     which elport writes itself), or None for any other Markdown."""
     try:
-        return text_meta(path.read_text(encoding="utf-8"))
+        with path.open("rb") as stream:
+            head = stream.read(6)
+            if not has_opener(head):
+                return None
+            raw = head + stream.read()
+        return text_meta(raw.decode("utf-8"))
     except (OSError, UnicodeDecodeError):
         return None
 

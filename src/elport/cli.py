@@ -351,9 +351,33 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+@functools.cache
+def _resolve_profile(
+    name: str,
+    base_url: str | None,
+    verify_ssl: bool,
+    env_url: str | None,
+    env_key: str | None,
+) -> tuple[str, Client]:
+    prof: dict = {"verify_ssl": verify_ssl}
+    if base_url is not None:
+        prof["base_url"] = base_url
+    resolved_name, url, api_key, verify = config.resolve(
+        {"profiles": {name: prof}}, name, {}
+    )
+    return resolved_name, _connect(url, api_key, verify)
+
+
 def _resolved_client(data: dict, profile: str | None, meta: dict) -> tuple[str, Client]:
-    name, base_url, api_key, verify_ssl = config.resolve(data, profile, meta)
-    return name, _connect(base_url, api_key, verify_ssl)
+    name = config._profile_name(data, profile, meta)
+    prof = data.get("profiles", {}).get(name, {})
+    return _resolve_profile(
+        name,
+        prof.get("base_url"),
+        prof.get("verify_ssl", True),
+        os.getenv("ELABFTW_BASE_URL"),
+        os.getenv("ELABFTW_API_KEY"),
+    )
 
 
 @functools.cache
@@ -780,6 +804,7 @@ def main(argv=None) -> int:
             stream.reconfigure(encoding="utf-8")
     args = _parser().parse_args(argv)
     _connect.cache_clear()
+    _resolve_profile.cache_clear()
     if args.cmd == "help":
         if args.topic is None:
             print(_TOPICS, end="")
