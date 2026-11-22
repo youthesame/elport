@@ -9,7 +9,7 @@ checking that nobody changed it since your last sync.
 elport status        # what would sync, and the entity's mode; sends nothing
 elport diff          # local against remote, in source form; sends nothing
 elport diff --base   # what you changed since the last sync
-elport push -n       # the uploads, the path-to-URL plan, and why push would stop; sends nothing
+elport push -n       # the uploads, the path-to-URL plan, and why push would stop; sends nothing and skips prompts
 elport push
 ```
 
@@ -22,7 +22,8 @@ status, and diff exit with 1 if any document failed.
 
 If someone edited the entity in the Web UI since your last sync, push stops and writes two files beside the
 document: `<name>.base.md`, the last synced version, and `<name>.remote.md`, the current remote. pull does the same
-when the document has edits you have not pushed. Then:
+when the document has edits you have not pushed (`push -n` writes no sidecars, so run `elport pull` before `merge`
+after a dry-run conflict). Then:
 
 ```sh
 elport merge         # 3-way merge into the document; needs git
@@ -30,7 +31,7 @@ elport merge         # 3-way merge into the document; needs git
 elport push
 ```
 
-elport keeps no history of its own. To keep one, `git init` your notes folder.
+elport keeps no history of its own. To keep one, `git init` your documents folder.
 
 ## pull and fetch
 

@@ -1,7 +1,8 @@
 # Documents
 
-A document is a Markdown file that starts with a YAML front matter block, and it maps to one entity. Inline HTML
-is allowed.
+A document is a Markdown file that starts with a YAML front matter block, and it maps to one entity. eLabFTW 5.x
+renders inline HTML such as `<figure>` inside a Markdown body; eLabFTW 6.x strips raw HTML when rendering a Markdown
+body, so write standard Markdown (`![alt](fig.png)`) on 6.x servers.
 
 ```markdown
 ---
@@ -46,7 +47,7 @@ ignored, or a directory. elport never deletes an attachment. pull does not bring
 view and pull name on stderr what the entity holds outside its body: attachments it does not show, compounds,
 steps, and comments.
 
-## Links to other notes
+## Links to other documents
 
 Link another document by its local path, as in `[previous](../exp12/report.md)`. push sends that entity's URL and
 never the file. The target needs an `id`, so push it first. A full eLabFTW URL works too.

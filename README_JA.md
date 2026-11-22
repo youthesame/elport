@@ -2,9 +2,9 @@
 
 [English](README.md) | [日本語](README_JA.md)
 
-ローカル環境でお気に入りのエディタを使い、`<figure>` などの HTML も自由に交えながら Markdown
-で実験ノートを記述できます。本文と、そこで参照されているすべての図やデータファイルをまとめて eLabFTW のノートへ `push` /
-`pull` して同期します。**同期の基準は常にローカルです。**
+ローカル環境でお気に入りのエディタを使い、Markdown で実験ドキュメントを記述できます（eLabFTW 5.x では `<figure>`
+などのインライン HTML も利用できます）。本文と、そこで参照されているすべての図やデータファイルをまとめて eLabFTW のエンティティへ
+`push` / `pull` して同期します。**同期の基準は常にローカルです。**
 
 ## インストール
 
@@ -30,13 +30,14 @@ pip install elport        # 更新: pip install -U elport
 
 ## コンセプト
 
-ローカルの 1 ファイルが eLabFTW 上の 1 つのノートに対応します。YAML フロントマターを持つ Markdown ファイルとして記述し、
-インライン HTML も自由に使用できます。
+ローカルの 1 ファイルが eLabFTW 上の 1 つのエンティティに対応します。YAML フロントマターを持つ Markdown ファイルとして記述します。
 
 `push` を実行すると、elport は記法（Markdown 画像記法、HTML タグ、通常リンクなど）を問わず、
 本文内で参照されている実在のローカルファイルを場所を問わず（`../data/raw.csv` や絶対パスも可。隠しファイルは除外）すべてアップロードし、各パスを正規の eLabFTW URL へと自動置換します。
-本文は生の Markdown として送信されるため、`<figure>` や数式（`$...$`）などもそのまま意図通りにレンダリングされます。
-別のノートにリンクしたい場合は、その eLabFTW URL かローカルのドキュメントのパスを書くだけです。コードブロック、インラインコード、HTML
+本文は生の Markdown として送信されるため、数式（`$...$`）はそのままレンダリングされます。`<figure>` などのインライン HTML は
+eLabFTW 5.x では描画されますが、eLabFTW 6.x では Markdown 本文中の生 HTML が表示時に除外されるため、6.x では標準の
+`![alt](fig.png)` を使用してください。
+別のエンティティにリンクしたい場合は、その eLabFTW URL かローカルのドキュメントのパスを書くだけです。コードブロック、インラインコード、HTML
 コメントの内部は一切解析・置換されません。
 
 ## クイックスタート
@@ -74,7 +75,7 @@ Raw data: [raw.csv](data/raw.csv)
 
 ローカルドキュメントを対象とするコマンドは、省略可能な `[<doc>]` を取ります。デフォルトは `report.md`
 ですが、任意のファイル名を使用できます。同期コマンドには
-ディレクトリも渡せ、その下の elport ドキュメントを 1 行ずつ処理します。終了コードは成功時 `0`、失敗時 `1` です。オプションの詳細は
+ディレクトリも渡せ、その下の elport ドキュメントを 1 行ずつ処理します。終了コードは成功時 `0`、失敗時 `1`、引数エラー時 `2` です。オプションの詳細は
 `elport <command> --help` で確認できます。
 
 ### 同期
@@ -134,7 +135,7 @@ Web UI のリッチテキストエディタで書いたノートは、本文が 
 
 詳しい説明は CLI に同梱しているので、インストールした版と必ず一致します（英語）。
 
-- `elport help documents`: フロントマター、参照、添付、ノート間のリンク（[GitHub で読む](https://github.com/youthesame/elport/blob/main/src/elport/help/documents.md)）
+- `elport help documents`: フロントマター、参照、添付、ドキュメント間のリンク（[GitHub で読む](https://github.com/youthesame/elport/blob/main/src/elport/help/documents.md)）
 - `elport help workflow`: status、diff、push の流れ、競合、pull と fetch（[GitHub で読む](https://github.com/youthesame/elport/blob/main/src/elport/help/workflow.md)）
 - `elport help agents`: AI エージェントが実行前にユーザーへ確認すべきこと（[GitHub で読む](https://github.com/youthesame/elport/blob/main/src/elport/help/agents.md)）
 

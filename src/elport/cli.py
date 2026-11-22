@@ -39,11 +39,26 @@ _WORDS = {"✓": "done", "·": sync.UP_TO_DATE, "*": "to sync", "✗": "failed"}
 HELP_TOPICS = {
     "agents": "read this first when you are an agent acting for a user",
     "workflow": "the status, diff, push loop; conflicts; pull and fetch",
-    "documents": "front matter, references, attachments, links between notes",
+    "documents": "front matter, references, attachments, links between documents",
 }
 _TOPICS = "help topics:\n" + "".join(
     f"  elport help {topic:<10} {summary}\n" for topic, summary in HELP_TOPICS.items()
 )
+
+_SIDE_EFFECTS = """\
+side effects:
+  read-only       list, view (without -o), activity, comments, status, diff,
+                  whoami, profile list, push -n
+  local writes    pull, fetch, clone, merge, view -o DIR, login, logout,
+                  profile use
+  remote writes   push (without -n; also writes locally),
+                  new (also writes locally), comment
+
+defaults & auth:
+  document commands default to report.md (sync commands also accept directories)
+  exit codes: 0 success, 1 failure, 2 usage error
+  non-interactive auth: set both ELABFTW_BASE_URL and ELABFTW_API_KEY
+"""
 
 _EXAMPLES = """\
 examples:
@@ -57,7 +72,7 @@ examples:
   elport push                        upload report.md (add -n to preview first)
   elport status                      show local/remote sync state
   elport pull                        download the remote body and attachments
-  elport push notes/                 push every document under notes/
+  elport push experiments/           push every document under experiments/
   elport clone --all backup/         back up all your entities (re-run to add new ones)
 """
 
@@ -82,8 +97,11 @@ def _add_docs_argument(parser: argparse.ArgumentParser) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="elport",
-        description="git-like sync CLI for eLabFTW (local is authoritative)",
-        epilog=_TOPICS + "\n" + _EXAMPLES,
+        description=(
+            "git-like sync CLI for eLabFTW (local is authoritative).\n"
+            "Agents: run `elport help agents` before acting."
+        ),
+        epilog=_SIDE_EFFECTS + "\n" + _TOPICS + "\n" + _EXAMPLES,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -91,11 +109,26 @@ def _parser() -> argparse.ArgumentParser:
     )
     commands = parser.add_subparsers(dest="cmd", required=True)
 
-    help_parser = commands.add_parser("help", help="print a help topic")
+    help_parser = commands.add_parser(
+        "help",
+        help="print a help topic",
+        description="print a bundled help topic (read-only)",
+        epilog="example: elport help agents",
+    )
     help_parser.add_argument("topic", nargs="?", choices=HELP_TOPICS)
 
     push_parser = commands.add_parser(
-        "push", help="upload the local document (full-body overwrite)"
+        "push",
+        help="upload the local document (-n/--dry-run plans without sending)",
+        description=(
+            "upload referenced files and overwrite the remote body. "
+            "-n/--dry-run prints the plan without sending or running confirmations"
+        ),
+        epilog=(
+            "example: elport push -n && elport push. "
+            "on conflict, run `elport diff`, then `elport pull` before `elport merge`; "
+            "agents: see `elport help agents`"
+        ),
     )
     _add_docs_argument(push_parser)
     _add_target_options(push_parser)
@@ -119,23 +152,49 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     pull_parser = commands.add_parser(
-        "pull", help="download the remote body and attachments"
+        "pull",
+        help="download the remote body and attachments",
+        description=(
+            "fetch the remote body, metadata, and referenced attachments into "
+            "the local document (remote read-only)"
+        ),
+        epilog=(
+            "example: elport pull. on conflict, run `elport merge`; "
+            "to download unreferenced attachments too, run `elport fetch`"
+        ),
     )
     _add_docs_argument(pull_parser)
     _add_target_options(pull_parser)
 
     fetch_parser = commands.add_parser(
-        "fetch", help="download all remote attachments (read-only)"
+        "fetch",
+        help="download all remote attachments locally",
+        description=(
+            "download every attachment on the entity without changing the body "
+            "or base (remote read-only, writes locally)"
+        ),
+        epilog=(
+            "example: elport fetch. to read an entity and its attachments "
+            "without a working copy, run `elport view <id> -o DIR`"
+        ),
     )
     _add_docs_argument(fetch_parser)
     _add_target_options(fetch_parser)
 
-    status_parser = commands.add_parser("status", help="show local/remote sync state")
+    status_parser = commands.add_parser(
+        "status",
+        help="show local/remote sync state",
+        description="show local/remote sync state, uploads, mode, and locks (read-only)",
+        epilog="example: elport status. inspect changes with `elport diff` or `elport push -n`",
+    )
     _add_docs_argument(status_parser)
     _add_target_options(status_parser)
 
     comments_parser = commands.add_parser(
-        "comments", help="show the remote comment thread"
+        "comments",
+        help="show the remote comment thread",
+        description="print the remote comment thread to the terminal (read-only)",
+        epilog="example: elport comments 357. post a reply with `elport comment`",
     )
     comments_parser.add_argument(
         "doc",
@@ -145,7 +204,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     _add_target_options(comments_parser)
 
-    comment_parser = commands.add_parser("comment", help="post a remote comment")
+    comment_parser = commands.add_parser(
+        "comment",
+        help="post a remote comment",
+        description=(
+            "post one comment to the document's remote entity "
+            "(edit or delete in the Web UI)"
+        ),
+        epilog='example: elport comment "checked calibration" (or: elport comment doc.md "text")',
+    )
     comment_parser.add_argument(
         "doc",
         nargs="?",
@@ -155,7 +222,12 @@ def _parser() -> argparse.ArgumentParser:
     comment_parser.add_argument("text", help="comment text")
     _add_target_options(comment_parser)
 
-    diff_parser = commands.add_parser("diff", help="show changes against the base")
+    diff_parser = commands.add_parser(
+        "diff",
+        help="show changes against remote or base",
+        description="diff the local document against remote, or against the last sync with --base (read-only)",
+        epilog="example: elport diff --base. preview upload changes with `elport push -n`",
+    )
     _add_docs_argument(diff_parser)
     _add_target_options(diff_parser)
     diff_parser.add_argument(
@@ -165,7 +237,16 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     merge_parser = commands.add_parser(
-        "merge", help="merge local and remote changes using git merge-file"
+        "merge",
+        help="merge local and remote sidecars using git merge-file",
+        description=(
+            "3-way merge .base.md and .remote.md into the local document "
+            "using git merge-file (local-only; never pushes)"
+        ),
+        epilog=(
+            "example: elport merge. resolve any conflict markers, then run `elport push`; "
+            "for a hand-merged file, run `elport merge --resolved`"
+        ),
     )
     merge_parser.add_argument(
         "doc",
@@ -183,7 +264,11 @@ def _parser() -> argparse.ArgumentParser:
     new_parser = commands.add_parser(
         "new",
         help="create a new remote entity and local document",
-        epilog="to upload an existing note as a new entity, run: elport push <file>",
+        description=(
+            "create a new remote entity (with your server's default visibility) "
+            "and write a local document scaffold"
+        ),
+        epilog="to upload an existing document as a new entity, run: elport push <file>",
     )
     new_parser.add_argument("title", help="title of the new entity")
     new_parser.add_argument(
@@ -202,7 +287,7 @@ def _parser() -> argparse.ArgumentParser:
 
     list_parser = commands.add_parser(
         "list",
-        help="list remote entities (read-only)",
+        help="list remote entities",
         description="list remote entities (read-only)",
         epilog="what moved in the team: --scope team --order lastchange, then "
         "--order comment (a new comment does not count as a change). "
@@ -218,7 +303,8 @@ def _parser() -> argparse.ArgumentParser:
         "--scope",
         choices=tuple(browse.SCOPES),
         default="self",
-        help="whose entities to list (default: self)",
+        help="whose entities to list: self (yours), team (active team), "
+        "all (every visible team) (default: self)",
     )
     list_parser.add_argument(
         "-q",
@@ -259,7 +345,8 @@ def _parser() -> argparse.ArgumentParser:
 
     activity_parser = commands.add_parser(
         "activity",
-        help="heatmap of entities created per day, up to a year (read-only)",
+        help="heatmap of entities created per day, up to a year",
+        description="print a terminal heatmap of entities created per day, up to a year (read-only)",
         epilog="raw rows as JSON: elport list --all --json [--scope team]",
     )
     activity_parser.add_argument(
@@ -272,11 +359,19 @@ def _parser() -> argparse.ArgumentParser:
     )
     activity_parser.add_argument("--profile", help="config profile to use")
 
-    view_help = (
-        "read a remote entity; -o DIR saves it with all its attachments "
-        "(read-only, not a working copy)"
+    view_parser = commands.add_parser(
+        "view",
+        help="read a remote entity (-o DIR saves a local snapshot)",
+        description=(
+            "read a remote entity (read-only; -o DIR writes a local snapshot, "
+            "not a working copy)"
+        ),
+        epilog=(
+            "stdout holds the body (or saved paths with -o DIR); "
+            "links and items outside the body print to stderr. "
+            "example: elport view 357 -o e357/"
+        ),
     )
-    view_parser = commands.add_parser("view", help=view_help, description=view_help)
     view_parser.add_argument("id", type=int, help="id of the remote entity")
     view_parser.add_argument(
         "--entity",
@@ -292,18 +387,25 @@ def _parser() -> argparse.ArgumentParser:
     )
     view_parser.add_argument("--profile", help="config profile to use")
 
-    clone_help = (
-        "start a local document to edit and push an existing remote entity "
-        "(to only read one, use view)"
+    clone_parser = commands.add_parser(
+        "clone",
+        help="start a local document from an existing entity (to read, use view)",
+        description=(
+            "start a local document to edit and push an existing remote entity "
+            "(writes locally; to only read one, use view)"
+        ),
+        epilog=(
+            "example: elport clone 357 (or: elport clone --all backup/ to mirror). "
+            "HTML entities are read-only; read them with `elport view <id> -o DIR`"
+        ),
     )
-    clone_parser = commands.add_parser("clone", help=clone_help, description=clone_help)
     clone_parser.add_argument("id", type=int, nargs="?", help="id of the remote entity")
     clone_parser.add_argument(
         "--all",
         dest="all_root",
         metavar="ROOT",
         help="clone every entity not yet under ROOT into "
-        "ROOT/<entity>/<id>-<title>/report.md",
+        "ROOT/<entity>/<id>-<title>/report.md (HTML entities become read-only snapshots)",
     )
     clone_parser.add_argument(
         "--entity",
@@ -325,24 +427,42 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     whoami_parser = commands.add_parser(
-        "whoami", help="show the authenticated user and active team"
+        "whoami",
+        help="show the authenticated user and active team",
+        description="check authentication, team, key permissions, server version, and scopes (read-only)",
+        epilog="if unauthenticated, run `elport login` or set ELABFTW_BASE_URL and ELABFTW_API_KEY",
     )
     whoami_parser.add_argument("--profile", help="config profile to use")
 
     login_parser = commands.add_parser(
-        "login", help="store base_url and api_key for a profile"
+        "login",
+        help="store base_url and api_key for a profile",
+        description=(
+            "interactively store base_url in config.toml and api_key in the OS "
+            "keyring (falling back to config.toml without a keyring)"
+        ),
+        epilog="for non-interactive runs, set both ELABFTW_BASE_URL and ELABFTW_API_KEY instead",
     )
     login_parser.add_argument(
         "profile", nargs="?", default="default", help="profile name (default: default)"
     )
     logout_parser = commands.add_parser(
-        "logout", help="remove the stored api_key for a profile"
+        "logout",
+        help="remove the stored api_key for a profile",
+        description=(
+            "remove the stored api_key from the OS keyring and config.toml, "
+            "clearing default_profile if it names this profile (keeps base_url)"
+        ),
+        epilog="example: elport logout labA",
     )
     logout_parser.add_argument(
         "profile", nargs="?", default="default", help="profile name (default: default)"
     )
     profile_parser = commands.add_parser(
-        "profile", help="list profiles or select the default profile"
+        "profile",
+        help="list profiles or select the default with 'use'",
+        description="list configured profiles (read-only), or set the default profile with `profile use <name>`",
+        epilog="example: elport profile use labA",
     )
     profile_parser.add_argument(
         "action", nargs="?", choices=["list", "use"], default="list"
