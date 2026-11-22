@@ -432,12 +432,20 @@ def _mask_for_raw_html(text: str) -> str:
     return "".join(chars)
 
 
+def _is_escaped(text: str, pos: int) -> bool:
+    backslashes = 0
+    cursor = pos - 1
+    while cursor >= 0 and text[cursor] == "\\":
+        backslashes += 1
+        cursor -= 1
+    return backslashes % 2 == 1
+
+
 def has_raw_html(text: str) -> bool:
     """True when the Markdown body contains an unmasked raw HTML tag."""
     masked = _mask_for_raw_html(text)
     return any(
-        not _AUTOLINK.match(tag.group())
-        and (tag.start() - len(masked[: tag.start()].rstrip("\\"))) % 2 == 0
+        not _AUTOLINK.match(tag.group()) and not _is_escaped(masked, tag.start())
         for tag in _HTML_TAG.finditer(masked)
     )
 
