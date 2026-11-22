@@ -204,14 +204,16 @@ def test_hidden_ancestor_allows_neighbours_but_rejects_new_hidden_components(
     ancestor, sibling, secret
 ):
     assume(secret != ancestor)
-    doc_dir = Path(f"/root/.{ancestor}/notes")
+    # Resolve once so target and doc_dir share a drive/anchor on Windows too.
+    root = Path(f"/root/.{ancestor}").resolve()
+    doc_dir = root / "notes"
     neighbour = doc_dir / f"{sibling}.txt"
     assert not transclude._exposes_hidden(doc_dir, f"{sibling}.txt", neighbour)
     assert not transclude._exposes_hidden(doc_dir, str(neighbour), neighbour)
 
     in_hidden = doc_dir / f".{secret}" / f"{sibling}.txt"
     assert transclude._exposes_hidden(doc_dir, f"{sibling}.txt", in_hidden)
-    other_hidden = Path(f"/root/.{secret}/{sibling}.txt")
+    other_hidden = root.parent / f".{secret}" / f"{sibling}.txt"
     assert transclude._exposes_hidden(doc_dir, str(other_hidden), other_hidden)
 
 
