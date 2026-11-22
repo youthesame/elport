@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import errno
 import functools
 import getpass
 import io
 import os
 import re
 import shutil
+import stat
 import sys
 import unicodedata
 from collections import Counter
@@ -208,16 +210,16 @@ def _parser() -> argparse.ArgumentParser:
         "comment",
         help="post a remote comment",
         description=(
-            "post one comment to the document's remote entity "
+            "post one comment to a document's or remote entity's thread "
             "(edit or delete in the Web UI)"
         ),
-        epilog='example: elport comment "checked calibration" (or: elport comment doc.md "text")',
+        epilog='example: elport comment "checked calibration" (or: elport comment 357 "text")',
     )
     comment_parser.add_argument(
         "doc",
         nargs="?",
         default="report.md",
-        help="local document (default: report.md)",
+        help="local document, or the id or eLabFTW URL of a remote entity (default: report.md)",
     )
     comment_parser.add_argument("text", help="comment text")
     _add_target_options(comment_parser)
@@ -654,8 +656,28 @@ def _where(saved: dict) -> str:
     return saved.get("path") or "an unrecorded path"
 
 
+def _is_existing_file(text: str) -> bool:
+    try:
+        return stat.S_ISREG(Path(text).stat().st_mode)
+    except OSError as error:
+        if error.errno in {
+            errno.ENOENT,
+            errno.ENOTDIR,
+            errno.ENAMETOOLONG,
+            errno.EINVAL,
+        }:
+            return False
+        raise OSError("cannot inspect local target path") from None
+
+
 def _is_remote_target(text: str) -> bool:
-    return text.isdigit() or "://" in text or text.lstrip().startswith("//")
+    stripped = text.lstrip()
+    return (
+        text.isdigit()
+        or "://" in text
+        or stripped.startswith("//")
+        or stripped.casefold().startswith(("http:", "https:"))
+    )
 
 
 def _parse_remote_target(
@@ -1026,12 +1048,21 @@ def main(argv=None) -> int:
             merge(path, data, args.profile, args.resolved)
             return 0
 
-        if args.cmd == "comments" and _is_remote_target(args.doc):
+        if (
+            args.cmd in ("comments", "comment")
+            and _is_remote_target(args.doc)
+            and not (args.cmd == "comment" and _is_existing_file(args.doc))
+        ):
+            if args.cmd == "comment" and not args.text.strip():
+                raise RuntimeError("comment text is empty")
             default_entity, client = _browse_target(args)
             entity, eid = _parse_remote_target(
                 args.doc, args.entity, default_entity, client
             )
-            sync.show_comments(client, entity, eid)
+            if args.cmd == "comments":
+                sync.show_comments(client, entity, eid)
+            else:
+                sync.post_comment(client, entity, eid, args.text)
             return 0
         if args.cmd in ("comments", "comment"):
             path = Path(args.doc)

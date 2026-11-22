@@ -352,3 +352,37 @@ def test_snapshot_lists_the_links_too(tmp_path, capsys):
     sync.view(client, "experiments", 42, BASE, tmp_path / "out")
 
     assert "linked from items/125: Protocol" in capsys.readouterr().err
+
+
+STEPS = [
+    {"id": 2, "body": "Measure absorbance\nat 450 nm", "finished": "0", "ordering": 2},
+    {"id": 1, "body": "Calibrate pipette", "finished": 1, "ordering": "1"},
+    {"id": 3, "body": "Confirm controls", "finished": "1"},
+    {"id": 4, "body": "   ", "finished": 0, "ordering": 0},
+]
+
+
+def test_view_lists_steps_with_completion_state_on_stderr_in_ordering(capsys):
+    client = FakeClient(remote_doc={"body": "text\n", "steps": STEPS})
+
+    sync.view(client, "experiments", 42, BASE)
+
+    out, err = capsys.readouterr()
+    assert out == "text\n"
+    assert err.splitlines()[1:] == [
+        "step [x] Calibrate pipette",
+        "step [ ] Measure absorbance at 450 nm",
+        "step [x] Confirm controls",
+    ]
+
+
+def test_snapshot_lists_steps_on_stderr_without_writing_them_to_report(
+    tmp_path, capsys
+):
+    out_dir = tmp_path / "out"
+    client = FakeClient(remote_doc={"body": "text\n", "steps": STEPS})
+
+    sync.view(client, "experiments", 42, BASE, out_dir)
+
+    assert (out_dir / "report.md").read_text(encoding="utf-8") == "text\n"
+    assert "step [x] Calibrate pipette" in capsys.readouterr().err

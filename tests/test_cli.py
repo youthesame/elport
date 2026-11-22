@@ -1,5 +1,7 @@
+import errno
 import io
 import re
+import stat
 import sys
 from importlib import resources
 from pathlib import Path
@@ -407,6 +409,179 @@ def test_comment_parses_doc_first_and_dispatches(argv, expected_path, monkeypatc
 def test_comment_text_is_required():
     with pytest.raises(SystemExit):
         cli._parser().parse_args(["comment"])
+
+
+def test_comment_posts_by_id_or_matching_url_without_a_local_document(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    posts = []
+
+    class Client:
+        root = "https://e.example"
+
+        def add_comment(self, entity, eid, text):
+            posts.append((entity, eid, text))
+
+    monkeypatch.setattr(config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", Client())
+    )
+
+    assert cli.main(["comment", "357", "looks good", "--entity", "items"]) == 0
+    assert (
+        cli.main(
+            [
+                "comment",
+                "https://e.example/database.php?mode=view&id=42",
+                "checked",
+            ]
+        )
+        == 0
+    )
+
+    assert posts == [("items", 357, "looks good"), ("items", 42, "checked")]
+    assert capsys.readouterr().out == "commented on items/357\ncommented on items/42\n"
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["comment", "0", "hi"],
+        ["comment", "357", "   "],
+        ["comment", "https://other.example/experiments.php?mode=view&id=1", "hi"],
+        [
+            "comment",
+            "https://e.example/database.php?mode=view&id=1",
+            "hi",
+            "--entity",
+            "experiments",
+        ],
+        ["comment", "//u:secretpass@e.example/experiments.php?mode=view&id=1", "hi"],
+        ["comment", " //u:secretpass@e.example/experiments.php?mode=view&id=1", "hi"],
+        [
+            "comment",
+            "https:/u:secretpass@e.example/experiments.php?mode=view&id=1",
+            "hi",
+        ],
+        [
+            "comment",
+            "http:/u:secretpass@e.example/experiments.php?mode=view&id=1",
+            "hi",
+        ],
+    ],
+)
+def test_comment_rejects_invalid_remote_targets_before_posting(
+    tmp_path, monkeypatch, capsys, argv
+):
+    monkeypatch.chdir(tmp_path)
+    posts = []
+
+    class Client:
+        root = "https://e.example"
+
+        def add_comment(self, entity, eid, text):
+            posts.append((entity, eid, text))
+
+    monkeypatch.setattr(config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", Client())
+    )
+
+    assert cli.main(argv) == 1
+
+    assert posts == []
+    err = capsys.readouterr().err
+    assert err != "" and "secretpass" not in err
+
+
+def test_comment_rejects_blank_text_before_resolving_client(monkeypatch, capsys):
+    resolved = []
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda *args: resolved.append(args) or ("test", None)
+    )
+
+    assert cli.main(["comment", "357", "   "]) == 1
+
+    assert resolved == []
+    assert capsys.readouterr().err == "comment text is empty\n"
+
+
+@pytest.mark.parametrize("name", ["357", "http:doc.md"])
+def test_comment_prefers_existing_local_document_over_remote_target(
+    tmp_path, monkeypatch, name
+):
+    monkeypatch.chdir(tmp_path)
+    if name == "357":
+        (tmp_path / name).write_text(
+            "---\nid: 42\nentity: items\n---\n\nbody\n", encoding="utf-8"
+        )
+    else:
+        # Windows forbids colons in real filenames; simulate a POSIX file.
+        class _RegStat:
+            st_mode = stat.S_IFREG
+
+        monkeypatch.setattr(
+            Path,
+            "stat",
+            lambda self, *args, **kwargs: (
+                _RegStat()
+                if self == Path(name)
+                else (_ for _ in ()).throw(FileNotFoundError())
+            ),
+        )
+    comment_calls = []
+    client = object()
+    monkeypatch.setattr(cli, "_target", lambda *args: ({}, client))
+    monkeypatch.setattr(
+        cli, "comment", lambda *args, **kwargs: comment_calls.append((args, kwargs))
+    )
+
+    assert cli.main(["comment", name, "hello"]) == 0
+    assert comment_calls == [((Path(name), client, {}, None), {"text": "hello"})]
+
+
+@pytest.mark.parametrize(
+    ("target", "error"),
+    [
+        (
+            "https:/u:secretpass@e.example/experiments.php?mode=view&id=1",
+            OSError(errno.ENAMETOOLONG, "File name too long", "secretpass"),
+        ),
+        (
+            "357",
+            PermissionError(errno.EACCES, "Permission denied", "357"),
+        ),
+        (
+            "https:/u:secretpass@e.example/experiments.php?mode=view&id=1",
+            PermissionError(errno.EACCES, "Permission denied", "secretpass"),
+        ),
+    ],
+)
+def test_comment_handles_file_probe_oserror_safely(monkeypatch, capsys, target, error):
+    posts = []
+
+    class Client:
+        root = "https://e.example"
+
+        def add_comment(self, entity, eid, text):
+            posts.append((entity, eid, text))
+
+    def fail_probe(self, *args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(Path, "stat", fail_probe)
+    monkeypatch.setattr(config, "load", lambda *args: {})
+    monkeypatch.setattr(
+        cli, "_resolved_client", lambda data, profile, meta: ("test", Client())
+    )
+
+    assert cli.main(["comment", target, "hi"]) == 1
+
+    assert posts == []
+    err = capsys.readouterr().err
+    assert err != "" and "secretpass" not in err
 
 
 @pytest.mark.parametrize(

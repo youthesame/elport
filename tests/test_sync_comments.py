@@ -103,3 +103,23 @@ def test_comment_requires_id(tmp_path, configured):
         sync.comment(doc, client, {}, text="hello")
 
     assert client.calls == []
+
+
+def test_post_comment_posts_by_entity_and_id(capsys):
+    client = FakeClient()
+
+    sync.post_comment(client, "items", 17, "Checked")
+
+    assert client.comment_posts == [("items", 17, {"comment": "Checked"})]
+    assert capsys.readouterr().out == "commented on items/17\n"
+
+
+def test_post_comment_rejects_empty_text_and_invalid_id_before_network():
+    client = FakeClient()
+
+    with pytest.raises(RuntimeError, match="^comment text is empty$"):
+        sync.post_comment(client, "experiments", 17, "   ")
+    with pytest.raises(ValueError, match="positive integer"):
+        sync.post_comment(client, "experiments", 0, "Checked")
+
+    assert client.calls == []
