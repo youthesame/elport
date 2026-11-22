@@ -509,14 +509,21 @@ def show_comments(client, entity: str, eid) -> None:
     print("\n\n".join(blocks))
 
 
+def post_comment(client, entity: str, eid, text: str) -> None:
+    if not text.strip():
+        raise RuntimeError("comment text is empty")
+    eid = frontmatter.validate_id(eid)
+    client.add_comment(entity, eid, text)
+    print(f"commented on {entity}/{eid}")
+
+
 def comment(path: Path, client, config: dict, profile=None, text="") -> None:
     if not text.strip():
         raise RuntimeError("comment text is empty")
     _, _, entity, eid = _document(path, config)
     if not eid:
         raise RuntimeError("id is required")
-    client.add_comment(entity, eid, text)
-    print(f"commented on {entity}/{eid}")
+    post_comment(client, entity, eid, text)
 
 
 def _permission_changes(
