@@ -22,7 +22,8 @@ status, and diff exit with 1 if any document failed.
 
 If someone edited the entity in the Web UI since your last sync, push stops and writes two files beside the
 document: `<name>.base.md`, the last synced version, and `<name>.remote.md`, the current remote. pull does the same
-when the document has edits you have not pushed. Then:
+when the document has edits you have not pushed (`push -n` writes no sidecars, so run `elport pull` before `merge`
+after a dry-run conflict). Then:
 
 ```sh
 elport merge         # 3-way merge into the document; needs git
