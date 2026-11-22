@@ -57,7 +57,11 @@ class Remote:
     def get(self):
         return self.client.get(self.entity, self.eid)
 
-    def uploads(self):
+    def uploads(self, remote_doc: dict | None = None):
+        # GET /{entity}/{id} embeds uploads identically to GET .../uploads
+        # (ELABFTW-API); reuse them when present to save an HTTP round trip.
+        if remote_doc is not None and isinstance(remote_doc.get("uploads"), list):
+            return name_uploads([dict(upload) for upload in remote_doc["uploads"]])
         return name_uploads(self.client.uploads(self.entity, self.eid))
 
     def upload(self, path):
@@ -559,7 +563,7 @@ def push(
         meta["tags"] = [str(tag) for tag in meta["tags"]]
     # After the string conversion above, so the base matches what a create writes.
     meta_base = _synced_meta(meta)
-    resolved_profile, base_url, _, _ = config_module.resolve(config, profile, meta)
+    resolved_profile, base_url, _ = config_module.base_target(config, profile, meta)
 
     refs = plan(body, path.parent, config.get("ignore", []))
     listed = _listed_files(refs, meta, path.parent, config.get("ignore", []))
@@ -652,7 +656,7 @@ def push(
             path,
             remote_doc.get("body", ""),
             saved,
-            remote.uploads(),
+            remote.uploads(remote_doc),
             remote,
             message,
         )
@@ -696,7 +700,7 @@ def push(
         (saved or {}).get("remote_paths", ()),
     )
     files = _upload_files(refs, listed)
-    uploads = remote.uploads() if remote is not None and files else []
+    uploads = remote.uploads(remote_doc) if remote is not None and files else []
     reused = {path: _matching_upload(path, uploads) for path in files}
     new_uploads = [path for path, upload in reused.items() if upload is None]
     if dry_run:
@@ -809,7 +813,7 @@ def push(
                 path,
                 latest.get("body", ""),
                 saved,
-                remote.uploads(),
+                remote.uploads(latest),
                 remote,
                 "remote changed after uploads; body was not updated and uploads remain",
             )
@@ -1241,7 +1245,7 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     meta, body, entity, eid = _document(path, config)
     if not eid:
         raise RuntimeError("id is required")
-    _, base_url, _, _ = config_module.resolve(config, profile, meta)
+    _, base_url, _ = config_module.base_target(config, profile, meta)
     remote = Remote(client, entity, eid, base_url)
     saved = state.load(base_url, entity, str(eid))
     _check_working_copy(saved, path, entity, eid)
@@ -1252,7 +1256,7 @@ def pull(path: Path, client, config: dict, profile=None) -> str:
     )
     base_meta = (saved or {}).get("meta_base", {})
     local_dirty = saved is not None and body != saved.get("local_base", "")
-    uploads = remote.uploads()
+    uploads = remote.uploads(remote_doc)
     _name_what_is_aside(remote, remote_doc, uploads)
     if local_dirty and remote_doc.get("body", "") == saved.get("remote_base", ""):
         merged, new_base = _merge_meta(meta, base_meta, remote_doc)
@@ -1352,7 +1356,7 @@ def fetch(path: Path, client, config: dict, profile=None) -> str:
     meta, _, entity, eid = _document(path, config)
     if not eid:
         raise RuntimeError("id is required")
-    _, base_url, _, _ = config_module.resolve(config, profile, meta)
+    _, base_url, _ = config_module.base_target(config, profile, meta)
     remote = Remote(client, entity, eid, base_url)
     uploads = remote.uploads()
     for upload in uploads:
@@ -1426,7 +1430,7 @@ def _readable(remote: Remote, remote_doc: dict) -> tuple[str, list[dict], list[d
     if _is_html(remote_doc):
         body = readable_html(body)
     body = absolute_links(body, remote.base_url)
-    uploads = remote.uploads()
+    uploads = remote.uploads(remote_doc)
     _name_what_is_aside(remote, remote_doc, uploads)
     _list_links(remote_doc)
     # A one-off read, unlike pull and push (#16): say what the reader will miss.
@@ -1507,8 +1511,8 @@ def status(path: Path, client, config: dict, profile=None) -> str:
         print("remote: no id (comparison unavailable)")
         return "not pushed yet"
     try:
-        uploads = remote.uploads()
         remote_doc = remote.get()
+        uploads = remote.uploads(remote_doc)
     except NotFoundError:
         # Local is authoritative: the document stays, only the report changes.
         print("remote: missing (deleted on the server?)")
@@ -1598,7 +1602,7 @@ def diff(path: Path, client, config: dict, profile=None, base_only=False) -> Non
         remote_doc = remote.get()
         other = reverse(
             relink(remote_doc.get("body", ""), (saved or {}).get("doc_links", {})),
-            remote.uploads(),
+            remote.uploads(remote_doc),
             remote.base_url,
         )[0]
         other = _normalize_remote_diff(other)

@@ -429,8 +429,8 @@ def test_new_push_persists_resolved_target(tmp_path, monkeypatch):
     client = FakeClient(gets=[{"body": "local", "content_type": 2}])
     monkeypatch.setattr(
         sync.config_module,
-        "resolve",
-        lambda *args: ("lab", "https://e.example", "secret", True),
+        "base_target",
+        lambda *args: ("lab", "https://e.example", True),
     )
     monkeypatch.setattr(sync.state, "save", lambda *args: None)
 

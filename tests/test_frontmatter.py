@@ -192,3 +192,24 @@ def test_non_string_and_unhashable_keys_raise_value_error(text):
     with pytest.raises(ValueError):
         frontmatter.parse(text)
     assert frontmatter.text_meta(text) is None
+
+
+def test_document_meta_skips_files_without_opener_before_parsing(tmp_path, monkeypatch):
+    import io
+    from pathlib import Path
+
+    note = tmp_path / "README.md"
+    note.write_text("# Not an elport note\n", encoding="utf-8")
+    reads: list[int | None] = []
+
+    class _Stream(io.BytesIO):
+        def read(self, size=-1):
+            reads.append(size)
+            return super().read(size)
+
+    monkeypatch.setattr(
+        Path, "open", lambda self, *a, **kw: _Stream(b"# Not an elport note\n")
+    )
+
+    assert frontmatter.document_meta(note) is None
+    assert reads == [6]

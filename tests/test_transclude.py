@@ -974,6 +974,16 @@ def test_trailing_slash_ignore_does_not_exclude_a_file_of_that_name(
     assert reference.file == path.resolve()
 
 
+def test_relink_skips_overlapping_inner_reference_span():
+    assert (
+        transclude.relink(
+            "[x](a[y](b))",
+            {"a[y](b)": {"markdown": "target.md"}, "b": {"markdown": "inner.md"}},
+        )
+        == "[x](target.md)"
+    )
+
+
 def test_ignore_rules_stay_inside_the_document_directory(tmp_path: Path):
     document_dir = tmp_path / "doc"
     document_dir.mkdir()
