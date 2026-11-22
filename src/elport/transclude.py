@@ -40,56 +40,56 @@ class Reference:
     doc: Path | None = None  # set for a link to another elport document
 
 
+# The prefix lets a fence sit inside blockquotes and list items, even on the
+# marker's own line; its closer must repeat that container prefix, with list
+# markers as their width in spaces (the opener's own 0-3 space indent aside,
+# but never a list item's own content indent).
+_LIST_ITEM = r"(?:[-*+]|\d{1,9}[.)])[ \t]"
+_FENCE_OPENER = re.compile(
+    # A backtick fence's info string cannot hold a backtick (CommonMark).
+    rf"(?m)^((?:[ \t>]|{_LIST_ITEM})*)(`{{3,}}(?=[^`\n]*$)|~{{3,}})[^\n]*(?:\n|$)"
+)
+# A code span stays within its paragraph: it cannot cross a blank line.
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)")
+_COMMENT = re.compile(r"<!--[\s\S]*?(?:-->|\Z)")
+_RAW_TEXT = re.compile(
+    r"<(pre|code|script|style|textarea|title)(?=[\s/>])[^>]*>[\s\S]*?(?:</\1\s*>|\Z)",
+    re.IGNORECASE,
+)
+
+
+def _blank(match: re.Match[str]) -> str:
+    return " " * len(match[0])
+
+
 def _masked(text: str) -> str:
-    mask = list(text)
-
-    def blank(a: int, b: int) -> None:
-        mask[a:b] = [" "] * (b - a)
-
-    # The prefix lets a fence sit inside blockquotes and list items, even on the
-    # marker's own line; its closer must repeat that container prefix, with list
-    # markers as their width in spaces (the opener's own 0-3 space indent aside,
-    # but never a list item's own content indent).
-    list_item = r"(?:[-*+]|\d{1,9}[.)])[ \t]"
-    opener_pattern = re.compile(
-        # A backtick fence's info string cannot hold a backtick (CommonMark).
-        rf"(?m)^((?:[ \t>]|{list_item})*)(`{{3,}}(?=[^`\n]*$)|~{{3,}})[^\n]*(?:\n|$)"
-    )
+    parts = []
     pos = 0
-    while opener := opener_pattern.search(text, pos):
+    while opener := _FENCE_OPENER.search(text, pos):
+        parts.append(text[pos : opener.start()])
         prefix, marker = opener.groups()
-        items = list(re.finditer(list_item, prefix))
+        items = list(re.finditer(_LIST_ITEM, prefix))
         split = items[-1].end() if items else 0
-        container = re.sub(list_item, lambda m: " " * len(m[0]), prefix[:split])
+        container = re.sub(_LIST_ITEM, _blank, prefix[:split])
         container += re.sub(r" {0,3}$", "", prefix[split:])
-        closer_pattern = re.compile(
+        closer = re.compile(
             rf"(?m)^{re.escape(container)} {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}"
             r"[ \t]*(?:\r?\n|$)"
-        )
-        closer = closer_pattern.search(text, opener.end())
-        end = closer.end() if closer else len(text)
-        blank(opener.start(), end)
-        pos = end
-    # A code span stays within its paragraph: it cannot cross a blank line.
-    for m in re.finditer(
-        r"(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)", "".join(mask)
-    ):
-        blank(*m.span())
-    for m in re.finditer(r"<!--[\s\S]*?(?:-->|\Z)", "".join(mask)):
-        blank(*m.span())
-    angle_spans = {
-        match.span(1) for match in _ANGLE_DESTINATION.finditer("".join(mask))
-    }
-    for m in re.finditer(
-        r"<(pre|code|script|style|textarea|title)(?=[\s/>])[^>]*>[\s\S]*?(?:</\1\s*>|\Z)",
-        "".join(mask),
-        re.IGNORECASE,
-    ):
-        opener_end = m.start() + m.group().index(">") + 1
-        if (m.start(), opener_end) in angle_spans:
-            continue
-        blank(*m.span())
-    return "".join(mask)
+        ).search(text, opener.end())
+        pos = closer.end() if closer else len(text)
+        parts.append(" " * (pos - opener.start()))
+    masked = _CODE_SPAN.sub(_blank, "".join(parts) + text[pos:])
+    masked = _COMMENT.sub(_blank, masked)
+    # `<code>` written as an angle-bracket link destination is a link, not a tag.
+    angles = {match.span(1) for match in _ANGLE_DESTINATION.finditer(masked)}
+    return _RAW_TEXT.sub(
+        lambda m: (
+            m[0]
+            if (m.start(), m.start() + m[0].index(">") + 1) in angles
+            else _blank(m)
+        ),
+        masked,
+    )
 
 
 @dataclass(frozen=True)
