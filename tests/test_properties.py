@@ -304,19 +304,18 @@ notation = st.sampled_from(
         max_size=12,
     ),
     notation,
-    st.sampled_from(["", "#sec"]),
     plain,
     plain,
 )
-def test_pull_then_push_then_pull_is_stable(real_name, form, fragment, before, after):
+def test_pull_then_push_then_pull_is_stable(real_name, form, before, after):
     """A pulled body pushes back to the same URLs, so pulling again changes
     nothing, and every localized reference names the downloaded file."""
     name = transclude.safe_name(real_name)
     assume(not name.startswith("."))  # pull refuses hidden attachments
-    assume(not ("#" in name and fragment))
+    assume("#" not in name)  # nor one a push could read as a fragment
     upload = {"id": 4, "long_name": "aa/bb.png", "real_name": real_name, "storage": 1}
     url = transclude.download_url(BASE, upload)
-    remote = f"{before}\n\n{form.format(html.escape(url) + fragment)}\n\n{after}"
+    remote = f"{before}\n\n{form.format(html.escape(url))}\n\n{after}"
 
     local, placed = transclude.reverse(remote, [upload], BASE)
     assert placed == [upload]
@@ -325,9 +324,7 @@ def test_pull_then_push_then_pull_is_stable(real_name, form, fragment, before, a
         file = doc_dir / name
         file.write_bytes(b"data")
         references = [r for r in transclude.plan(local, doc_dir) if r.file]
-        assert [(r.file, r.fragment) for r in references] == [
-            (file.resolve(), fragment)
-        ]
+        assert [(r.file, r.fragment) for r in references] == [(file.resolve(), "")]
         pushed = transclude.replace_spans(local, references, {file: url})
     assert transclude.reverse(pushed, [upload], BASE) == (local, [upload])
 

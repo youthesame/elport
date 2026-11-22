@@ -83,7 +83,7 @@ def test_pull_then_push_reuses_upload_with_markdown_unsafe_name(
 ):
     doc = tmp_path / "report.md"
     write_doc(doc, "local")
-    real_name = "図 1 (テスト)#1.png"
+    real_name = "図 1 (テスト) 1.png"
     upload = {
         "id": 3,
         "long_name": "aa/existing",

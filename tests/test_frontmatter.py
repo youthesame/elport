@@ -118,6 +118,24 @@ def test_frontmatter_rejects_duplicate_yaml_keys():
         frontmatter.parse("---\nid: 1\nid: 2\n---\nBody\n")
 
 
+@pytest.mark.parametrize(
+    "yaml_text",
+    [
+        "tags: &a [x]\ntitle: *a",
+        "title: " + "[" * 5000 + "]" * 5000,
+    ],
+    ids=["alias", "deep nesting"],
+)
+def test_frontmatter_rejects_yaml_that_expands_or_nests_without_bound(yaml_text):
+    """A pulled attachment is parsed too: an alias copies its anchor at no cost
+    to the writer, and nesting deeper than the stack is not a YAMLError."""
+    text = f"---\n{yaml_text}\n---\nBody\n"
+
+    with pytest.raises(ValueError, match="invalid frontmatter YAML"):
+        frontmatter.parse(text)
+    assert frontmatter.text_meta(text) is None
+
+
 @pytest.mark.parametrize("key", ["read", "write"])
 def test_frontmatter_rejects_invalid_permission_keyword(key):
     with pytest.raises(

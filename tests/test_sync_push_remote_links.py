@@ -8,7 +8,8 @@ from _sync_harness import (
     write_doc,
 )
 
-from elport import sync
+from elport import frontmatter, sync
+from elport.transclude import download_url
 
 
 def _pulled_link_doc(tmp_path, monkeypatch, link="private.txt"):
@@ -207,3 +208,34 @@ def test_push_and_status_keep_skipping_a_remote_link_after_server_normalizes_it(
     assert "uploads new: none" in capsys.readouterr().out
     sync.push(doc, second, {})
     assert "upload" not in second.calls
+
+
+@pytest.mark.parametrize(
+    ("real_name", "fragment", "private"),
+    [
+        ("image.png", "#/../../private.txt", "private.txt"),
+        ("run", "#12.csv", "notes/run#12.csv"),
+    ],
+)
+def test_push_never_uploads_through_a_pulled_download_url_fragment(
+    tmp_path, monkeypatch, configured, real_name, fragment, private
+):
+    """The fragment of a download URL is written on the server side too."""
+    doc = tmp_path / "notes" / "report.md"
+    doc.parent.mkdir()
+    write_doc(doc, "local")
+    (tmp_path / private).write_text("secret")
+    upload = {"id": 3, "long_name": "ab/cd", "real_name": real_name, "storage": 1}
+    url = download_url("https://e.example", upload)
+    pulled = f"![x]({url}{fragment})"
+    Store(monkeypatch, {"1": saved_state()})
+    sync.pull(doc, FakeClient(gets=[{"body": pulled}], uploads=[upload]), {})
+    body = frontmatter.parse(doc.read_text())[1]
+    write_doc(doc, f"{body}\n\nmy edit")
+    client = FakeClient(
+        remote_doc={"body": pulled, "content_type": 2}, uploads=[upload]
+    )
+
+    sync.push(doc, client, {})
+
+    assert "upload" not in client.calls

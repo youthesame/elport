@@ -1248,7 +1248,7 @@ def test_flat_basename_round_trip():
 
 @pytest.mark.parametrize(
     "real_name",
-    ["図 1 (テスト).png", "section#1.txt"],
+    ["図 1 (テスト).png", "a (b) c.txt"],
 )
 def test_reverse_markdown_uses_parseable_angle_destination(
     tmp_path: Path, real_name: str
@@ -1280,19 +1280,26 @@ def test_reverse_html_attribute_keeps_plain_attachment_name():
     assert used == [upload]
 
 
-def test_reverse_preserves_download_url_fragment():
-    upload = {
-        "id": 4,
-        "long_name": "x/y",
-        "real_name": "manual.pdf",
-        "storage": 1,
-    }
+@pytest.mark.parametrize(
+    ("real_name", "body"),
+    [
+        ("manual.pdf", "[f]({url}#page=4)"),
+        ("manual.pdf", "[f](<{url}#page=4>)"),
+        ("manual.pdf", '<img src="{escaped}#page=4">'),
+        ("manual.pdf", "[f]({url}#/../private.txt)"),
+        ("manual.pdf", '<img src="{escaped}&#35;&#47;..&#47;private.txt">'),
+        ("data.csv#1", "[f]({url})"),
+    ],
+)
+def test_reverse_never_writes_a_hash_into_a_local_destination(real_name, body):
+    """Beside a file name a ``#`` is ambiguous on the next push: ``run#12.csv``
+    may itself be a file, ``name#/../x`` resolves to ``x``, and ``data.csv#1``
+    reads as ``data.csv`` once that download is gone. Such a URL stays a URL."""
+    upload = {"id": 4, "long_name": "x/y", "real_name": real_name, "storage": 1}
     url = download_url("https://e.example", upload)
+    body = body.format(url=url, escaped=url.replace("&", "&amp;"))
 
-    body, used = reverse(f"[manual]({url}#page=4)", [upload], "https://e.example")
-
-    assert body == "[manual](manual.pdf#page=4)"
-    assert used == [upload]
+    assert reverse(body, [upload], "https://e.example") == (body, [])
 
 
 def test_span_replacement_does_not_touch_fence_or_partial_match(tmp_path: Path):
