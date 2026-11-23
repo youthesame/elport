@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 const (
@@ -158,9 +159,13 @@ func Entities(ctx context.Context, client Searcher, opts ListOptions, stdout, st
 		if err := enc.Encode(rows); err != nil {
 			return err
 		}
-		_, _ = io.WriteString(stdout, buf.String())
+		if _, err := io.WriteString(stdout, buf.String()); err != nil {
+			return err
+		}
 	} else if len(rows) == 0 {
-		_, _ = fmt.Fprintf(stdout, "no %s found\n", opts.Entity)
+		if _, err := fmt.Fprintf(stdout, "no %s found\n", opts.Entity); err != nil {
+			return err
+		}
 	} else {
 		col := OrderColumns[opts.Order]
 		if col == "" {
@@ -169,10 +174,10 @@ func Entities(ctx context.Context, client Searcher, opts ListOptions, stdout, st
 		idWidth := 0
 		whenWidth := 0
 		for _, row := range rows {
-			if n := len(stringField(row, "id")); n > idWidth {
+			if n := utf8.RuneCountInString(stringField(row, "id")); n > idWidth {
 				idWidth = n
 			}
-			if n := len(stringField(row, col)); n > whenWidth {
+			if n := utf8.RuneCountInString(stringField(row, col)); n > whenWidth {
 				whenWidth = n
 			}
 		}
@@ -181,7 +186,9 @@ func Entities(ctx context.Context, client Searcher, opts ListOptions, stdout, st
 			whenStr := stringField(row, col)
 			title := stringField(row, "title")
 			line := fmt.Sprintf("%-*s  %-*s  %s", idWidth, idStr, whenWidth, whenStr, title)
-			_, _ = fmt.Fprintln(stdout, strings.TrimRight(line, " \t"))
+			if _, err := fmt.Fprintln(stdout, strings.TrimRight(line, " \t")); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -248,7 +255,8 @@ func Activity(rows []map[string]any, entity string, today time.Time, color bool,
 		userid string
 	}
 	days := map[authorKey]map[string]int{}
-	for _, row := range rows {
+	firstSeen := map[authorKey]int{}
+	for idx, row := range rows {
 		created := stringField(row, "created_at")
 		if len(created) < 10 {
 			continue
@@ -272,6 +280,7 @@ func Activity(rows []map[string]any, entity string, today time.Time, color bool,
 		key := authorKey{name: name, userid: uid}
 		if days[key] == nil {
 			days[key] = map[string]int{}
+			firstSeen[key] = idx
 		}
 		days[key][day.Format("2006-01-02")]++
 	}
@@ -281,9 +290,10 @@ func Activity(rows []map[string]any, entity string, today time.Time, color bool,
 	}
 
 	type authorEntry struct {
-		key    authorKey
-		counts map[string]int
-		total  int
+		key       authorKey
+		counts    map[string]int
+		total     int
+		firstSeen int
 	}
 	entries := make([]authorEntry, 0, len(days))
 	for k, counts := range days {
@@ -291,13 +301,16 @@ func Activity(rows []map[string]any, entity string, today time.Time, color bool,
 		for _, c := range counts {
 			total += c
 		}
-		entries = append(entries, authorEntry{key: k, counts: counts, total: total})
+		entries = append(entries, authorEntry{key: k, counts: counts, total: total, firstSeen: firstSeen[k]})
 	}
 	sort.Slice(entries, func(i, j int) bool {
 		if entries[i].total != entries[j].total {
 			return entries[i].total > entries[j].total
 		}
-		return entries[i].key.name < entries[j].key.name
+		if entries[i].key.name != entries[j].key.name {
+			return entries[i].key.name < entries[j].key.name
+		}
+		return entries[i].firstSeen < entries[j].firstSeen
 	})
 
 	noun := strings.TrimRight(entity, "s")

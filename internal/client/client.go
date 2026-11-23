@@ -12,12 +12,15 @@ import (
 	"mime/multipart"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/idna"
 
 	"github.com/youthesame/elport/internal/config"
 	"github.com/youthesame/elport/internal/frontmatter"
@@ -79,11 +82,43 @@ type Client struct {
 	catalogs map[string][]map[string]any
 }
 
+type idleTimeoutConn struct {
+	net.Conn
+	idle time.Duration
+}
+
+func (c *idleTimeoutConn) Read(p []byte) (int, error) {
+	if c.idle > 0 {
+		_ = c.Conn.SetReadDeadline(time.Now().Add(c.idle))
+	}
+	return c.Conn.Read(p)
+}
+
+func (c *idleTimeoutConn) Write(p []byte) (int, error) {
+	if c.idle > 0 {
+		_ = c.Conn.SetWriteDeadline(time.Now().Add(c.idle))
+	}
+	return c.Conn.Write(p)
+}
+
 func canonicalHTTPSOrigin(u *url.URL) (string, bool) {
 	if u == nil || !strings.EqualFold(u.Scheme, "https") || u.Host == "" {
 		return "", false
 	}
-	host := strings.ToLower(u.Hostname())
+	rawHost := u.Hostname()
+	if rawHost == "" {
+		return "", false
+	}
+	var host string
+	if addr, err := netip.ParseAddr(rawHost); err == nil {
+		host = addr.String()
+	} else {
+		ascii, err := idna.Lookup.ToASCII(rawHost)
+		if err != nil || ascii == "" {
+			return "", false
+		}
+		host = strings.ToLower(ascii)
+	}
 	port := u.Port()
 	if port == "" {
 		port = "443"
@@ -120,9 +155,16 @@ func New(baseURL string, apiKey config.APIKey, verifySSL bool, opts ...Option) (
 		InsecureSkipVerify: !verifySSL,
 		RootCAs:            cfg.rootCAs,
 	}
+	idle := cfg.idleTimeout
 	transport := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           dialer.DialContext,
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			conn, err := dialer.DialContext(ctx, network, addr)
+			if err != nil {
+				return nil, err
+			}
+			return &idleTimeoutConn{Conn: conn, idle: idle}, nil
+		},
 		TLSClientConfig:       tlsCfg,
 		TLSHandshakeTimeout:   cfg.dialTimeout,
 		ResponseHeaderTimeout: cfg.idleTimeout,
@@ -216,7 +258,7 @@ func readAllWithIdleTimeout(r io.Reader, idle time.Duration, cancel context.Canc
 	}
 }
 
-func (c *Client) do(ctx context.Context, method, path string, query url.Values, contentType string, body io.Reader) (int, http.Header, []byte, error) {
+func (c *Client) do(ctx context.Context, method, path string, query url.Values, contentType string, body io.Reader, getBody func() (io.ReadCloser, error)) (int, http.Header, []byte, error) {
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -232,6 +274,9 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	req, err := http.NewRequestWithContext(reqCtx, method, fullURL, body)
 	if err != nil {
 		return 0, nil, nil, err
+	}
+	if getBody != nil {
+		req.GetBody = getBody
 	}
 	req.Header.Set("Authorization", c.key.Reveal())
 	if contentType != "" {
@@ -284,7 +329,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 		body = bytes.NewReader(raw)
 		ct = "application/json"
 	}
-	_, hdr, data, err := c.do(ctx, method, path, query, ct, body)
+	_, hdr, data, err := c.do(ctx, method, path, query, ct, body, nil)
 	return hdr, data, err
 }
 
@@ -398,6 +443,9 @@ func (c *Client) Create(ctx context.Context, entity, title string) (map[string]a
 	res := map[string]any{}
 	if len(bytes.TrimSpace(data)) > 0 {
 		_ = decodeJSON(data, &res)
+		if res == nil {
+			res = map[string]any{}
+		}
 	}
 	if _, hasID := res["id"]; !hasID {
 		if locID := idFromLocation(hdr); locID != "" {
@@ -455,24 +503,22 @@ func (c *Client) Comments(ctx context.Context, entity string, eid int) ([]map[st
 	return res, nil
 }
 
-func (c *Client) Upload(ctx context.Context, entity string, eid int, approved plan.ApprovedUploadPath) (map[string]any, error) {
-	if !approved.Valid() {
-		return nil, errors.New("refusing unapproved upload path")
-	}
-	p, err := entityPath(entity, eid, "/uploads")
+func openMultipartBody(filePath, boundary string) (io.ReadCloser, error) {
+	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(approved.Path())
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = f.Close() }()
-
 	pr, pw := io.Pipe()
 	mw := multipart.NewWriter(pw)
+	if err := mw.SetBoundary(boundary); err != nil {
+		_ = f.Close()
+		_ = pw.Close()
+		_ = pr.Close()
+		return nil, err
+	}
 	go func() {
-		part, err := mw.CreateFormFile("file", filepath.Base(approved.Path()))
+		defer func() { _ = f.Close() }()
+		part, err := mw.CreateFormFile("file", filepath.Base(filePath))
 		if err != nil {
 			_ = pw.CloseWithError(err)
 			return
@@ -483,15 +529,40 @@ func (c *Client) Upload(ctx context.Context, entity string, eid int, approved pl
 		}
 		_ = pw.CloseWithError(mw.Close())
 	}()
+	return pr, nil
+}
 
-	_, hdr, data, err := c.do(ctx, http.MethodPost, p, nil, mw.FormDataContentType(), pr)
+func (c *Client) Upload(ctx context.Context, entity string, eid int, approved plan.ApprovedUploadPath) (map[string]any, error) {
+	if !approved.Valid() {
+		return nil, errors.New("refusing unapproved upload path")
+	}
+	p, err := entityPath(entity, eid, "/uploads")
 	if err != nil {
-		_ = pr.Close()
+		return nil, err
+	}
+	tmpWriter := multipart.NewWriter(io.Discard)
+	boundary := tmpWriter.Boundary()
+	contentType := tmpWriter.FormDataContentType()
+
+	body, err := openMultipartBody(approved.Path(), boundary)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = body.Close() }()
+
+	getBody := func() (io.ReadCloser, error) {
+		return openMultipartBody(approved.Path(), boundary)
+	}
+	_, hdr, data, err := c.do(ctx, http.MethodPost, p, nil, contentType, body, getBody)
+	if err != nil {
 		return nil, err
 	}
 	var res map[string]any
-	if err := decodeJSON(data, &res); err != nil {
-		return map[string]any{"id": idFromLocation(hdr)}, nil
+	if err := decodeJSON(data, &res); err != nil || res == nil {
+		if locID := idFromLocation(hdr); locID != "" {
+			return map[string]any{"id": locID}, nil
+		}
+		return nil, errors.New("upload succeeded without JSON body or Location header")
 	}
 	return res, nil
 }
@@ -505,7 +576,7 @@ func (c *Client) Download(ctx context.Context, entity string, eid, uid int) ([]b
 	if err != nil {
 		return nil, err
 	}
-	_, _, data, err := c.do(ctx, http.MethodGet, p, nil, "", nil)
+	_, _, data, err := c.do(ctx, http.MethodGet, p, nil, "", nil, nil)
 	return data, err
 }
 

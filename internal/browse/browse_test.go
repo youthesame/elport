@@ -121,3 +121,24 @@ func TestActivityHeatmapMatchesFormat(t *testing.T) {
 		t.Errorf("empty Activity = %q", empty)
 	}
 }
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) {
+	return 0, context.Canceled
+}
+
+func TestEntitiesPropagatesStdoutWriteError(t *testing.T) {
+	limit := 10
+	fs := &fakeSearcher{
+		pages: [][]map[string]any{{{"id": 1, "date": "2026-11-23", "title": "A"}}},
+	}
+	var errBuf bytes.Buffer
+	if err := browse.Entities(context.Background(), fs, browse.ListOptions{
+		Entity: "experiments",
+		Scope:  "self",
+		Limit:  &limit,
+	}, failingWriter{}, &errBuf); err == nil {
+		t.Fatal("expected stdout write error to propagate")
+	}
+}

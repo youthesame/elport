@@ -221,3 +221,52 @@ func TestClientEndpointsCachingErrorsAndJSONContentType(t *testing.T) {
 		t.Fatal("expected Upload to reject zero ApprovedUploadPath")
 	}
 }
+
+func TestClientCreateJSONNullBodyWithLocationDoesNotPanic(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "/api/v2/experiments/77")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte("null"))
+	}))
+	defer srv.Close()
+
+	c := tlsClientForServer(t, srv, "1-key")
+	got, err := c.Create(context.Background(), "experiments", "T")
+	if err != nil {
+		t.Fatalf("Create with null body: %v", err)
+	}
+	if got["id"] != "77" {
+		t.Fatalf("Create id = %#v, want 77", got["id"])
+	}
+}
+
+func TestClientIDNAHostRedirectRejectedAndStalledRedirectBodyTimesOut(t *testing.T) {
+	// IDNA homograph İ.example (xn--i-9bb.example) must not match i.example,
+	// and a stalled redirect response body must abort via the conn idle deadline.
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		flusher, _ := w.(http.Flusher)
+		switch r.URL.Path {
+		case "/api/v2/experiments/1":
+			http.Redirect(w, r, "https://\u0130.example/steal", http.StatusFound)
+		case "/api/v2/experiments/2":
+			w.Header().Set("Location", "/api/v2/experiments/20")
+			w.WriteHeader(http.StatusFound)
+			if flusher != nil {
+				flusher.Flush()
+			}
+			select {
+			case <-r.Context().Done():
+			case <-time.After(2 * time.Second):
+			}
+		}
+	}))
+	defer srv.Close()
+
+	c := tlsClientForServer(t, srv, "1-key", client.WithTimeouts(time.Second, 80*time.Millisecond))
+	if _, err := c.Get(context.Background(), "experiments", 1); err == nil {
+		t.Fatal("expected IDNA cross-origin redirect to fail")
+	}
+	if _, err := c.Get(context.Background(), "experiments", 2); err == nil {
+		t.Fatal("expected stalled redirect body to time out")
+	}
+}

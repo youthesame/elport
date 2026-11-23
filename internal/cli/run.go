@@ -62,6 +62,11 @@ func (e Env) termWidth(stdout io.Writer) int {
 	if e.TermWidth > 0 {
 		return e.TermWidth
 	}
+	if raw := os.Getenv("COLUMNS"); raw != "" {
+		if cols, err := strconv.Atoi(raw); err == nil && cols > 0 {
+			return cols
+		}
+	}
 	if f, ok := stdout.(*os.File); ok {
 		if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
 			return w
@@ -84,36 +89,94 @@ func colorize(text string, code int, color bool) string {
 	return fmt.Sprintf("\033[%dm%s\033[0m", code, text)
 }
 
-func readPromptSecret(stdin io.Reader, reader *bufio.Reader, stdout io.Writer) (string, error) {
-	_, _ = io.WriteString(stdout, "api_key: ")
-	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
-		raw, err := term.ReadPassword(int(f.Fd()))
-		_, _ = io.WriteString(stdout, "\n")
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(string(raw)), nil
+func readLineCtx(ctx context.Context, reader *bufio.Reader) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
 	}
-	line, err := reader.ReadString('\n')
+	type result struct {
+		line string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		line, err := reader.ReadString('\n')
+		ch <- result{line: line, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case res := <-ch:
+		return res.line, res.err
+	}
+}
+
+func readPromptSecret(ctx context.Context, stdin io.Reader, reader *bufio.Reader, promptOut io.Writer) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	_, _ = io.WriteString(promptOut, "api_key: ")
+	if f, ok := stdin.(*os.File); ok && term.IsTerminal(int(f.Fd())) {
+		fd := int(f.Fd())
+		oldState, stateErr := term.GetState(fd)
+		type result struct {
+			raw []byte
+			err error
+		}
+		ch := make(chan result, 1)
+		go func() {
+			raw, err := term.ReadPassword(fd)
+			ch <- result{raw: raw, err: err}
+		}()
+		select {
+		case <-ctx.Done():
+			if stateErr == nil && oldState != nil {
+				_ = term.Restore(fd, oldState)
+			}
+			_, _ = io.WriteString(promptOut, "\n")
+			return "", ctx.Err()
+		case res := <-ch:
+			_, _ = io.WriteString(promptOut, "\n")
+			if res.err != nil {
+				return "", res.err
+			}
+			return strings.TrimSpace(string(res.raw)), nil
+		}
+	}
+	line, err := readLineCtx(ctx, reader)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", err
+	}
+	if errors.Is(err, io.EOF) && strings.TrimSpace(line) == "" {
+		return "", errors.New("api_key is required")
 	}
 	return strings.TrimSpace(line), nil
 }
 
-func runLogin(cmd *Command, stdin io.Reader, stdout, stderr io.Writer, env Env) error {
+func runLogin(ctx context.Context, cmd *Command, stdin io.Reader, stdout, stderr io.Writer, env Env) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if stdin == nil {
 		return errors.New("stdin unavailable for interactive login")
 	}
 	reader := bufio.NewReader(stdin)
 	_, _ = io.WriteString(stdout, "base_url: ")
-	line, err := reader.ReadString('\n')
+	line, err := readLineCtx(ctx, reader)
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
 	baseURL := strings.TrimSpace(line)
-	secret, err := readPromptSecret(stdin, reader, stdout)
+	if baseURL == "" {
+		return errors.New("base_url is required")
+	}
+	secret, err := readPromptSecret(ctx, stdin, reader, stderr)
 	if err != nil {
+		return err
+	}
+	if secret == "" {
+		return errors.New("api_key is required")
+	}
+	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return config.Login(cmd.ProfileName, baseURL, config.NewAPIKey(secret), env.keyring(), stderr)
@@ -146,7 +209,7 @@ func runProfile(cmd *Command, stdout, stderr io.Writer, env Env) error {
 		if cmd.ProfileName == "" {
 			return errors.New("elport profile use requires a profile name")
 		}
-		if _, ok := profs[cmd.ProfileName]; !ok {
+		if _, ok := profs[cmd.ProfileName]; !ok || (data.UserProfiles != nil && !data.UserProfiles[cmd.ProfileName]) {
 			return fmt.Errorf("no such profile: %s", cmd.ProfileName)
 		}
 		if err := config.SetDefault(cmd.ProfileName); err != nil {
@@ -491,7 +554,7 @@ func RunWithEnv(ctx context.Context, args []string, stdin io.Reader, stdout, std
 		_, _ = io.WriteString(stdout, text)
 		return ExitOK
 	case "login":
-		runErr = runLogin(cmd, stdin, stdout, stderr, env)
+		runErr = runLogin(ctx, cmd, stdin, stdout, stderr, env)
 	case "logout":
 		runErr = runLogout(cmd, stdout, env)
 	case "profile":

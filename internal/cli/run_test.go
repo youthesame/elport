@@ -141,3 +141,28 @@ func TestRunLoginProfileWhoamiListActivityLogout(t *testing.T) {
 		t.Errorf("unexpected logout output: %q", out.String())
 	}
 }
+
+func TestRunLoginRejectsEOFAndCanceledContext(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	kr := &memKeyring{}
+	env := cli.Env{WorkDir: t.TempDir(), Keyring: kr}
+
+	var out, errBuf bytes.Buffer
+	if code := cli.RunWithEnv(context.Background(), []string{"login", "lab"}, strings.NewReader("https://elab.example.test\n"), &out, &errBuf, env); code != cli.ExitError {
+		t.Fatalf("login with missing api_key line should exit 1, got %d", code)
+	}
+	if !strings.Contains(errBuf.String(), "api_key is required") {
+		t.Errorf("unexpected stderr: %q", errBuf.String())
+	}
+
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(canceled, []string{"login", "lab"}, strings.NewReader("https://elab.example.test\nsecret\n"), &out, &errBuf, env); code != cli.ExitError {
+		t.Fatalf("login with canceled ctx should exit 1, got %d", code)
+	}
+}
