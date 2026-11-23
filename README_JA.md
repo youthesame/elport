@@ -26,9 +26,10 @@ curl -fsSL https://raw.githubusercontent.com/youthesame/elport/main/install.sh |
 irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/install.ps1 | iex
 ```
 
-<details><summary>その他の方法（Go / GitHub Releases）</summary>
+<details><summary>その他の方法（Nix / Go / GitHub Releases）</summary>
 
-- Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1`
+- Nix: `nix profile install github:youthesame/elport`（または `nix run github:youthesame/elport -- --help`）
+- Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@latest`
 - [GitHub Releases](https://github.com/youthesame/elport/releases)（macOS ではブラウザからのダウンロードに quarantine が付くため、Homebrew または `install.sh` を推奨します）
 
 </details>
@@ -37,7 +38,7 @@ irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/in
 
 既存の `~/.config/elport/config.toml` と `~/.config/elport/state/` は全 OS でそのまま引き継げます（削除しないでください）。
 
-1. 先に Python 版をアンインストールしてください（`uv tool uninstall elport` / `pipx uninstall elport` / `pip uninstall elport` / conda 環境など）。残っていると `PATH` 上で旧版が優先されることがあります。
+1. 先に Python 版をアンインストールしてください（`uv tool uninstall elport` / `conda global uninstall elport` / `pipx uninstall elport` / `pip uninstall elport`）。残っていると `PATH` 上で旧版が優先されることがあります。
 2. 上の手順で Go 版をインストールし、`command -v elport`（PowerShell は `Get-Command elport`）と `elport --version`（`0.2.x`）を確認してください。
 
 - **macOS**: Python 版が保存した Keychain エントリを初回読み込む際、`/usr/bin/security` による許可ダイアログが 1 回表示されます。「常に許可」を選ぶか、`elport login <profile>` を 1 回やり直してください。

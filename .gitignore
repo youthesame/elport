@@ -33,6 +33,10 @@ dist/
 wheels/
 *.egg-info/
 
+# Nix
+/result
+/result-*
+
 # Secrets / local config
 .env
 .elport.toml
