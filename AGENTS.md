@@ -1,4 +1,4 @@
-# elport — agent guide
+# elport: agent guide
 
 Git-like sync CLI for eLabFTW (single static Go binary, `CGO_ENABLED=0`). **Local is the source of truth.**
 
@@ -14,7 +14,7 @@ Git-like sync CLI for eLabFTW (single static Go binary, `CGO_ENABLED=0`). **Loca
 ## Rules you cannot infer from code alone
 
 - **Tests are authoritative**: update tests first (`internal/**/*_test.go`, `testdata/golden/`, `spec/quint/sync.qnt` → `testdata/quint/`).
-- **Read [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** before touching HTTP requests, URLs, or body/metadata handling — mocks do not show real eLabFTW quirks.
+- **Read [docs/ELABFTW-API.md](docs/ELABFTW-API.md)** before touching HTTP requests, URLs, or body/metadata handling; mocks do not show real eLabFTW quirks.
 - **Live API checks**: use **only** the disposable demo <https://demo.elabftw.net>. Never write to any other instance.
 - **Terminology** (use these exact words; avoid the alternatives):
   - **Document** (not note/page/file), **Entity** (not entry/record), **HTML entity** (not rich-text entity)

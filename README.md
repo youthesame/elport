@@ -7,7 +7,7 @@ along with every figure and data file the body references, to eLabFTW entities. 
 
 ## Install
 
-Single static binary — no Python or other runtime required.
+Single static binary (no Python or other runtime required).
 
 **macOS / Linux:**
 
