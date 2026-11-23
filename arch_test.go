@@ -6,6 +6,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -442,5 +443,102 @@ func TestArchRulesAllowValidCode(t *testing.T) {
 				t.Fatalf("unexpected violations: %v", got)
 			}
 		})
+	}
+}
+
+var agentsSymbolPattern = regexp.MustCompile("`(internal/[a-z0-9_/]+)\\.([A-Z][A-Za-z0-9_]*)(?:\\.([A-Z][A-Za-z0-9_]*))?`")
+
+func exportedSymbolsInPkg(pkgDir string) (map[string]bool, map[string]bool, error) {
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	topLevel := map[string]bool{}
+	methods := map[string]bool{}
+	fset := token.NewFileSet()
+	for _, de := range entries {
+		name := de.Name()
+		if de.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, filepath.Join(pkgDir, name), nil, 0)
+		if err != nil {
+			return nil, nil, err
+		}
+		for _, decl := range f.Decls {
+			switch d := decl.(type) {
+			case *ast.FuncDecl:
+				if d.Recv == nil {
+					topLevel[d.Name.Name] = true
+				} else if len(d.Recv.List) > 0 {
+					recvType := receiverTypeName(d.Recv.List[0].Type)
+					if recvType != "" {
+						methods[recvType+"."+d.Name.Name] = true
+					}
+				}
+			case *ast.GenDecl:
+				for _, spec := range d.Specs {
+					switch s := spec.(type) {
+					case *ast.TypeSpec:
+						topLevel[s.Name.Name] = true
+					case *ast.ValueSpec:
+						for _, ident := range s.Names {
+							topLevel[ident.Name] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return topLevel, methods, nil
+}
+
+func receiverTypeName(expr ast.Expr) string {
+	switch t := expr.(type) {
+	case *ast.Ident:
+		return t.Name
+	case *ast.StarExpr:
+		if id, ok := t.X.(*ast.Ident); ok {
+			return id.Name
+		}
+	}
+	return ""
+}
+
+func TestArchAgentsSymbolLinksExist(t *testing.T) {
+	// Every Go symbol referenced in AGENTS.md must exist in production code so
+	// invariant documentation cannot silently drift from the implementation.
+	raw, err := os.ReadFile("AGENTS.md")
+	if err != nil {
+		t.Fatalf("read AGENTS.md: %v", err)
+	}
+	matches := agentsSymbolPattern.FindAllStringSubmatch(string(raw), -1)
+	if len(matches) == 0 {
+		t.Fatal("AGENTS.md contains no verifiable internal/<pkg>.<Symbol> references")
+	}
+	type pkgCache struct {
+		top     map[string]bool
+		methods map[string]bool
+	}
+	cache := map[string]pkgCache{}
+	for _, m := range matches {
+		pkgDir, sym, method := m[1], m[2], m[3]
+		entry, ok := cache[pkgDir]
+		if !ok {
+			top, meths, err := exportedSymbolsInPkg(pkgDir)
+			if err != nil {
+				t.Errorf("AGENTS.md references %s: %v", m[0], err)
+				continue
+			}
+			entry = pkgCache{top: top, methods: meths}
+			cache[pkgDir] = entry
+		}
+		if !entry.top[sym] {
+			t.Errorf("AGENTS.md references missing symbol %s in %s", sym, pkgDir)
+			continue
+		}
+		if method != "" && !entry.methods[sym+"."+method] {
+			t.Errorf("AGENTS.md references missing method %s.%s in %s", sym, method, pkgDir)
+		}
 	}
 }
