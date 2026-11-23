@@ -61,7 +61,7 @@ func (e Env) useColor(stdout io.Writer) bool {
 	if e.IsTTY != nil {
 		return *e.IsTTY
 	}
-	if f, ok := stdout.(*os.File); ok {
+	if f, ok := fileOf(stdout); ok {
 		return term.IsTerminal(int(f.Fd()))
 	}
 	return false
@@ -72,7 +72,7 @@ func (e Env) canPrompt(stdin io.Reader, stdout io.Writer) bool {
 		return *e.IsTTY
 	}
 	inFile, inOK := stdin.(*os.File)
-	outFile, outOK := stdout.(*os.File)
+	outFile, outOK := fileOf(stdout)
 	return inOK && outOK && term.IsTerminal(int(inFile.Fd())) && term.IsTerminal(int(outFile.Fd()))
 }
 
@@ -85,7 +85,7 @@ func (e Env) termWidth(stdout io.Writer) int {
 			return cols
 		}
 	}
-	if f, ok := stdout.(*os.File); ok {
+	if f, ok := fileOf(stdout); ok {
 		if w, _, err := term.GetSize(int(f.Fd())); err == nil && w > 0 {
 			return w
 		}
@@ -1076,6 +1076,7 @@ func runActivity(ctx context.Context, cmd *Command, stdout, stderr io.Writer, en
 }
 
 func RunWithEnv(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, env Env) int {
+	stdout, stderr = termSafe(stdout), termSafe(stderr)
 	cmd, code, err := Parse(args, stdout)
 	if err != nil {
 		_, _ = fmt.Fprintln(stderr, err.Error())
