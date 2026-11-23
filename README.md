@@ -2,6 +2,10 @@
 
 [English](https://github.com/youthesame/elport/blob/main/README.md) | [日本語](https://github.com/youthesame/elport/blob/main/README_JA.md)
 
+> **Migrated to Go (`v0.2.0+`):** `elport` is now distributed as a standalone Go binary and this PyPI package (`v0.1.x`) is maintenance-only.
+> Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` carry over as-is (do not delete them).
+> Uninstall the Python package first (`uv tool uninstall elport`, `conda global uninstall elport`, `pipx uninstall elport`, or `pip uninstall elport`), then follow the [Go install instructions](https://github.com/youthesame/elport#install) and verify with `command -v elport` (`Get-Command elport` on PowerShell) and `elport --version`.
+
 Write lab documents locally in Markdown (with inline HTML like `<figure>` on eLabFTW 5.x). Then `push`/`pull` them,
 along with every figure and data file the body references, to eLabFTW entities. **Local is the source of truth.**
 

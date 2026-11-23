@@ -955,3 +955,38 @@ def test_help_topics_and_top_help_avoid_note_terminology(capsys):
     for topic in cli.HELP_TOPICS:
         text = (resources.files("elport") / "help" / f"{topic}.md").read_text("utf-8")
         assert not re.search(r"\bnotes?\b", text, flags=re.IGNORECASE), topic
+
+
+def test_migration_notice_prints_only_on_tty_stderr_for_commands(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("ELPORT_NO_MIGRATION_NOTICE", raising=False)
+
+    # Non-TTY stderr stays silent.
+    assert cli.main(["profile", "list"]) == 0
+    captured = capsys.readouterr()
+    assert captured.err == ""
+
+    # TTY stderr prints one notice line on stderr, never stdout.
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    assert cli.main(["profile", "list"]) == 0
+    captured = capsys.readouterr()
+    lines = captured.err.splitlines()
+    assert len(lines) == 1 and "v0.2.0+" in lines[0]
+    assert "v0.2.0+" not in captured.out
+
+    # ELPORT_NO_MIGRATION_NOTICE=1 silences the notice even on a TTY.
+    monkeypatch.setenv("ELPORT_NO_MIGRATION_NOTICE", "1")
+    assert cli.main(["profile", "list"]) == 0
+    assert capsys.readouterr().err == ""
+
+    # --version, --help, and help stay silent even on a TTY.
+    monkeypatch.delenv("ELPORT_NO_MIGRATION_NOTICE", raising=False)
+    for argv in (["--version"], ["--help"]):
+        with pytest.raises(SystemExit):
+            cli.main(argv)
+        assert capsys.readouterr().err == ""
+
+    assert cli.main(["help"]) == 0
+    assert capsys.readouterr().err == ""

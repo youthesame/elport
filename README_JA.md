@@ -2,6 +2,10 @@
 
 [English](README.md) | [日本語](README_JA.md)
 
+> **Go 版（`v0.2.0+`）へ移行しました:** `elport` は単独の Go バイナリとして配布されるようになり、この PyPI パッケージ（`v0.1.x`）はメンテナンス専用です。
+> 既存の `~/.config/elport/config.toml` と `~/.config/elport/state/` はそのまま引き継げます（削除しないでください）。
+> 先に Python 版をアンインストールし（`uv tool uninstall elport` / `conda global uninstall elport` / `pipx uninstall elport` / `pip uninstall elport`）、[Go 版のインストール手順](https://github.com/youthesame/elport/blob/main/README_JA.md#%E3%82%A4%E3%83%B3%E3%82%B9%E3%83%88%E3%83%BC%E3%83%AB)に従って導入後、`command -v elport`（PowerShell は `Get-Command elport`）と `elport --version` を確認してください。
+
 ローカル環境でお気に入りのエディタを使い、Markdown で実験ドキュメントを記述できます（eLabFTW 5.x では `<figure>`
 などのインライン HTML も利用できます）。本文と、そこで参照されているすべての図やデータファイルをまとめて eLabFTW のエンティティへ
 `push` / `pull` して同期します。**同期の基準は常にローカルです。**
