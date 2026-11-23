@@ -2,17 +2,44 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v0.1.*"]
 
 permissions:
   contents: read
 
 jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Verify release tag and maintenance branch ancestry
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          test "$REF_TYPE" = "tag" || {
+            echo "Expected a tag ref, got: $REF_TYPE" >&2
+            exit 1
+          }
+          printf '%s\n' "$TAG_NAME" | grep -Eq '^v0\.1\.(0|[1-9][0-9]*)$' || {
+            echo "Tag must match v0.1.<patch> without leading zeros: $TAG_NAME" >&2
+            exit 1
+          }
+          git fetch --no-tags origin +refs/heads/python:refs/remotes/origin/python
+          git merge-base --is-ancestor HEAD refs/remotes/origin/python || {
+            echo "Tagged commit $(git rev-parse HEAD) is not on the python maintenance branch" >&2
+            exit 1
+          }
+
   ci:
+    needs: verify
     uses: ./.github/workflows/ci.yml
 
   publish:
-    needs: ci
+    needs: [verify, ci]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
