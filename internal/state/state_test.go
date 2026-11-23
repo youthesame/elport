@@ -99,3 +99,47 @@ func TestLoadSavePreservesUnknownFieldsAndEmptyPendingRemote(t *testing.T) {
 		t.Errorf("corrupt state = (%v, %v), want (nil, nil)", corrupt, err)
 	}
 }
+
+func TestStatePreservesLarge64BitIntegerAndResets0600Perm(t *testing.T) {
+	// Unknown integer fields above 2^53 must survive Load -> Save without float64
+	// rounding, and Save must always restore 0600 permissions.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	base := "https://elab.example.test"
+	p, err := state.Path(base, "experiments", "88")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(`{"big":9007199254740993}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := state.Load(base, "experiments", "88")
+	if err != nil || loaded == nil {
+		t.Fatalf("Load: (%v, %v)", loaded, err)
+	}
+	if err := state.Save(base, "experiments", "88", loaded); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != `{"big":9007199254740993}` {
+		t.Fatalf("integer precision lost: got %s", raw)
+	}
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("perm = %o, want 0600", info.Mode().Perm())
+		}
+	}
+}

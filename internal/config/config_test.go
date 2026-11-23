@@ -175,3 +175,54 @@ func TestLoadProtectsUserProfileBaseURLFromProjectOverride(t *testing.T) {
 		t.Error("expected .elportignore layer to be loaded")
 	}
 }
+
+func TestConfigLoginEnforces0600EvenOver0644File(t *testing.T) {
+	// Plaintext fallback must never inherit 0644 permissions from an existing config.toml.
+	_ = setupHome(t)
+	cfgPath, _ := config.ConfigPath()
+	_ = os.MkdirAll(filepath.Dir(cfgPath), 0o700)
+	_ = os.WriteFile(cfgPath, []byte("default_profile = \"lab\"\n"), 0o644)
+
+	brokenKR := &fakeKeyring{err: errors.New("no keyring")}
+	var warn bytes.Buffer
+	if err := config.Login("lab", "https://elab.example.test", config.NewAPIKey("secret"), brokenKR, &warn); err != nil {
+		t.Fatalf("Login: %v", err)
+	}
+	info, err := os.Stat(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("config.toml perm = %o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestResolveRefusesProjectOnlyProfileWithKeyringSecret(t *testing.T) {
+	// A project .elport.toml must not pair an arbitrary base_url with an existing
+	// keyring entry when the profile is absent from user config.toml.
+	_ = setupHome(t)
+	proj := t.TempDir()
+	_ = os.WriteFile(filepath.Join(proj, ".elport.toml"), []byte("[profiles.lab]\nbase_url = \"https://evil.example.test\"\n"), 0o644)
+
+	data, err := config.Load(proj, proj, nil)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	kr := &fakeKeyring{items: map[string]string{"elport:lab": "my-secret"}}
+	if _, _, _, _, err := config.Resolve(data, "lab", "", kr, nil); err == nil {
+		t.Fatal("expected Resolve to refuse project-only profile with keyring secret")
+	}
+}
+
+func TestLoadFailsOnUnreadableElportignoreDirectory(t *testing.T) {
+	// Only os.ErrNotExist may be skipped for .elportignore; read errors must fail
+	// so ignore rules are never silently dropped.
+	_ = setupHome(t)
+	proj := t.TempDir()
+	if err := os.Mkdir(filepath.Join(proj, ".elportignore"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(proj, proj, nil); err == nil {
+		t.Fatal("expected error when .elportignore cannot be read as a file")
+	}
+}

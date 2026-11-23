@@ -658,9 +658,7 @@ func scanMarkdownDestinations(text, maskedText string) []Reference {
 		if !ok {
 			continue
 		}
-		if maskedText[i] == '!' && i+1 < len(maskedText) && maskedText[i+1] == '[' {
-			i++
-		}
+		i = start - 1
 		if start == len(maskedText) || maskedText[start] == '<' {
 			continue
 		}
@@ -1045,35 +1043,71 @@ func scanReferenceDefinitions(maskedText string) []string {
 func maskForRawHTML(text string) string {
 	buf := []byte(text)
 	pos := 0
+	var f fenceOpen
+	var c, cm, tg byteSpan
+	fState, cState, cmState, tgState := 0, 0, 0, 0
 	for pos < len(text) {
-		f, hasFence := findNextFenceOpener(text, pos)
-		codeLimit := len(text)
-		if hasFence {
-			codeLimit = f.start
+		if fState == 0 || (fState == 1 && f.start < pos) {
+			var ok bool
+			f, ok = findNextFenceOpener(text, pos)
+			if ok {
+				fState = 1
+			} else {
+				fState = -1
+			}
+			cState = 0
 		}
-		c, hasCode := findNextCodeSpan(text, pos, codeLimit)
-		cm, hasComment := findNextComment(text, pos)
-		tg, hasTag := findNextHTMLTag(text, pos)
+		if cState == 0 || (cState == 1 && c.start < pos) {
+			codeLimit := len(text)
+			if fState == 1 {
+				codeLimit = f.start
+			}
+			var ok bool
+			c, ok = findNextCodeSpan(text, pos, codeLimit)
+			if ok {
+				cState = 1
+			} else {
+				cState = -1
+			}
+		}
+		if cmState == 0 || (cmState == 1 && cm.start < pos) {
+			var ok bool
+			cm, ok = findNextComment(text, pos)
+			if ok {
+				cmState = 1
+			} else {
+				cmState = -1
+			}
+		}
+		if tgState == 0 || (tgState == 1 && tg.start < pos) {
+			var ok bool
+			tg, ok = findNextHTMLTag(text, pos)
+			if ok {
+				tgState = 1
+			} else {
+				tgState = -1
+			}
+		}
 
 		bestStart := len(text) + 1
 		bestKind := ""
 		bestEnd := 0
-		if hasFence && f.start < bestStart {
+		if fState == 1 && f.start < bestStart {
 			bestStart = f.start
 			bestKind = "fence"
 			bestEnd = findFenceEnd(text, f)
 		}
-		if hasCode && c.start < bestStart {
+		if cState == 1 && c.start < bestStart {
 			bestStart = c.start
 			bestKind = "code"
 			bestEnd = c.end
 		}
-		if hasComment && cm.start < bestStart {
+		if cmState == 1 && cm.start < bestStart {
 			bestStart = cm.start
 			bestKind = "comment"
 			bestEnd = cm.end
 		}
-		if hasTag && tg.start < bestStart {
+		if tgState == 1 && tg.start < bestStart {
 			bestStart = tg.start
 			bestKind = "tag"
 			bestEnd = tg.end
@@ -1118,9 +1152,7 @@ func maskForRawHTML(text string) string {
 		if !ok {
 			continue
 		}
-		if s[i] == '!' && i+1 < len(s) && s[i+1] == '[' {
-			i++
-		}
+		i = start - 1
 		if start == len(s) || s[start] == '<' {
 			continue
 		}

@@ -60,7 +60,9 @@ func Load(base, entity, eid string) (map[string]any, error) {
 		return nil, err
 	}
 	var data map[string]any
-	if err := json.Unmarshal(raw, &data); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&data); err != nil {
 		return nil, nil
 	}
 	return data, nil
@@ -79,5 +81,5 @@ func Save(base, entity, eid string, data map[string]any) error {
 		return err
 	}
 	out := bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
-	return fsx.AtomicWriteFile(p, out, 0o600)
+	return fsx.AtomicWriteFileFixedPerm(p, out, 0o600)
 }

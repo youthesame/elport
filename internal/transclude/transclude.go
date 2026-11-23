@@ -99,10 +99,9 @@ func hasHiddenPart(parts []string) bool {
 	return false
 }
 
-func splitPathParts(p string) []string {
-	cleaned := filepath.Clean(p)
-	vol := filepath.VolumeName(cleaned)
-	rest := strings.TrimPrefix(cleaned, vol)
+func splitRawParts(p string) []string {
+	vol := filepath.VolumeName(p)
+	rest := strings.TrimPrefix(p, vol)
 	raw := strings.FieldsFunc(rest, func(r rune) bool { return r == '/' || r == '\\' })
 	if vol != "" {
 		return append([]string{vol}, raw...)
@@ -110,33 +109,50 @@ func splitPathParts(p string) []string {
 	return raw
 }
 
-func ResolveNonStrict(p string) string {
-	abs, err := filepath.Abs(p)
-	if err != nil {
-		abs = filepath.Clean(p)
+func splitPathParts(p string) []string {
+	return splitRawParts(filepath.Clean(p))
+}
+
+func resolveJoinedNonStrict(base, rel string) string {
+	var cur string
+	var rest string
+	if filepath.IsAbs(rel) {
+		vol := filepath.VolumeName(rel)
+		cur = vol + string(filepath.Separator)
+		rest = strings.TrimPrefix(rel, vol)
+	} else {
+		cur = ResolveNonStrict(base)
+		rest = rel
 	}
-	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
-		return resolved
-	}
-	var tail []string
-	cur := abs
-	for {
-		parent := filepath.Dir(cur)
-		if parent == cur {
-			break
+	segs := strings.FieldsFunc(rest, func(r rune) bool { return r == '/' || r == '\\' })
+	for _, seg := range segs {
+		if seg == "" || seg == "." {
+			continue
 		}
-		tail = append(tail, filepath.Base(cur))
-		cur = parent
-		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
-			parts := make([]string, 0, 1+len(tail))
-			parts = append(parts, resolved)
-			for i := len(tail) - 1; i >= 0; i-- {
-				parts = append(parts, tail[i])
+		if seg == ".." {
+			if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+				cur = resolved
 			}
-			return filepath.Join(parts...)
+			cur = filepath.Dir(cur)
+			continue
+		}
+		cur = filepath.Join(cur, seg)
+		if resolved, err := filepath.EvalSymlinks(cur); err == nil {
+			cur = resolved
 		}
 	}
-	return abs
+	return cur
+}
+
+func ResolveNonStrict(p string) string {
+	if filepath.IsAbs(p) {
+		return resolveJoinedNonStrict("", p)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return resolveJoinedNonStrict(cwd, p)
 }
 
 func hiddenAsWritten(docDir, raw string) bool {
@@ -144,7 +160,7 @@ func hiddenAsWritten(docDir, raw string) bool {
 		parts := strings.FieldsFunc(raw, func(r rune) bool { return r == '/' || r == '\\' })
 		return hasHiddenPart(parts)
 	}
-	rawParts := splitPathParts(raw)
+	rawParts := splitRawParts(raw)
 	below := func(base string) []string {
 		baseParts := splitPathParts(base)
 		shared := 0
@@ -249,10 +265,7 @@ func candidate(docDir, value string, ignore []IgnoreLayer, dirCache map[string][
 	}
 	raw := value
 	joinPath := func(r string) string {
-		if filepath.IsAbs(r) {
-			return ResolveNonStrict(r)
-		}
-		return ResolveNonStrict(filepath.Join(docDir, r))
+		return resolveJoinedNonStrict(docDir, r)
 	}
 	p := joinPath(raw)
 	fragment := ""
@@ -289,12 +302,7 @@ func linkedDocument(docDir, value string) (string, string, bool, error) {
 		return "", "", false, nil
 	}
 	raw, frag, hasFrag := strings.Cut(value, "#")
-	var target string
-	if filepath.IsAbs(raw) {
-		target = ResolveNonStrict(raw)
-	} else {
-		target = ResolveNonStrict(filepath.Join(docDir, raw))
-	}
+	target := resolveJoinedNonStrict(docDir, raw)
 	if !isRegularFile(target) || ExposesHidden(docDir, raw, target) {
 		return "", "", false, nil
 	}
@@ -312,7 +320,8 @@ func linkedDocument(docDir, value string) (string, string, bool, error) {
 	if err != nil || !utf8.Valid(rawBytes) {
 		return "", "", false, nil
 	}
-	meta, _, err := frontmatter.Parse(string(rawBytes))
+	normalized := strings.ReplaceAll(strings.ReplaceAll(string(rawBytes), "\r\n", "\n"), "\r", "\n")
+	meta, _, err := frontmatter.Parse(normalized)
 	if err != nil || meta.Len() == 0 {
 		return "", "", false, nil
 	}
@@ -428,6 +437,9 @@ func ReplaceSpans(text string, refs []Reference, urls map[string]string) string 
 	var b strings.Builder
 	pos := 0
 	for _, r := range refs {
+		if r.Start < pos {
+			continue
+		}
 		target := r.File
 		if target == "" {
 			target = r.Doc
@@ -459,15 +471,24 @@ func DownloadURL(baseURL string, upload Upload) string {
 		strconv.Itoa(storage)
 }
 
+func firstNonEmptyQueryParam(q url.Values, key string) string {
+	for _, v := range q[key] {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 func ParseDownloadURL(value string) (string, string, string, bool) {
 	u, err := url.Parse(html.UnescapeString(value))
 	if err != nil {
 		return "", "", "", false
 	}
 	q := u.Query()
-	f := q.Get("f")
-	name := q.Get("name")
-	storage := q.Get("storage")
+	f := firstNonEmptyQueryParam(q, "f")
+	name := firstNonEmptyQueryParam(q, "name")
+	storage := firstNonEmptyQueryParam(q, "storage")
 	if f == "" || name == "" || storage == "" {
 		return "", "", "", false
 	}
@@ -576,7 +597,7 @@ func Reverse(text string, uploads []Upload, baseURL string) (string, []Upload) {
 		if err != nil {
 			continue
 		}
-		f := u.Query().Get("f")
+		f := firstNonEmptyQueryParam(u.Query(), "f")
 		if f == "" {
 			continue
 		}
@@ -636,11 +657,11 @@ func UnmatchedDownloadURLs(text string, uploads []Upload, baseURL string) []stri
 			continue
 		}
 		q := u.Query()
-		f := q.Get("f")
+		f := firstNonEmptyQueryParam(q, "f")
 		if f == "" || known[f] {
 			continue
 		}
-		name := q.Get("name")
+		name := firstNonEmptyQueryParam(q, "name")
 		if name == "" {
 			if slash := strings.LastIndexByte(f, '/'); slash >= 0 {
 				name = f[slash+1:]
@@ -701,12 +722,16 @@ func AbsoluteLinks(text, baseURL string) string {
 func NameUploads(uploads []Upload) []Upload {
 	out := make([]Upload, len(uploads))
 	copy(out, uploads)
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].ID < out[j].ID
+	order := make([]int, len(out))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		return out[order[i]].ID < out[order[j]].ID
 	})
 	taken := map[string]bool{}
-	for i := range out {
-		realName := out[i].RealName
+	for _, idx := range order {
+		realName := out[idx].RealName
 		if realName == "" {
 			realName = "attachment"
 		}
@@ -714,10 +739,10 @@ func NameUploads(uploads []Upload) []Upload {
 		for taken[Fold(name)] {
 			ext := filepath.Ext(name)
 			stem := strings.TrimSuffix(name, ext)
-			name = fmt.Sprintf("%s-%d%s", stem, out[i].ID, ext)
+			name = fmt.Sprintf("%s-%d%s", stem, out[idx].ID, ext)
 		}
 		taken[Fold(name)] = true
-		out[i].ElportName = name
+		out[idx].ElportName = name
 	}
 	return out
 }
@@ -738,6 +763,9 @@ func SafeName(name string) string {
 
 func SafeNameForPlatform(name string, isWindows bool) string {
 	slash := strings.ReplaceAll(name, "\\", "/")
+	if isWindows && len(slash) >= 2 && isASCIIAlpha(slash[0]) && slash[1] == ':' {
+		slash = slash[2:]
+	}
 	slash = strings.TrimRight(slash, "/")
 	base := slash
 	if idx := strings.LastIndexByte(slash, '/'); idx >= 0 {
@@ -780,6 +808,76 @@ func SafeNameForPlatform(name string, isWindows bool) string {
 	return cleaned
 }
 
+func appendReadableData(out *[]string, preDepth int, data string) {
+	if preDepth == 0 && trimPySpace(data) == "" && strings.Contains(data, "\n") {
+		if len(*out) > 0 && strings.HasSuffix((*out)[len(*out)-1], "\n") {
+			data = ""
+		} else {
+			data = "\n"
+		}
+	}
+	*out = append(*out, data)
+}
+
+func emitReadableText(out *[]string, preDepth int, raw string) {
+	pos := 0
+	for pos < len(raw) {
+		amp := strings.IndexByte(raw[pos:], '&')
+		if amp < 0 {
+			appendReadableData(out, preDepth, raw[pos:])
+			return
+		}
+		start := pos + amp
+		end := start + 1
+		if end < len(raw) && raw[end] == '#' {
+			end++
+			if end < len(raw) && (raw[end] == 'x' || raw[end] == 'X') {
+				end++
+				dStart := end
+				for end < len(raw) && ((raw[end] >= '0' && raw[end] <= '9') || (raw[end] >= 'a' && raw[end] <= 'f') || (raw[end] >= 'A' && raw[end] <= 'F')) {
+					end++
+				}
+				if end > dStart && end < len(raw) && raw[end] == ';' {
+					if start > pos {
+						appendReadableData(out, preDepth, raw[pos:start])
+					}
+					*out = append(*out, raw[start:end+1])
+					pos = end + 1
+					continue
+				}
+			} else {
+				dStart := end
+				for end < len(raw) && raw[end] >= '0' && raw[end] <= '9' {
+					end++
+				}
+				if end > dStart && end < len(raw) && raw[end] == ';' {
+					if start > pos {
+						appendReadableData(out, preDepth, raw[pos:start])
+					}
+					*out = append(*out, raw[start:end+1])
+					pos = end + 1
+					continue
+				}
+			}
+		} else {
+			nStart := end
+			for end < len(raw) && (isASCIIAlpha(raw[end]) || (raw[end] >= '0' && raw[end] <= '9')) {
+				end++
+			}
+			if end > nStart && end < len(raw) && raw[end] == ';' {
+				if start > pos {
+					appendReadableData(out, preDepth, raw[pos:start])
+				}
+				*out = append(*out, raw[start:end+1])
+				pos = end + 1
+				continue
+			}
+		}
+		appendReadableData(out, preDepth, raw[pos:start+1])
+		pos = start + 1
+	}
+}
+
 func ReadableHTML(text string) string {
 	z := xnethtml.NewTokenizer(strings.NewReader(text))
 	var out []string
@@ -793,7 +891,7 @@ func ReadableHTML(text string) string {
 		case xnethtml.StartTagToken, xnethtml.SelfClosingTagToken:
 			nameBytes, hasAttr := z.TagName()
 			tag := strings.ToLower(string(nameBytes))
-			if tag == "pre" && tt == xnethtml.StartTagToken {
+			if tag == "pre" {
 				preDepth++
 			}
 			var kept strings.Builder
@@ -819,15 +917,7 @@ func ReadableHTML(text string) string {
 				out = append(out, "</"+tag+">")
 			}
 		case xnethtml.TextToken:
-			raw := string(z.Raw())
-			if preDepth == 0 && trimPySpace(raw) == "" && strings.Contains(raw, "\n") {
-				if len(out) > 0 && strings.HasSuffix(out[len(out)-1], "\n") {
-					raw = ""
-				} else {
-					raw = "\n"
-				}
-			}
-			out = append(out, raw)
+			emitReadableText(&out, preDepth, string(z.Raw()))
 		case xnethtml.CommentToken, xnethtml.DoctypeToken:
 		}
 	}

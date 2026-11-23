@@ -173,9 +173,11 @@ func TestFrontmatterGoldenParseServerID(t *testing.T) {
 }
 
 func TestFrontmatterRenderParseRoundTripRapid(t *testing.T) {
+	// Include quotes, consecutive newlines, leading spaces after newlines, and
+	// control characters so Render -> Parse round-trip holds losslessly.
 	rapid.Check(t, func(t *rapid.T) {
 		id := rapid.IntRange(1, 100000).Draw(t, "id")
-		title := rapid.StringMatching(`[A-Za-z0-9 _:#日本語]{1,30}`).Draw(t, "title")
+		title := rapid.StringMatching(`[A-Za-z0-9 _:#'"\n\t\x00日本語]{1,30}`).Draw(t, "title")
 		profile := rapid.StringMatching(`[A-Za-z0-9_-]{1,12}`).Draw(t, "profile")
 		body := rapid.StringMatching(`[\nA-Za-z0-9 日本語._-]{0,40}`).Draw(t, "body")
 
@@ -196,4 +198,42 @@ func TestFrontmatterRenderParseRoundTripRapid(t *testing.T) {
 			t.Fatalf("meta mismatch: got %#v, want id=%d profile=%q title=%q", parsed.Values, id, profile, title)
 		}
 	})
+}
+
+func TestFrontmatterYAML11EdgeCasesAndUTF8Validation(t *testing.T) {
+	// YAML 1.1 treats 08 as a string (not octal), rejects !!binary in attachments,
+	// treats top-level !!set as non-mapping, and matches Python key equality (true == 1).
+	if _, _, err := frontmatter.Parse("---\nid: 08\n---\nBody\n"); err == nil {
+		t.Error("expected id: 08 to be rejected as string, not int")
+	}
+	meta, _, err := frontmatter.Parse("---\nattachments: 08\n---\nBody\n")
+	if err != nil {
+		t.Fatalf("attachments: 08 failed: %v", err)
+	}
+	if !reflect.DeepEqual(meta.Values["attachments"], []string{"08"}) {
+		t.Errorf("attachments: 08 = %#v, want [\"08\"]", meta.Values["attachments"])
+	}
+	if _, _, err := frontmatter.Parse("---\nattachments: !!binary ZGF0YS5jc3Y=\n---\nBody\n"); err == nil {
+		t.Error("expected !!binary in attachments to be rejected")
+	}
+	if _, _, err := frontmatter.Parse("---\ntrue: 1\n1: 2\n---\nBody\n"); err == nil {
+		t.Error("expected duplicate key between true and 1 to be rejected")
+	}
+	setDoc := "---\n!!set {a: null}\n---\nBody\n"
+	m, b, err := frontmatter.Parse(setDoc)
+	if err != nil || m.Len() != 0 || b != setDoc {
+		t.Errorf("top-level !!set = (%v, %q, %v), want empty meta and full body", m.Values, b, err)
+	}
+	if _, _, err := frontmatter.Parse("---\ntags: !!set {a: null}\n---\nBody\n"); err == nil {
+		t.Error("expected tags: !!set to be rejected")
+	}
+
+	dir := t.TempDir()
+	badUTF8 := filepath.Join(dir, "bad.md")
+	if err := os.WriteFile(badUTF8, []byte("---\nid: 5\nprofile: lab\n---\n\xff\xfe\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := frontmatter.DocumentMeta(badUTF8); ok {
+		t.Error("DocumentMeta must reject files with invalid UTF-8 bytes in body")
+	}
 }

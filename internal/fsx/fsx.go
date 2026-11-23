@@ -119,18 +119,11 @@ func (r *RootDir) AtomicWrite(rel string, data []byte, defaultPerm os.FileMode) 
 	return nil
 }
 
-func AtomicWriteFile(path string, data []byte, defaultPerm os.FileMode) error {
+func writeAtomic(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	perm := defaultPerm
-	if info, err := os.Lstat(path); err == nil {
-		perm = info.Mode().Perm()
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-
 	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".")
 	if err != nil {
 		return err
@@ -161,6 +154,20 @@ func AtomicWriteFile(path string, data []byte, defaultPerm os.FileMode) error {
 	}
 	cleanup = false
 	return nil
+}
+
+func AtomicWriteFile(path string, data []byte, defaultPerm os.FileMode) error {
+	perm := defaultPerm
+	if info, err := os.Lstat(path); err == nil && info.Mode()&os.ModeSymlink == 0 {
+		perm = info.Mode().Perm()
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return writeAtomic(path, data, perm)
+}
+
+func AtomicWriteFileFixedPerm(path string, data []byte, perm os.FileMode) error {
+	return writeAtomic(path, data, perm)
 }
 
 func HomeDir() (string, error) {

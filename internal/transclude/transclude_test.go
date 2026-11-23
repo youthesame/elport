@@ -274,6 +274,93 @@ func TestPlanDotfileSymlinkAndDocumentLinks(t *testing.T) {
 	}
 }
 
+func TestNestedBracketsNoDoubleExtractAndReplaceNoPanic(t *testing.T) {
+	// Nested brackets like [see [data](data.csv)] must extract the link once so
+	// ReplaceSpans never slices backward and panics.
+	dir := t.TempDir()
+	dataFile := filepath.Join(dir, "data.csv")
+	if err := os.WriteFile(dataFile, []byte("a,b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := "[see [data](data.csv)]\n"
+	refs, err := transclude.Plan(md, dir, nil, nil)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	if len(refs) != 1 {
+		t.Fatalf("len(refs) = %d (%+v), want 1", len(refs), refs)
+	}
+	out := transclude.ReplaceSpans(md, refs, map[string]string{dataFile: "https://elab.example.test/x"})
+	if out != "[see [data](https://elab.example.test/x)]\n" {
+		t.Fatalf("ReplaceSpans = %q", out)
+	}
+}
+
+func TestAbsoluteHiddenSegmentAndSymlinkDotDotResolution(t *testing.T) {
+	// Absolute references containing /.private/../ must still be rejected as hidden,
+	// and symlink/../file must resolve the symlink before applying "..".
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	otherSub := filepath.Join(root, "other", "sub")
+	_ = os.MkdirAll(work, 0o755)
+	_ = os.MkdirAll(otherSub, 0o755)
+	_ = os.WriteFile(filepath.Join(work, "data.csv"), []byte("wrong"), 0o644)
+	otherData := filepath.Join(root, "other", "data.csv")
+	_ = os.WriteFile(otherData, []byte("right"), 0o644)
+
+	absHidden := work + "/.private/../data.csv"
+	refs, err := transclude.Plan("[h]("+absHidden+")\n", work, nil, nil)
+	if err != nil {
+		t.Fatalf("Plan hidden abs: %v", err)
+	}
+	if len(refs) != 1 || refs[0].File != "" {
+		t.Fatalf("expected absolute /.private/../ path to be rejected as hidden, got %+v", refs)
+	}
+
+	if runtime.GOOS != "windows" {
+		if err := os.Symlink(otherSub, filepath.Join(work, "link")); err != nil {
+			t.Fatal(err)
+		}
+		refs, err = transclude.Plan("[s](link/../data.csv)\n", work, nil, nil)
+		if err != nil {
+			t.Fatalf("Plan symlink..: %v", err)
+		}
+		want := transclude.ResolveNonStrict(otherData)
+		if len(refs) != 1 || refs[0].File != want {
+			t.Fatalf("link/../data.csv resolved to %q, want %q", refs[0].File, want)
+		}
+	}
+}
+
+func TestQueryEmptyFirstParamNameUploadsOrderSafeNameWinDriveAndReadableHTML(t *testing.T) {
+	if f, name, storage, ok := transclude.ParseDownloadURL("https://elab.example.test/app/download.php?f=&f=hash&name=&name=a.png&storage=&storage=1"); !ok || f != "hash" || name != "a.png" || storage != "1" {
+		t.Fatalf("ParseDownloadURL empty-first = (%q,%q,%q,%v)", f, name, storage, ok)
+	}
+
+	uploads := []transclude.Upload{
+		{ID: 20, RealName: "image.png", LongName: "b"},
+		{ID: 10, RealName: "image.png", LongName: "a"},
+	}
+	named := transclude.NameUploads(uploads)
+	if named[0].ID != 20 || named[0].ElportName != "image-20.png" || named[1].ID != 10 || named[1].ElportName != "image.png" {
+		t.Fatalf("NameUploads did not preserve input order: %+v", named)
+	}
+
+	if got := transclude.SafeNameForPlatform("C:report.csv", true); got != "report.csv" {
+		t.Errorf("SafeNameForPlatform(C:report.csv, win) = %q, want report.csv", got)
+	}
+	if got := transclude.SafeNameForPlatform("C:report.csv", false); got != "C_report.csv" {
+		t.Errorf("SafeNameForPlatform(C:report.csv, posix) = %q, want C_report.csv", got)
+	}
+
+	if got := transclude.ReadableHTML("<p>x</p>\n\n&amp;\n\n<p>y</p>"); got != "<p>x</p>\n&amp;\n<p>y</p>" {
+		t.Errorf("ReadableHTML around entity = %q, want %q", got, "<p>x</p>\n&amp;\n<p>y</p>")
+	}
+	if got := transclude.ReadableHTML("<pre/>\n\nx\n\n"); got != "<pre>\n\nx\n\n" {
+		t.Errorf("ReadableHTML after <pre/> = %q, want %q", got, "<pre>\n\nx\n\n")
+	}
+}
+
 func TestExtractNeverMatchesInsideCodeFenceRapid(t *testing.T) {
 	// Masking invariant: arbitrary Markdown links inside a fenced block must
 	// never produce extracted references.

@@ -10,9 +10,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 )
+
+type yamlBinary string
+
+type yamlSet struct{}
 
 const maxNestingDepth = 64
 
@@ -212,32 +217,31 @@ func pyYAML11Int(val string) (int, bool) {
 	if clean == "" {
 		return 0, false
 	}
-	if len(clean) > 1 && clean[0] == '0' && clean[1] >= '0' && clean[1] <= '7' {
-		allOct := true
-		for i := range len(clean) {
-			if clean[i] < '0' || clean[i] > '7' {
-				allOct = false
-				break
-			}
-		}
-		if allOct {
-			n, err := strconv.ParseInt(clean, 8, 64)
-			if err == nil {
-				return sign * int(n), true
-			}
-		}
-	}
 	if strings.HasPrefix(clean, "0x") || strings.HasPrefix(clean, "0X") {
 		n, err := strconv.ParseInt(clean[2:], 16, 64)
 		if err == nil {
 			return sign * int(n), true
 		}
+		return 0, false
 	}
 	if strings.HasPrefix(clean, "0b") || strings.HasPrefix(clean, "0B") {
 		n, err := strconv.ParseInt(clean[2:], 2, 64)
 		if err == nil {
 			return sign * int(n), true
 		}
+		return 0, false
+	}
+	if len(clean) > 1 && clean[0] == '0' {
+		for i := range len(clean) {
+			if clean[i] < '0' || clean[i] > '7' {
+				return 0, false
+			}
+		}
+		n, err := strconv.ParseInt(clean, 8, 64)
+		if err == nil {
+			return sign * int(n), true
+		}
+		return 0, false
 	}
 	allDec := true
 	for i := range len(clean) {
@@ -255,7 +259,14 @@ func pyYAML11Int(val string) (int, bool) {
 	return 0, false
 }
 
+func isYAML11Float(s string) bool {
+	return strings.ContainsAny(s, ".eE")
+}
+
 func decodeScalar(n *yaml.Node) any {
+	if n.Tag == "!!binary" {
+		return yamlBinary(n.Value)
+	}
 	if n.Style == 0 {
 		if n.Tag == "!!null" || pyYAML11Null(n.Value) {
 			return nil
@@ -266,7 +277,7 @@ func decodeScalar(n *yaml.Node) any {
 		if i, ok := pyYAML11Int(n.Value); ok {
 			return i
 		}
-		if n.Tag == "!!float" {
+		if n.Tag == "!!float" && isYAML11Float(n.Value) {
 			f, err := strconv.ParseFloat(strings.ReplaceAll(n.Value, "_", ""), 64)
 			if err == nil {
 				return f
@@ -290,6 +301,27 @@ func decodeScalar(n *yaml.Node) any {
 		}
 	}
 	return n.Value
+}
+
+func pyKeyIdentity(v any) any {
+	switch x := v.(type) {
+	case bool:
+		if x {
+			return int64(1)
+		}
+		return int64(0)
+	case int:
+		return int64(x)
+	case int64:
+		return x
+	case float64:
+		if !math.IsInf(x, 0) && !math.IsNaN(x) && math.Trunc(x) == x && x >= math.MinInt64 && x <= math.MaxInt64 {
+			return int64(x)
+		}
+		return x
+	default:
+		return x
+	}
 }
 
 func decodeNode(n *yaml.Node, depth int) (any, error) {
@@ -320,7 +352,11 @@ func decodeNode(n *yaml.Node, depth int) (any, error) {
 		}
 		return out, nil
 	case yaml.MappingNode:
+		if n.Tag == "!!set" {
+			return yamlSet{}, nil
+		}
 		m := NewMeta()
+		seenKeys := map[any]bool{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			kNode := n.Content[i]
 			vNode := n.Content[i+1]
@@ -331,15 +367,16 @@ func decodeNode(n *yaml.Node, depth int) (any, error) {
 				return nil, fmt.Errorf("found unhashable key at line %d", kNode.Line)
 			}
 			kv := decodeScalar(kNode)
-			ks := pyString(kv)
-			if m.Has(ks) {
-				return nil, fmt.Errorf("found duplicate key %q", ks)
+			id := pyKeyIdentity(kv)
+			if seenKeys[id] {
+				return nil, fmt.Errorf("found duplicate key %q", pyString(kv))
 			}
+			seenKeys[id] = true
 			val, err := decodeNode(vNode, depth+1)
 			if err != nil {
 				return nil, err
 			}
-			m.Set(ks, val)
+			m.Set(pyString(kv), val)
 		}
 		return m, nil
 	default:
@@ -479,7 +516,7 @@ func Parse(text string) (Meta, string, error) {
 		case nil:
 			meta.Values["tags"] = []any{}
 		case []any:
-		case Meta:
+		case Meta, yamlSet:
 			return NewMeta(), "", errors.New("tags must be a list or scalar")
 		default:
 			meta.Values["tags"] = []any{tv}
@@ -549,10 +586,55 @@ func DocumentMeta(path string) (Meta, bool) {
 		return NewMeta(), false
 	}
 	raw, err := os.ReadFile(path)
-	if err != nil {
+	if err != nil || !utf8.Valid(raw) {
 		return NewMeta(), false
 	}
 	return TextMeta(string(raw))
+}
+
+func needsDoubleQuote(s string) bool {
+	if strings.HasPrefix(s, "\n") || strings.HasSuffix(s, "\n") ||
+		strings.Contains(s, "\n\n") || strings.Contains(s, "\n ") || strings.Contains(s, "\n\t") ||
+		strings.Contains(s, " \n") || strings.Contains(s, "\t\n") {
+		return true
+	}
+	for i := range len(s) {
+		ch := s[i]
+		if (ch < 0x20 && ch != '\n') || ch == 0x7f {
+			return true
+		}
+	}
+	return false
+}
+
+func emitDoubleQuoted(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for i := range len(s) {
+		ch := s[i]
+		switch ch {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		case 0:
+			b.WriteString(`\0`)
+		default:
+			if ch < 0x20 || ch == 0x7f {
+				fmt.Fprintf(&b, `\x%02x`, ch)
+			} else {
+				b.WriteByte(ch)
+			}
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 func needsSingleQuote(s string) bool {
@@ -626,12 +708,18 @@ func emitScalar(v any) string {
 	case float64:
 		return strconv.FormatFloat(x, 'g', -1, 64)
 	case string:
+		if needsDoubleQuote(x) {
+			return emitDoubleQuoted(x)
+		}
 		if needsSingleQuote(x) {
 			return emitSingleQuoted(x)
 		}
 		return x
 	default:
 		s := fmt.Sprint(x)
+		if needsDoubleQuote(s) {
+			return emitDoubleQuoted(s)
+		}
 		if needsSingleQuote(s) {
 			return emitSingleQuoted(s)
 		}

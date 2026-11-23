@@ -51,6 +51,7 @@ type IgnoreLayer struct {
 type Data struct {
 	Raw          map[string]any
 	IgnoreLayers []IgnoreLayer
+	UserProfiles map[string]bool
 }
 
 func ConfigPath() (string, error) {
@@ -89,7 +90,7 @@ func writeTOML(path string, data map[string]any) error {
 	if err := toml.NewEncoder(&buf).Encode(data); err != nil {
 		return err
 	}
-	return fsx.AtomicWriteFile(path, buf.Bytes(), 0o600)
+	return fsx.AtomicWriteFileFixedPerm(path, buf.Bytes(), 0o600)
 }
 
 func cleanPatterns(patterns []string) []string {
@@ -221,10 +222,15 @@ func Load(project, docDir string, warn io.Writer) (*Data, error) {
 
 	for _, dir := range ignoreDirs(project, docDir) {
 		ignoreFile := filepath.Join(dir, ".elportignore")
-		if raw, err := os.ReadFile(ignoreFile); err == nil {
-			lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
-			addIgnore(dir, lines)
+		raw, err := os.ReadFile(ignoreFile)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
 		}
+		lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+		addIgnore(dir, lines)
 	}
 
 	seen := map[string]bool{}
@@ -273,7 +279,7 @@ func Load(project, docDir string, warn io.Writer) (*Data, error) {
 		}
 	}
 
-	return &Data{Raw: data, IgnoreLayers: layers}, nil
+	return &Data{Raw: data, IgnoreLayers: layers, UserProfiles: userProfiles}, nil
 }
 
 func ProfileName(data *Data, cliProfile, metaProfile string) (string, error) {
@@ -347,6 +353,9 @@ func Resolve(data *Data, cliProfile, metaProfile string, kr Keyring, warn io.Wri
 	}
 	var prof map[string]any
 	if data != nil {
+		if data.UserProfiles != nil && !data.UserProfiles[name] {
+			return "", "", APIKey{}, false, fmt.Errorf("profile %s is not configured in user config; run elport login", name)
+		}
 		prof = profileEntry(data.Raw, name)
 	}
 	baseURL, _ := prof["base_url"].(string)
