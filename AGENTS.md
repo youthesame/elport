@@ -2,6 +2,15 @@
 
 Git-like sync CLI for eLabFTW (single static Go binary, `CGO_ENABLED=0`). **Local is the source of truth.**
 
+## Non-negotiable invariants (do not weaken tests for these)
+
+- **Local is authoritative**: `push` overwrites remote only after conflict detection and never mutates the local body.
+- **Keep out-of-sync data out of the body**: comments, steps, and revision bodies print to the terminal only.
+- **Remote content never authorizes local uploads**: remote-linked paths are skipped unless explicitly listed under `attachments:`; dot-prefixed hidden paths are never uploaded.
+- **No parsing inside code fences, inline code, or HTML comments**; `pull` never writes outside the document directory.
+- **Reuse attachments only by matching server SHA-256**; `push` never deletes attachments.
+- **Refuse locked entities even with `--force`**; refuse non-empty HTML entities in `clone`, `pull`, and `push`.
+
 ## Rules you cannot infer from code alone
 
 - **Tests are authoritative**: update tests first (`internal/**/*_test.go`, `testdata/golden/`, `spec/quint/sync.qnt` → `testdata/quint/`).
