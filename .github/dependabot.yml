@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # Dependabot updates go.mod/go.sum but not flake.nix's vendorHash.
+  # Before merging a gomod PR, refresh vendorHash in flake.nix and let Nix CI pass.
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
