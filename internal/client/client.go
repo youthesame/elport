@@ -164,9 +164,26 @@ func New(baseURL string, apiKey config.APIKey, verifySSL bool, opts ...Option) (
 		Timeout:   cfg.dialTimeout,
 		KeepAlive: 30 * time.Second,
 	}
+	rootCAs := cfg.rootCAs
+	if rootCAs == nil && verifySSL {
+		if certFile := os.Getenv("SSL_CERT_FILE"); certFile != "" {
+			pemBytes, err := os.ReadFile(certFile)
+			if err != nil {
+				return nil, fmt.Errorf("read SSL_CERT_FILE: %w", err)
+			}
+			pool, err := x509.SystemCertPool()
+			if err != nil || pool == nil {
+				pool = x509.NewCertPool()
+			}
+			if !pool.AppendCertsFromPEM(pemBytes) {
+				return nil, fmt.Errorf("invalid certificate in SSL_CERT_FILE: %s", certFile)
+			}
+			rootCAs = pool
+		}
+	}
 	tlsCfg := &tls.Config{
 		InsecureSkipVerify: !verifySSL,
-		RootCAs:            cfg.rootCAs,
+		RootCAs:            rootCAs,
 	}
 	idle := cfg.idleTimeout
 	transport := &http.Transport{

@@ -67,6 +67,15 @@ func (e Env) useColor(stdout io.Writer) bool {
 	return false
 }
 
+func (e Env) canPrompt(stdin io.Reader, stdout io.Writer) bool {
+	if e.IsTTY != nil {
+		return *e.IsTTY
+	}
+	inFile, inOK := stdin.(*os.File)
+	outFile, outOK := stdout.(*os.File)
+	return inOK && outOK && term.IsTerminal(int(inFile.Fd())) && term.IsTerminal(int(outFile.Fd()))
+}
+
 func (e Env) termWidth(stdout io.Writer) int {
 	if e.TermWidth > 0 {
 		return e.TermWidth
@@ -492,7 +501,46 @@ func (l *lazyAPI) Search(ctx context.Context, entity string, params url.Values) 
 	return c.Search(ctx, entity, params)
 }
 
-func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env) (*config.Data, sync.API, error) {
+type clientCacheKey struct {
+	baseURL   string
+	verifySSL bool
+	profile   string
+}
+
+type clientCache struct {
+	clients map[clientCacheKey]*client.Client
+}
+
+func newClientCache() *clientCache {
+	return &clientCache{clients: map[clientCacheKey]*client.Client{}}
+}
+
+func resolveClientCached(data *config.Data, profile, metaProfile string, stderr io.Writer, env Env, cache *clientCache) (string, *client.Client, error) {
+	if cache != nil {
+		name, baseURL, verifySSL, err := config.BaseTarget(data, profile, metaProfile)
+		if err == nil {
+			key := clientCacheKey{baseURL: baseURL, verifySSL: verifySSL, profile: name}
+			if cached, ok := cache.clients[key]; ok {
+				return name, cached, nil
+			}
+		}
+	}
+	name, baseURL, apiKey, verifySSL, err := config.Resolve(data, profile, metaProfile, env.keyring(), stderr)
+	if err != nil {
+		return "", nil, err
+	}
+	c, err := client.New(baseURL, apiKey, verifySSL, env.ClientOpts...)
+	if err != nil {
+		return "", nil, err
+	}
+	if cache != nil {
+		key := clientCacheKey{baseURL: baseURL, verifySSL: verifySSL, profile: name}
+		cache.clients[key] = c
+	}
+	return name, c, nil
+}
+
+func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env, cache *clientCache) (*config.Data, sync.API, error) {
 	wd, err := env.workDir()
 	if err != nil {
 		return nil, nil, err
@@ -522,7 +570,7 @@ func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env)
 	metaProf, _ := doc.Meta.Values["profile"].(string)
 	api := &lazyAPI{
 		init: func() (*client.Client, error) {
-			_, c, err := resolveClient(data, cliProfile, metaProf, stderr, env)
+			_, c, err := resolveClientCached(data, cliProfile, metaProf, stderr, env, cache)
 			return c, err
 		},
 	}
@@ -569,7 +617,7 @@ func runComments(ctx context.Context, cmd *Command, stdout, stderr io.Writer, en
 		}
 		return sync.PostComment(ctx, c, entity, eid, cmd.Text, stdout)
 	}
-	data, c, err := docTarget(cmd.Doc, cmd.Profile, cmd.Entity, stderr, env)
+	data, c, err := docTarget(cmd.Doc, cmd.Profile, cmd.Entity, stderr, env, nil)
 	if err != nil {
 		return err
 	}
@@ -651,23 +699,47 @@ func expandDocPaths(paths []string) ([]string, int) {
 }
 
 func docIdent(p string) string {
-	meta, ok := frontmatter.DocumentMeta(p)
-	if !ok {
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return "experiments/-"
+	}
+	norm := strings.ReplaceAll(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\r", "\n")
+	meta, _, err := frontmatter.Parse(norm)
+	if err != nil {
 		return "experiments/-"
 	}
 	ent, _ := meta.Values["entity"].(string)
 	if ent == "" {
 		ent = "experiments"
 	}
-	return fmt.Sprintf("%s/%v", ent, meta.Values["id"])
+	idVal, exists := meta.Values["id"]
+	if !exists || idVal == nil {
+		return ent + "/-"
+	}
+	return fmt.Sprintf("%s/%v", ent, idVal)
 }
 
-func runDocOne(ctx context.Context, cmd *Command, docPath string, stdout, stderr io.Writer, env Env) (string, bool, error) {
-	data, c, err := docTarget(docPath, cmd.Profile, cmd.Entity, stderr, env)
+func runDocOne(ctx context.Context, cmd *Command, docPath string, stdin io.Reader, stdout, stderr io.Writer, env Env, batch bool, cache *clientCache) (string, bool, error) {
+	data, c, err := docTarget(docPath, cmd.Profile, cmd.Entity, stderr, env, cache)
 	if err != nil {
 		return "", false, err
 	}
 	switch cmd.Name {
+	case "push":
+		wd, _ := env.workDir()
+		s, err := sync.Push(ctx, docPath, c, data, sync.PushOptions{
+			Profile:   cmd.Profile,
+			DryRun:    cmd.DryRun,
+			Force:     cmd.Force,
+			AssumeYes: cmd.Yes,
+			Stdin:     stdin,
+			CanPrompt: !batch && env.canPrompt(stdin, stdout),
+			WorkDir:   wd,
+		}, stdout, stderr)
+		return s, true, err
+	case "pull":
+		s, err := sync.Pull(ctx, docPath, c, data, cmd.Profile, stdout, stderr)
+		return s, true, err
 	case "status":
 		s, err := sync.Status(ctx, docPath, c, data, cmd.Profile, stdout, stderr)
 		return s, true, err
@@ -682,10 +754,11 @@ func runDocOne(ctx context.Context, cmd *Command, docPath string, stdout, stderr
 	}
 }
 
-func runDocCommand(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) int {
+func runDocCommand(ctx context.Context, cmd *Command, stdin io.Reader, stdout, stderr io.Writer, env Env) int {
+	cache := newClientCache()
 	if len(cmd.Docs) == 1 {
 		if info, err := os.Stat(cmd.Docs[0]); err != nil || !info.IsDir() {
-			if _, _, err := runDocOne(ctx, cmd, cmd.Docs[0], stdout, stderr, env); err != nil {
+			if _, _, err := runDocOne(ctx, cmd, cmd.Docs[0], stdin, stdout, stderr, env, false, cache); err != nil {
 				_, _ = fmt.Fprintln(stderr, err.Error())
 				return ExitError
 			}
@@ -708,7 +781,7 @@ func runDocCommand(ctx context.Context, cmd *Command, stdout, stderr io.Writer, 
 	counts := map[string]int{}
 	for _, p := range docs {
 		var capOut, capErr bytes.Buffer
-		summary, hasSummary, err := runDocOne(ctx, cmd, p, &capOut, &capErr, env)
+		summary, hasSummary, err := runDocOne(ctx, cmd, p, nil, &capOut, &capErr, env, true, cache)
 		if err != nil {
 			counts["✗"]++
 			_, _ = fmt.Fprintf(stdout, "✗ %s  %s  %s\n", p, docIdent(p), err.Error())
@@ -1038,16 +1111,14 @@ func RunWithEnv(ctx context.Context, args []string, stdin io.Reader, stdout, std
 		runErr = runView(ctx, cmd, stdout, stderr, env)
 	case "comments", "comment":
 		runErr = runComments(ctx, cmd, stdout, stderr, env)
-	case "status", "diff", "fetch":
-		return runDocCommand(ctx, cmd, stdout, stderr, env)
+	case "push", "pull", "status", "diff", "fetch":
+		return runDocCommand(ctx, cmd, stdin, stdout, stderr, env)
+	case "merge":
+		runErr = runMerge(ctx, cmd, stdout, stderr, env)
+	case "new":
+		runErr = runNew(ctx, cmd, stdout, stderr, env)
 	case "clone":
-		if cmd.HasAll && cmd.ID != "" {
-			runErr = errors.New("clone: pass either an entity id or --all ROOT, not both")
-		} else if !cmd.HasAll && cmd.ID == "" {
-			runErr = errors.New("clone: pass an entity id or --all ROOT")
-		} else {
-			runErr = fmt.Errorf("%s: not yet implemented in Go build", cmd.Name)
-		}
+		return runClone(ctx, cmd, stdout, stderr, env)
 	default:
 		runErr = fmt.Errorf("%s: not yet implemented in Go build", cmd.Name)
 	}

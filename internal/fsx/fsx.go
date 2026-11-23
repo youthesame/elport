@@ -126,6 +126,13 @@ func (r *RootDir) Lstat(rel string) (os.FileInfo, error) {
 	return r.root.Lstat(rel)
 }
 
+func (r *RootDir) Remove(rel string) error {
+	if r == nil || r.root == nil {
+		return errors.New("root directory is closed")
+	}
+	return r.root.Remove(rel)
+}
+
 func (r *RootDir) ReadFile(rel string) ([]byte, error) {
 	if r == nil || r.root == nil {
 		return nil, errors.New("root directory is closed")

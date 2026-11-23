@@ -45,6 +45,20 @@ func (l *LocalResult) LocalFiles() []string {
 	return out
 }
 
+func (l *LocalResult) DocRefs() []transclude.Reference {
+	if l == nil {
+		return nil
+	}
+	var out []transclude.Reference
+	for _, r := range l.refs {
+		if r.Doc != "" {
+			r.File = ""
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 func LocalCandidates(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries []string, warn io.Writer) (*LocalResult, error) {
 	refs, err := transclude.Plan(body, docDir, ignore, warn)
 	if err != nil {

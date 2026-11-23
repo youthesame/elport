@@ -4,10 +4,13 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -268,5 +271,29 @@ func TestClientIDNAHostRedirectRejectedAndStalledRedirectBodyTimesOut(t *testing
 	}
 	if _, err := c.Get(context.Background(), "experiments", 2); err == nil {
 		t.Fatal("expected stalled redirect body to time out")
+	}
+}
+
+func TestClientHonorsSSLCertFileEnv(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"elabftw_version":"6.0.0"}`))
+	}))
+	defer srv.Close()
+
+	caPath := filepath.Join(t.TempDir(), "ca.pem")
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	if err := os.WriteFile(caPath, pemBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SSL_CERT_FILE", caPath)
+
+	c, err := client.New(srv.URL, config.NewAPIKey("1-key"), true)
+	if err != nil {
+		t.Fatalf("client.New with SSL_CERT_FILE: %v", err)
+	}
+	info, err := c.Info(context.Background())
+	if err != nil || info["elabftw_version"] != "6.0.0" {
+		t.Fatalf("Info via SSL_CERT_FILE = %v, err=%v", info, err)
 	}
 }

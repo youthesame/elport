@@ -21,6 +21,8 @@ import (
 
 	"github.com/youthesame/elport/internal/config"
 	"github.com/youthesame/elport/internal/frontmatter"
+	"github.com/youthesame/elport/internal/plan"
+	"github.com/youthesame/elport/internal/state"
 	"github.com/youthesame/elport/internal/transclude"
 )
 
@@ -91,6 +93,24 @@ func (r *Remote) Uploads(ctx context.Context, remoteDoc map[string]any) ([]trans
 
 func (r *Remote) Download(ctx context.Context, uid int) ([]byte, error) {
 	return r.API.Download(ctx, r.Entity, r.ID, uid)
+}
+
+func (r *Remote) Upload(ctx context.Context, approved plan.ApprovedUploadPath) (map[string]any, error) {
+	return r.API.Upload(ctx, r.Entity, r.ID, approved)
+}
+
+func (r *Remote) Patch(ctx context.Context, payload map[string]any) (map[string]any, error) {
+	return r.API.Patch(ctx, r.Entity, r.ID, payload)
+}
+
+func MarkCreated(baseURL, entity string, eid int, bodySent bool) error {
+	return state.Save(baseURL, entity, strconv.Itoa(eid), map[string]any{
+		"remote_base":    "",
+		"local_base":     "",
+		"meta_base":      map[string]any{},
+		"pending_create": true,
+		"body_sent":      bodySent,
+	})
 }
 
 func uploadFromMap(m map[string]any) transclude.Upload {

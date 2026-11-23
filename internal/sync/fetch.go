@@ -19,12 +19,48 @@ import (
 	"github.com/youthesame/elport/internal/transclude"
 )
 
+func PathStem(base string) string {
+	idx := strings.LastIndexByte(base, '.')
+	if idx <= 0 || idx == len(base)-1 {
+		return base
+	}
+	allDots := true
+	for i := range idx {
+		if base[i] != '.' {
+			allDots = false
+			break
+		}
+	}
+	if allDots {
+		return base
+	}
+	return base[:idx]
+}
+
 func SidecarPath(docPath string) string {
-	return docPath + ".remote.md"
+	return filepath.Join(filepath.Dir(docPath), PathStem(filepath.Base(docPath))+".remote.md")
 }
 
 func BaseSidecarPath(docPath string) string {
-	return docPath + ".base.md"
+	return filepath.Join(filepath.Dir(docPath), PathStem(filepath.Base(docPath))+".base.md")
+}
+
+func AtomicWriteDoc(docPath, content string) error {
+	root, err := fsx.OpenRoot(filepath.Dir(docPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.AtomicWrite(filepath.Base(docPath), []byte(content), 0o644)
+}
+
+func WriteNewDocNoClobber(docPath, content string) error {
+	root, err := fsx.OpenRoot(filepath.Dir(docPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.WriteNewNoClobber(filepath.Base(docPath), []byte(content), 0o644)
 }
 
 func rejectSidecarAttachmentCollisions(uploads []transclude.Upload, sidecars []string) error {

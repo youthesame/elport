@@ -115,8 +115,8 @@ func TestRunRuntimeValidationErrorsReturnExit1(t *testing.T) {
 		args      []string
 		wantError string
 	}{
-		{[]string{"clone"}, "pass an entity id or --all ROOT"},
-		{[]string{"clone", "42", "--all", "backup/"}, "not both"},
+		{[]string{"clone"}, "exactly one of <id> or --all"},
+		{[]string{"clone", "42", "--all", "backup/"}, "exactly one of <id> or --all"},
 		{[]string{"profile", "use"}, "profile use requires a profile name"},
 	}
 	for _, tc := range cases {
