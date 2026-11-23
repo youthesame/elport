@@ -43,12 +43,7 @@ snapshot:
   version_template: "0.0.0-snapshot.{{ .ShortCommit }}"
 
 changelog:
-  sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"
-      - "^ci:"
+  use: github-native
 
 release:
   prerelease: auto
