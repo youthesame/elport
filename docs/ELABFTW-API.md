@@ -99,8 +99,21 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   `{"content_type": 2}` then `1` on an HTML body took effect both times and left `body` unchanged. While it was 2,
   `body_html` was empty, so the Web UI showed no body at all. Back at 1 it showed again.
 - **MathJax is enabled in both md/html modes** (inline `$`, block `$$`, AMS extensions.
-  [issue #892](https://github.com/elabftw/elabftw/issues/892)). Measured: `$\eta = 1 - e^{-kt}$` passes through
-  intact and is rendered client-side.
+  [issue #892](https://github.com/elabftw/elabftw/issues/892)). Measured (5.6.12): `$\eta = 1 - e^{-kt}$` passes
+  through intact and is rendered client-side.
+- **6.x Markdown mode does not protect inline `$...$` math or HTML tags** (measured demo 6.0.9, 2026-11-23).
+  `Tools::md2html()` runs `League\CommonMark` with Core + GFM + `DisplayMathExtension` and `'html_input' => 'strip'`.
+  Block `$$...$$` (`aligned`, `bmatrix`) survives, while inline `$a*b*c$` becomes `$a<em>b</em>c$` and `$\{x\}$`
+  loses its backslashes (`${x}$`). `<sub>`, `<sup>`, `<br>` inside table cells, and `<details>` are stripped from
+  `body_html` (an unseparated `<details>` block can swallow following lines as an HTML block).
+- **6.x HTML mode (`content_type: 1`) preserves figures, TeX math, and code blocks, and converges on re-PATCH**
+  (measured demo 6.0.9, 2026-11-23). Through `Filter::body()`, `<figure>`, `<img width="80%">`,
+  `<img style="width:50%;">`, `<img width="300">`, `<figcaption>`, inline `$a < b$` (escaped to `&lt;`), block
+  `$$...$$`, and `<pre class="language-python"><code>` all survive; `<thead>`/`<tbody>` are dropped and `img alt`
+  is overwritten with the URL basename. Re-PATCHing the stored HTML body returns the exact same bytes (no trailing
+  newline growth). Saving in TinyMCE preserves all of those elements (collapsing newlines inside `<p>` to spaces,
+  reformatting HTML whitespace across the body, and rewriting a drag-resized `width="80%"` to pixel
+  `width`/`height` attributes while keeping `<figure>` and `<figcaption>` intact).
 
 ## File uploads
 
@@ -124,7 +137,12 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - **For elport's own file retrieval during pull**: `GET /api/v2/{entity}/{id}/uploads/{upload_id}?format=binary`.
   This **returns the real binary with the API key** (measured: got `text/csv` content). Reverse transclusion
   downloads use this.
-- Delete: `DELETE /api/v2/{entity}/{id}/uploads/{upload_id}` (not used by push).
+- Delete: `DELETE /api/v2/{entity}/{id}/uploads/{upload_id}` (not used by push). Soft-deletes to `state: 3`
+  (measured demo 6.0.9, 2026-11-23).
+- Archive / replace (measured demo 6.0.9, 2026-11-23): `PATCH .../uploads/{id}` with `{"action": "archive"}` moves
+  an upload to `state: 2` (hidden from default `GET .../uploads` and embedded `uploads`, queryable via
+  `GET .../uploads?state=2` and readable via `?format=binary`); `POST .../uploads/{id}` with form field
+  `action=replace` archives the previous row and creates a new active row.
 
 ## Bodies written in the Web UI (measured demo 6.0.9, 2026-11-09)
 
