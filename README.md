@@ -7,25 +7,25 @@ along with every figure and data file the body references, to eLabFTW entities. 
 
 ## Install
 
-Python 3.10+, installed as a `uv` tool (provides the `elport` command):
+`elport` ships as a single static binary (`CGO_ENABLED=0`, no runtime dependencies) for macOS, Linux, and Windows.
+
+Download the archive for your platform from [GitHub Releases](https://github.com/youthesame/elport/releases), verify
+against `checksums.txt`, and place `elport` (or `elport.exe`) on your `PATH`.
+
+Or build from source with Go 1.26+:
 
 ```sh
-uv tool install elport    # upgrade: uv tool upgrade elport
+go install github.com/youthesame/elport/cmd/elport@latest
 ```
 
-Or as a conda global tool, on conda 26.10 or later:
+### Upgrading from Python `v0.1.x`
 
-```sh
-conda install -c conda-forge "conda-global>=0.2"
-conda global ensurepath
-conda global install elport -c conda-forge -c conda-pypi    # upgrade: conda global update
-```
+Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` work as-is on all OSes.
 
-Or with pip:
-
-```sh
-pip install elport        # upgrade: pip install -U elport
-```
+- **macOS**: on first read of a Keychain entry created by Python `v0.1.x`, macOS prompts once for Keychain access
+  (`/usr/bin/security`); click **Always Allow** or re-run `elport login <profile>` once.
+- **Windows / KDE KWallet**: run `elport login <profile>` once after upgrading (native keyring storage format differs).
+- **Python `v0.1.x` line**: preserved on the [`python` branch](https://github.com/youthesame/elport/tree/python) and PyPI.
 
 ## The core idea
 
@@ -50,7 +50,7 @@ elport status                           # what would sync? (read-only)
 elport push                             # upload references + push the body
 ```
 
-## Writing a note
+## Writing a document
 
 ```markdown
 ---
@@ -133,11 +133,11 @@ refuse it, and `view -o` is the way to read it with its figures.
 
 ## Documents, sync, and conflicts
 
-The details ship with the CLI, so they match the version you installed:
+The details ship embedded in the CLI, so they match the version you installed:
 
-- `elport help documents`: front matter, references, attachments, links between documents ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/documents.md))
-- `elport help workflow`: the status, diff, push loop, conflicts, pull and fetch ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/workflow.md))
-- `elport help agents`: what an AI agent asks its user before acting ([on GitHub](https://github.com/youthesame/elport/blob/main/src/elport/help/agents.md))
+- `elport help documents`: front matter, references, attachments, links between documents ([on GitHub](https://github.com/youthesame/elport/blob/main/internal/help/documents.md))
+- `elport help workflow`: the status, diff, push loop, conflicts, pull and fetch ([on GitHub](https://github.com/youthesame/elport/blob/main/internal/help/workflow.md))
+- `elport help agents`: what an AI agent asks its user before acting ([on GitHub](https://github.com/youthesame/elport/blob/main/internal/help/agents.md))
 
 ## Configuration & auth
 
@@ -175,7 +175,7 @@ Profiles layer like settings.json, one per team:
 ```
 
 Your first `elport login` becomes the default. `elport profile use <name>` switches it, or set `profile:` in a
-note's front matter to pin that one file.
+document's front matter to pin that one file.
 
 ### .elportignore
 
@@ -186,27 +186,31 @@ pattern is anchored at its own directory.
 
 ## Learn more
 
-- **Why it works this way** → [docs/DESIGN.md](https://github.com/youthesame/elport/blob/main/docs/DESIGN.md)
 - **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](https://github.com/youthesame/elport/blob/main/docs/ELABFTW-API.md)
-- **The behavioral contract** → the test suite (`tests/`) is authoritative
-- **Driving elport from an AI agent** → `elport help agents`. The skill in [skills/elport/SKILL.md](https://github.com/youthesame/elport/blob/main/skills/elport/SKILL.md) only points there.
+- **The behavioral contract** → Go tests (`internal/**/*_test.go`), `testdata/golden/`, and Quint traces (`spec/quint/sync.qnt` → `testdata/quint/`)
+- **Driving elport from an AI agent** → `elport help agents`. The skill in [skills/elport/SKILL.md](https://github.com/youthesame/elport/blob/main/skills/elport/SKILL.md) points there.
+- **Historical Python `v0.1.x` design notes & ADRs** → preserved on the [`python` branch](https://github.com/youthesame/elport/tree/python)
 
 ## Development
 
-| Module | Role |
+| Package | Role |
 |---|---|
-| `cli.py` | Argument parsing and dispatch |
-| `sync.py` | push, pull, status, diff, view |
-| `transclude.py` | Path ↔ URL rewriting, both directions |
-| `client.py` | eLabFTW API wrapper |
-| `state.py` | The stored base and its hashes |
-| `config.py` | Profiles and credential resolution |
-| `frontmatter.py` | The YAML block |
-| `browse.py` | list and activity |
-| `help/*.md` | Topics printed by `elport help` |
+| `cmd/elport` | CLI entry point and signal handling |
+| `internal/cli` | Flag parsing, dispatch, `new`, `clone`, batch runs |
+| `internal/sync` | `push`, `pull`, `merge`, `fetch`, `status`, `diff`, `view`, `comments` |
+| `internal/plan` | Upload approval boundary (`ApprovedUploadPath`) |
+| `internal/transclude` | Hand-written reference scanner and path ↔ URL rewriting |
+| `internal/frontmatter` | YAML 1.1-compatible front matter parsing and rendering |
+| `internal/client` | HTTPS eLabFTW REST v2 client with idle timeouts and origin guards |
+| `internal/browse` | `list` and `activity` heatmap |
+| `internal/state` | Stored base state and key hashes |
+| `internal/config` | Layered config, profiles, and redacted `APIKey` resolution |
+| `internal/fsx` | Confined `*os.Root` writes and atomic replacement |
+| `internal/help` | Embedded Markdown help topics (`elport help`) |
+| `arch_test.go` | Structural guardrails and `AGENTS.md` symbol checks |
 
-**The tests are the authoritative behavioral contract, so change tests first.** You can check live API behavior
-against <https://demo.elabftw.net>.
+**The tests are the authoritative behavioral contract, so change tests first.** Run `go test -race ./...` and
+`go vet ./...`. You can check live API behavior against <https://demo.elabftw.net>.
 
 ## Acknowledgments
 

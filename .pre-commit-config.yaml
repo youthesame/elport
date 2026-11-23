@@ -1,27 +1,23 @@
 repos:
   - repo: local
     hooks:
-      - id: ruff-check
-        name: ruff check
-        entry: uv run ruff check --fix
+      - id: gofmt
+        name: gofmt check
+        entry: bash -c 'test -z "$(gofmt -l .)"'
         language: system
-        types_or: [python, pyi]
-
-      - id: ruff-format
-        name: ruff format
-        entry: uv run ruff format
-        language: system
-        types_or: [python, pyi]
-
-      - id: ty-check
-        name: ty check
-        entry: uv run ty check src
-        language: system
+        types: [go]
         pass_filenames: false
 
-      - id: pytest
-        name: pytest
-        entry: uv run pytest
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
         language: system
+        types: [go]
         pass_filenames: false
-        files: ^tests/
+
+      - id: go-arch
+        name: go arch guardrails
+        entry: go test -run TestArch .
+        language: system
+        types_or: [go, markdown]
+        pass_filenames: false
