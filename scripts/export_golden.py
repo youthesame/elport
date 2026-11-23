@@ -122,6 +122,8 @@ def _export_frontmatter() -> dict[str, Any]:
             "結果\n",
         ),
         ("quoting_traps", {"title": "yes", "profile": "foo: bar"}, "x\n"),
+        ("empty_mapping", {}, "Body\n"),
+        ("multiline_title_and_crlf_body", {"title": "Line1\nLine2"}, "A\r\nB\r\n"),
     ]
     render_cases = [
         {
@@ -221,6 +223,10 @@ def _export_transclude() -> dict[str, Any]:
         (
             "python_ascii_control_whitespace",
             "A\x1cB\x1dC\x1eD\x1fE ![img](a.png) [b](<x.png\x1c>)\n",
+        ),
+        (
+            "crlf_fence_then_unicode_and_html_entity",
+            '```\r\n![skip](x.png)\r\n```\r\n日本語 <img src="a&amp;b.png" width="50%">\r\n',
         ),
     ]
 

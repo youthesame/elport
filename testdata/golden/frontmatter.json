@@ -471,6 +471,24 @@
       ],
       "body": "x\n",
       "output": "---\ntitle: 'yes'\nprofile: 'foo: bar'\n---\n\nx\n"
+    },
+    {
+      "name": "empty_mapping",
+      "meta": {},
+      "key_order": [],
+      "body": "Body\n",
+      "output": "---\n{}\n---\n\nBody\n"
+    },
+    {
+      "name": "multiline_title_and_crlf_body",
+      "meta": {
+        "title": "Line1\nLine2"
+      },
+      "key_order": [
+        "title"
+      ],
+      "body": "A\r\nB\r\n",
+      "output": "---\ntitle: 'Line1\n\n  Line2'\n---\n\nA\r\nB\r\n"
     }
   ],
   "text_meta": [

@@ -3,19 +3,26 @@ package config
 import "fmt"
 
 type APIKey struct {
-	value string
+	reveal func() string
 }
 
 func NewAPIKey(value string) APIKey {
-	return APIKey{value: value}
+	if value == "" {
+		return APIKey{}
+	}
+	v := value
+	return APIKey{reveal: func() string { return v }}
 }
 
 func (k APIKey) Empty() bool {
-	return k.value == ""
+	return k.reveal == nil || k.reveal() == ""
 }
 
 func (k APIKey) Reveal() string {
-	return k.value
+	if k.reveal == nil {
+		return ""
+	}
+	return k.reveal()
 }
 
 func (k APIKey) String() string {

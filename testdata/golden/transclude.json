@@ -282,6 +282,21 @@
           "slice": "<x.png\u001c>"
         }
       ]
+    },
+    {
+      "name": "crlf_fence_then_unicode_and_html_entity",
+      "input": "```\r\n![skip](x.png)\r\n```\r\n日本語 <img src=\"a&amp;b.png\" width=\"50%\">\r\n",
+      "refs": [
+        {
+          "path": "a&b.png",
+          "kind": "html",
+          "char_start": 40,
+          "char_end": 51,
+          "byte_start": 46,
+          "byte_end": 57,
+          "slice": "a&amp;b.png"
+        }
+      ]
     }
   ],
   "has_raw_html": [

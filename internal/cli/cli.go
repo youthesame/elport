@@ -6,6 +6,7 @@ import (
 	"io"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -48,6 +49,7 @@ type Command struct {
 	Sort        string
 	Limit       int
 	All         bool
+	HasAll      bool
 	AllRoot     string
 	Offset      int
 	JSON        bool
@@ -65,6 +67,49 @@ type usageError struct {
 
 func (e usageError) Error() string {
 	return e.msg
+}
+
+type choiceValue struct {
+	target   *string
+	flagName string
+	allowed  []string
+}
+
+func (c *choiceValue) String() string {
+	return *c.target
+}
+
+func (c *choiceValue) Set(v string) error {
+	if !slices.Contains(c.allowed, v) {
+		return fmt.Errorf("invalid %s %q (choose from %s)", c.flagName, v, strings.Join(c.allowed, ", "))
+	}
+	*c.target = v
+	return nil
+}
+
+func (c *choiceValue) Type() string {
+	return "string"
+}
+
+type decimalIntValue struct {
+	target *int
+}
+
+func (d *decimalIntValue) String() string {
+	return strconv.Itoa(*d.target)
+}
+
+func (d *decimalIntValue) Set(v string) error {
+	parsed, err := strconv.ParseInt(v, 10, 0)
+	if err != nil {
+		return fmt.Errorf("invalid integer %q", v)
+	}
+	*d.target = int(parsed)
+	return nil
+}
+
+func (d *decimalIntValue) Type() string {
+	return "int"
 }
 
 func versionString() string {
@@ -100,7 +145,43 @@ func rootHelp() string {
 		"  login       store base_url and api_key for a profile\n" +
 		"  logout      remove the stored api_key for a profile\n" +
 		"  profile     list profiles or select the default with 'use'\n\n" +
+		"side effects:\n" +
+		"  read-only       list, view (without -o), activity, comments, status, diff,\n" +
+		"                  whoami, profile list, push -n\n" +
+		"  local writes    pull, fetch, clone, merge, view -o DIR, login, logout,\n" +
+		"                  profile use\n" +
+		"  remote writes   push (without -n; also writes locally),\n" +
+		"                  new (also writes locally), comment\n\n" +
+		"defaults & auth:\n" +
+		"  document commands default to report.md (sync commands also accept directories)\n" +
+		"  exit codes: 0 success, 1 failure, 2 usage error\n" +
+		"  non-interactive auth: set both ELABFTW_BASE_URL and ELABFTW_API_KEY\n\n" +
 		help.Summary()
+}
+
+func subcommandUsage(name string) string {
+	switch name {
+	case "help":
+		return "usage: elport help [agents|workflow|documents]"
+	case "push", "pull", "fetch", "status", "diff":
+		return fmt.Sprintf("usage: elport %s [options] [doc ...]", name)
+	case "comments", "merge":
+		return fmt.Sprintf("usage: elport %s [options] [doc]", name)
+	case "comment":
+		return "usage: elport comment [options] [doc] <text>"
+	case "new":
+		return "usage: elport new [options] <title>"
+	case "view":
+		return "usage: elport view [options] <ID_OR_URL>"
+	case "clone":
+		return "usage: elport clone [options] [ID_OR_URL | --all ROOT]"
+	case "login", "logout":
+		return fmt.Sprintf("usage: elport %s [profile]", name)
+	case "profile":
+		return "usage: elport profile [list|use] [name]"
+	default:
+		return fmt.Sprintf("usage: elport %s [options]", name)
+	}
 }
 
 func newFlagSet(name string) *pflag.FlagSet {
@@ -110,19 +191,19 @@ func newFlagSet(name string) *pflag.FlagSet {
 	return fs
 }
 
-func addTargetFlags(fs *pflag.FlagSet, cmd *Command) {
-	fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
-	fs.StringVar(&cmd.Entity, "entity", "", "target entity type (default: experiments)")
+func addChoiceFlag(fs *pflag.FlagSet, target *string, name, defaultVal, usage string, allowed []string) {
+	*target = defaultVal
+	fs.Var(&choiceValue{target: target, flagName: "--" + name, allowed: allowed}, name, usage)
 }
 
-func validateChoice(flagName, value string, allowed []string) error {
-	if value == "" {
-		return nil
-	}
-	if !slices.Contains(allowed, value) {
-		return usageError{msg: fmt.Sprintf("invalid %s %q (choose from %s)", flagName, value, strings.Join(allowed, ", "))}
-	}
-	return nil
+func addDecimalIntFlag(fs *pflag.FlagSet, target *int, name string, defaultVal int, usage string) {
+	*target = defaultVal
+	fs.Var(&decimalIntValue{target: target}, name, usage)
+}
+
+func addTargetFlags(fs *pflag.FlagSet, cmd *Command) {
+	fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
+	addChoiceFlag(fs, &cmd.Entity, "entity", "", "target entity type (default: experiments)", entities)
 }
 
 func defaultDocs(args []string) []string {
@@ -139,6 +220,10 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 	rootFS.BoolVar(&showVersion, "version", false, "show version and exit")
 
 	if err := rootFS.Parse(args); err != nil {
+		if showVersion {
+			_, _ = fmt.Fprintf(stdout, "elport %s\n", versionString())
+			return nil, ExitOK, nil
+		}
 		if errors.Is(err, pflag.ErrHelp) {
 			_, _ = io.WriteString(stdout, rootHelp())
 			return nil, ExitOK, nil
@@ -178,33 +263,33 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 		addTargetFlags(fs, cmd)
 		fs.BoolVar(&cmd.Resolved, "resolved", false, "mark a hand-merged conflict as resolved")
 	case "new":
-		fs.StringVar(&cmd.Entity, "entity", "experiments", "entity type to create (default: experiments)")
+		addChoiceFlag(fs, &cmd.Entity, "entity", "experiments", "entity type to create (default: experiments)", entities)
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 		fs.StringVarP(&cmd.Output, "output", "o", "report.md", "local document to create (default: report.md)")
 	case "list":
-		fs.StringVar(&cmd.Entity, "entity", "", "entity type to list (default: experiments)")
-		fs.StringVar(&cmd.Scope, "scope", "self", "whose entities to list: self, team, all (default: self)")
+		addChoiceFlag(fs, &cmd.Entity, "entity", "", "entity type to list (default: experiments)", entities)
+		addChoiceFlag(fs, &cmd.Scope, "scope", "self", "whose entities to list: self, team, all (default: self)", scopes)
 		fs.StringVarP(&cmd.Query, "query", "q", "", "search term")
 		fs.StringArrayVar(&cmd.Tags, "tag", nil, "only entities with this tag (repeat to require several)")
-		fs.StringVar(&cmd.Order, "order", "", "sort by this field")
-		fs.StringVar(&cmd.Sort, "sort", "", "sort direction (default: desc)")
-		fs.IntVar(&cmd.Limit, "limit", 50, "maximum number of results (default: 50)")
+		addChoiceFlag(fs, &cmd.Order, "order", "", "sort by this field", orders)
+		addChoiceFlag(fs, &cmd.Sort, "sort", "", "sort direction (default: desc)", sorts)
+		addDecimalIntFlag(fs, &cmd.Limit, "limit", 50, "maximum number of results (default: 50)")
 		fs.BoolVar(&cmd.All, "all", false, "page through every result")
-		fs.IntVar(&cmd.Offset, "offset", 0, "skip this many results")
+		addDecimalIntFlag(fs, &cmd.Offset, "offset", 0, "skip this many results")
 		fs.BoolVar(&cmd.JSON, "json", false, "emit the raw API rows as JSON")
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 	case "activity":
 		fs.BoolVar(&cmd.Team, "team", false, "one heatmap per author in your team")
-		fs.StringVar(&cmd.Entity, "entity", "", "entity type to count (default: experiments)")
+		addChoiceFlag(fs, &cmd.Entity, "entity", "", "entity type to count (default: experiments)", entities)
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 	case "view":
-		fs.StringVar(&cmd.Entity, "entity", "", "entity type to view (default: experiments)")
+		addChoiceFlag(fs, &cmd.Entity, "entity", "", "entity type to view (default: experiments)", entities)
 		fs.StringVarP(&cmd.Output, "output", "o", "", "write body and attachments into DIR")
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 	case "clone":
 		fs.StringVar(&cmd.AllRoot, "all", "", "clone every entity not yet under ROOT")
-		fs.StringVar(&cmd.Entity, "entity", "", "entity type to clone (default: experiments)")
-		fs.StringVar(&cmd.Scope, "scope", "self", "whose entities --all clones (default: self)")
+		addChoiceFlag(fs, &cmd.Entity, "entity", "", "entity type to clone (default: experiments)", entities)
+		addChoiceFlag(fs, &cmd.Scope, "scope", "self", "whose entities --all clones (default: self)", scopes)
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 		fs.StringVarP(&cmd.Output, "output", "o", "report.md", "local document to create (default: report.md)")
 	case "whoami":
@@ -216,23 +301,10 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 
 	if err := fs.Parse(subArgs); err != nil {
 		if errors.Is(err, pflag.ErrHelp) {
-			_, _ = fmt.Fprintf(stdout, "usage: elport %s [options]\n\n%s", name, fs.FlagUsages())
+			_, _ = fmt.Fprintf(stdout, "%s\n\n%s", subcommandUsage(name), fs.FlagUsages())
 			return nil, ExitOK, nil
 		}
 		return nil, ExitUsage, usageError{msg: err.Error()}
-	}
-
-	if err := validateChoice("--entity", cmd.Entity, entities); err != nil {
-		return nil, ExitUsage, err
-	}
-	if err := validateChoice("--scope", cmd.Scope, scopes); err != nil {
-		return nil, ExitUsage, err
-	}
-	if err := validateChoice("--order", cmd.Order, orders); err != nil {
-		return nil, ExitUsage, err
-	}
-	if err := validateChoice("--sort", cmd.Sort, sorts); err != nil {
-		return nil, ExitUsage, err
 	}
 
 	pos := fs.Args()
@@ -291,6 +363,7 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 		}
 		cmd.ID = pos[0]
 	case "clone":
+		cmd.HasAll = fs.Changed("all")
 		if len(pos) > 1 {
 			return nil, ExitUsage, usageError{msg: "clone accepts at most one id or URL"}
 		}
@@ -335,7 +408,8 @@ func Run(args []string, _ io.Reader, stdout, stderr io.Writer) int {
 		return code
 	}
 
-	if cmd.Name == "help" {
+	switch cmd.Name {
+	case "help":
 		if cmd.Topic == "" {
 			_, _ = io.WriteString(stdout, help.Summary())
 			return ExitOK
@@ -343,6 +417,20 @@ func Run(args []string, _ io.Reader, stdout, stderr io.Writer) int {
 		text, _ := help.Read(cmd.Topic)
 		_, _ = io.WriteString(stdout, text)
 		return ExitOK
+	case "clone":
+		if cmd.HasAll && cmd.ID != "" {
+			_, _ = fmt.Fprintln(stderr, "clone: pass either an entity id or --all ROOT, not both")
+			return ExitError
+		}
+		if !cmd.HasAll && cmd.ID == "" {
+			_, _ = fmt.Fprintln(stderr, "clone: pass an entity id or --all ROOT")
+			return ExitError
+		}
+	case "profile":
+		if cmd.Action == "use" && cmd.ProfileName == "" {
+			_, _ = fmt.Fprintln(stderr, "profile use requires a profile name")
+			return ExitError
+		}
 	}
 
 	_, _ = fmt.Fprintf(stderr, "%s: not yet implemented in Go build\n", cmd.Name)

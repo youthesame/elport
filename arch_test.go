@@ -82,6 +82,14 @@ func allowedProdComment(text string) bool {
 	return false
 }
 
+func pkgMatches(pkgDir, root string) bool {
+	return pkgDir == root || strings.HasPrefix(pkgDir, root+"/")
+}
+
+func importMatches(importPath, forbidden string) bool {
+	return importPath == forbidden || strings.HasPrefix(importPath, forbidden+"/")
+}
+
 func importAliases(f *ast.File) map[string]string {
 	aliases := map[string]string{}
 	for _, spec := range f.Imports {
@@ -138,8 +146,11 @@ func checkGoSource(relPath string, src any) []string {
 		if rel != "arch_test.go" {
 			ast.Inspect(file, func(n ast.Node) bool {
 				lit, ok := n.(*ast.BasicLit)
-				if ok && lit.Kind == token.STRING && bannedDocRefPattern.MatchString(lit.Value) {
-					add(lit.Pos(), "do not cite ADR numbers or DESIGN.md in Go files")
+				if ok && lit.Kind == token.STRING {
+					val, err := strconv.Unquote(lit.Value)
+					if err == nil && bannedDocRefPattern.MatchString(val) {
+						add(lit.Pos(), "do not cite ADR numbers or DESIGN.md in Go files")
+					}
 				}
 				return true
 			})
@@ -147,20 +158,31 @@ func checkGoSource(relPath string, src any) []string {
 		return violations
 	}
 
-	forbiddenSet := map[string]bool{}
-	for _, imp := range forbiddenImportsByPkg[pkgDir] {
-		forbiddenSet[imp] = true
+	var forbiddenImports []string
+	for rulePkg, imps := range forbiddenImportsByPkg {
+		if pkgMatches(pkgDir, rulePkg) {
+			forbiddenImports = append(forbiddenImports, imps...)
+		}
 	}
 
+	importsHTTP := false
 	for _, spec := range file.Imports {
 		importPath, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
 			continue
 		}
-		if forbiddenSet[importPath] {
-			add(spec.Pos(), "package %s must not import %q", pkgDir, importPath)
+		if spec.Name != nil && spec.Name.Name == "." {
+			add(spec.Pos(), "dot imports are forbidden in production code")
 		}
-		if importPath == "os/exec" && pkgDir != "internal/sync" {
+		if importPath == "net/http" {
+			importsHTTP = true
+		}
+		for _, forbidden := range forbiddenImports {
+			if importMatches(importPath, forbidden) {
+				add(spec.Pos(), "package %s must not import %q", pkgDir, importPath)
+			}
+		}
+		if importPath == "os/exec" && !pkgMatches(pkgDir, "internal/sync") {
 			add(spec.Pos(), "os/exec is allowed only in internal/sync")
 		}
 	}
@@ -179,7 +201,7 @@ func checkGoSource(relPath string, src any) []string {
 					if val == "XDG_CONFIG_HOME" {
 						add(node.Pos(), "do not reference XDG_CONFIG_HOME; always use <home>/.config/elport")
 					}
-					if pkgDir == "internal/client" && val == "DELETE" {
+					if pkgMatches(pkgDir, "internal/client") && val == "DELETE" {
 						add(node.Pos(), "HTTP DELETE is forbidden in internal/client")
 					}
 				}
@@ -223,6 +245,15 @@ func checkGoSource(relPath string, src any) []string {
 					add(kv.Pos(), "http.Client.Timeout is forbidden; use split dial/header/idle-read timeouts")
 				}
 			}
+		case *ast.AssignStmt:
+			if !importsHTTP {
+				return true
+			}
+			for _, lhs := range node.Lhs {
+				if sel, ok := lhs.(*ast.SelectorExpr); ok && sel.Sel.Name == "Timeout" {
+					add(sel.Pos(), "assigning Timeout in net/http code is forbidden; use split dial/header/idle-read timeouts")
+				}
+			}
 		}
 		return true
 	})
@@ -231,22 +262,29 @@ func checkGoSource(relPath string, src any) []string {
 }
 
 func TestArchitectureInvariants(t *testing.T) {
+	skipTopDirs := map[string]bool{
+		".git":     true,
+		".venv":    true,
+		"dist":     true,
+		"testdata": true,
+		"vendor":   true,
+	}
 	var allViolations []string
 	err := filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() {
-			name := d.Name()
-			if name == ".git" || name == ".venv" || name == "dist" || name == "testdata" {
+		rel := filepath.ToSlash(path)
+		if d.IsDir() && rel != "." {
+			if skipTopDirs[rel] {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !strings.HasSuffix(path, ".go") {
+		if !strings.HasSuffix(rel, ".go") {
 			return nil
 		}
-		allViolations = append(allViolations, checkGoSource(path, nil)...)
+		allViolations = append(allViolations, checkGoSource(rel, nil)...)
 		return nil
 	})
 	if err != nil {
@@ -277,15 +315,27 @@ func TestArchRulesCatchViolations(t *testing.T) {
 			wantMatch: "do not cite ADR numbers",
 		},
 		{
-			name:      "DESIGN.md citation rejected",
+			name:      "escaped DESIGN.md citation in test string rejected",
 			relPath:   "internal/sync/sample_test.go",
-			src:       "package sync_test\n// see DESIGN.md\nfunc f() {}\n",
+			src:       "package sync_test\nconst s = \"DESIGN\\x2emd\"\n",
 			wantMatch: "do not cite ADR numbers or DESIGN.md",
+		},
+		{
+			name:      "dot import rejected",
+			relPath:   "internal/cli/dot.go",
+			src:       "package cli\nimport . \"os\"\nfunc f() { Exit(1) }\n",
+			wantMatch: "dot imports are forbidden",
 		},
 		{
 			name:      "regexp in transclude rejected",
 			relPath:   "internal/transclude/scan.go",
 			src:       "package transclude\nimport \"regexp\"\nvar _ = regexp.MustCompile\n",
+			wantMatch: `must not import "regexp"`,
+		},
+		{
+			name:      "regexp in transclude subpackage rejected",
+			relPath:   "internal/transclude/scan/lexer.go",
+			src:       "package scan\nimport \"regexp\"\nvar _ = regexp.MustCompile\n",
 			wantMatch: `must not import "regexp"`,
 		},
 		{
@@ -319,16 +369,22 @@ func TestArchRulesCatchViolations(t *testing.T) {
 			wantMatch: "http.MethodDelete is forbidden",
 		},
 		{
-			name:      "DELETE string in client rejected",
-			relPath:   "internal/client/del.go",
-			src:       "package client\nconst m = \"DELETE\"\n",
+			name:      "DELETE string in client subpackage rejected",
+			relPath:   "internal/client/sub/del.go",
+			src:       "package sub\nconst m = \"DELETE\"\n",
 			wantMatch: "HTTP DELETE is forbidden",
 		},
 		{
-			name:      "http.Client.Timeout rejected",
+			name:      "http.Client.Timeout composite literal rejected",
 			relPath:   "internal/client/c.go",
 			src:       "package client\nimport (\n\"net/http\"\n\"time\"\n)\nvar _ = &http.Client{Timeout: time.Second}\n",
 			wantMatch: "http.Client.Timeout is forbidden",
+		},
+		{
+			name:      "http.Client.Timeout field assignment rejected",
+			relPath:   "internal/client/c.go",
+			src:       "package client\nimport (\n\"net/http\"\n\"time\"\n)\nfunc f() { c := &http.Client{}; c.Timeout = time.Second; _ = c }\n",
+			wantMatch: "assigning Timeout in net/http code is forbidden",
 		},
 		{
 			name:      "http.DefaultClient rejected",
