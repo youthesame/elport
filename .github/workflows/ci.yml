@@ -128,3 +128,35 @@ jobs:
         env:
           ELPORT_DIFF_REQUIRE: "1"
         run: go test -v -race -count=1 ./internal/difftest/...
+
+  go-release-snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: GoReleaser check
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.20.2
+          args: check
+
+      - name: GoReleaser snapshot build (no publish)
+        uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.20.2
+          args: release --snapshot --clean
+
+      - name: Verify snapshot archives, checksums, and binary --version
+        run: |
+          test -s dist/checksums.txt
+          test "$(wc -l < dist/checksums.txt)" -eq 6
+          (cd dist && sha256sum -c checksums.txt)
+          ./dist/elport_linux_amd64_v1/elport --version | grep -Eq '^elport 0\.0\.0-snapshot\.[0-9a-f]+$'
