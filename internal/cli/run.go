@@ -940,7 +940,7 @@ func runWhoami(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env 
 	}
 	heading := fmt.Sprintf("%s %s", colorize("✓", 32, color), host)
 	if name != "" {
-		heading += " — " + name
+		heading += " - " + name
 	}
 	if userid != "" {
 		heading += fmt.Sprintf(" (uid %s)", userid)

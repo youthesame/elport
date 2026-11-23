@@ -1,0 +1,39 @@
+name: Nix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - go.mod
+      - go.sum
+      - flake.nix
+      - flake.lock
+      - .github/workflows/nix.yml
+  pull_request:
+    paths:
+      - go.mod
+      - go.sum
+      - flake.nix
+      - flake.lock
+      - .github/workflows/nix.yml
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+
+      - name: Build and verify elport via Nix flake
+        run: |
+          nix build --no-update-lock-file --print-build-logs
+          ./result/bin/elport --version | grep -Eq '^elport '

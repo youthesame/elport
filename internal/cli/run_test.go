@@ -110,7 +110,7 @@ func TestRunLoginProfileWhoamiListActivityLogout(t *testing.T) {
 	if code := cli.RunWithEnv(context.Background(), []string{"whoami"}, nil, &out, &errBuf, env); code != cli.ExitOK {
 		t.Fatalf("whoami failed: code=%d stderr=%q", code, errBuf.String())
 	}
-	for _, want := range []string{"Ada Lovelace (uid 7)", "Profile   lab", "Team      Lab (#3) · admin", "API key   read-write", "Server    eLabFTW 6.0.9", "Scopes    experiments=team · items=self"} {
+	for _, want := range []string{" - Ada Lovelace (uid 7)", "Profile   lab", "Team      Lab (#3) · admin", "API key   read-write", "Server    eLabFTW 6.0.9", "Scopes    experiments=team · items=self"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("whoami output missing %q:\n%s", want, out.String())
 		}
