@@ -27,7 +27,7 @@ irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/in
 
 <details><summary>Other ways (Nix, Go, GitHub Releases)</summary>
 
-- Nix: `nix profile install github:youthesame/elport` (or `nix run github:youthesame/elport -- --help`)
+- Nix (requires `nix-command` and `flakes`): `nix profile install github:youthesame/elport` (or `nix run github:youthesame/elport -- --help`)
 - Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@latest`
 - [GitHub Releases](https://github.com/youthesame/elport/releases) (on macOS, browser downloads are quarantined; prefer Homebrew or `install.sh`)
 
@@ -38,7 +38,7 @@ irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/in
 Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` work as-is on all OSes (do not delete them).
 
 1. Uninstall the Python package first (`uv tool uninstall elport`, `conda global uninstall elport`, `pipx uninstall elport`, or `pip uninstall elport`) so it does not shadow the Go binary on `PATH`.
-2. Install the Go binary above, then check `command -v elport` (PowerShell: `Get-Command elport`) and `elport --version` (`0.2.x`).
+2. Install the Go binary above, then check `command -v elport` (PowerShell: `Get-Command elport`) and `elport --version` (`0.2.x`, or a short commit hash for Nix builds).
 
 - **macOS**: on first read of a Keychain entry created by Python `v0.1.x`, macOS prompts once for Keychain access
   (`/usr/bin/security`); click **Always Allow** or re-run `elport login <profile>` once.
