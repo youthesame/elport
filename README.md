@@ -41,7 +41,7 @@ Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` work as-is
 
 - **macOS**: on first read of a Keychain entry created by Python `v0.1.x`, macOS prompts once for Keychain access
   (`/usr/bin/security`); click **Always Allow** or re-run `elport login <profile>` once.
-- **Windows / KDE KWallet**: run `elport login <profile>` once after upgrading (native keyring storage format differs).
+- **Windows / Linux (KDE)**: run `elport login <profile>` once after upgrading (native keyring storage format differs).
 - **Python `v0.1.x` line**: preserved on the [`python` branch](https://github.com/youthesame/elport/tree/python) and PyPI.
 
 ## The core idea

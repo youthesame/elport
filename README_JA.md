@@ -41,7 +41,7 @@ irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/in
 2. 上の手順で Go 版をインストールし、`command -v elport`（PowerShell は `Get-Command elport`）と `elport --version`（`0.2.x`）を確認してください。
 
 - **macOS**: Python 版が保存した Keychain エントリを初回読み込む際、`/usr/bin/security` による許可ダイアログが 1 回表示されます。「常に許可」を選ぶか、`elport login <profile>` を 1 回やり直してください。
-- **Windows / KDE KWallet**: キーリング保存形式が異なるため、アップグレード後に 1 回 `elport login <profile>` を実行してください。
+- **Windows / Linux (KDE)**: キーリング保存形式が異なるため、アップグレード後に 1 回 `elport login <profile>` を実行してください。
 - **Python 版 `v0.1.x`**: [`python` ブランチ](https://github.com/youthesame/elport/tree/python) と PyPI に保全されています。
 
 ## コンセプト
