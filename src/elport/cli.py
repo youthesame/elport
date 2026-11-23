@@ -982,11 +982,7 @@ _MIGRATION_NOTICE = (
 def _maybe_emit_migration_notice() -> None:
     if os.environ.get("ELPORT_NO_MIGRATION_NOTICE") == "1":
         return
-    try:
-        is_tty = sys.stderr.isatty()
-    except (AttributeError, ValueError, OSError):
-        return
-    if is_tty:
+    if sys.stderr is not None and sys.stderr.isatty():
         print(_MIGRATION_NOTICE, file=sys.stderr)
 
 

@@ -972,7 +972,8 @@ def test_migration_notice_prints_only_on_tty_stderr_for_commands(
     monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
     assert cli.main(["profile", "list"]) == 0
     captured = capsys.readouterr()
-    assert "v0.2.0+" in captured.err
+    lines = captured.err.splitlines()
+    assert len(lines) == 1 and "v0.2.0+" in lines[0]
     assert "v0.2.0+" not in captured.out
 
     # ELPORT_NO_MIGRATION_NOTICE=1 silences the notice even on a TTY.
