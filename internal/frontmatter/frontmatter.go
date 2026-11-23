@@ -708,7 +708,7 @@ func needsSingleQuote(s string) bool {
 	if _, ok := pyYAML11Int(s); ok {
 		return true
 	}
-	if _, err := strconv.ParseFloat(s, 64); err == nil {
+	if _, err := strconv.ParseFloat(strings.ReplaceAll(s, "_", ""), 64); err == nil {
 		return true
 	}
 	if strings.HasPrefix(s, " ") || strings.HasSuffix(s, " ") || strings.HasPrefix(s, "\t") || strings.HasSuffix(s, "\t") {
