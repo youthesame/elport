@@ -175,7 +175,7 @@ func (r *RootDir) WriteNewNoClobber(rel string, data []byte, perm os.FileMode) e
 		if parent != "." {
 			candidate = filepath.Join(parent, candidate)
 		}
-		file, err := r.root.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		file, err := r.root.OpenFile(candidate, os.O_WRONLY|os.O_CREATE|os.O_EXCL, perm)
 		if err == nil {
 			tmpRel = candidate
 			f = file
@@ -193,12 +193,6 @@ func (r *RootDir) WriteNewNoClobber(rel string, data []byte, perm os.FileMode) e
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
 		return err
-	}
-	if runtime.GOOS != "windows" {
-		if err := f.Chmod(perm); err != nil {
-			_ = f.Close()
-			return err
-		}
 	}
 	if err := f.Close(); err != nil {
 		return err

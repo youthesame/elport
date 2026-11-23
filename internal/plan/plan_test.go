@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -94,5 +95,49 @@ func TestApproveFromLocalRejectsUnvalidatedAndCaseInsensitiveRemoteLinked(t *tes
 	}
 	if len(res.Files) != 0 {
 		t.Fatalf("expected case-variant remote-linked path to be excluded, got %+v", res.Files)
+	}
+}
+
+func TestApprovedUploadPathRejectsPostApprovalSwap(t *testing.T) {
+	// Swapping an approved file with a symlink or a different inode after approval
+	// must fail when opening for upload.
+	dir := t.TempDir()
+	target := filepath.Join(dir, "data.csv")
+	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	res, err := plan.Approve("[d](data.csv)\n", dir, nil, nil, nil, nil, nil)
+	if err != nil || len(res.Files) != 1 {
+		t.Fatalf("Approve failed: res=%+v err=%v", res, err)
+	}
+	approved := res.Files[0]
+
+	// Replace with a brand-new regular file (new inode).
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("swapped"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := approved.Open(); err == nil {
+		_ = f.Close()
+		t.Fatal("expected Open to reject replaced inode")
+	}
+
+	if runtime.GOOS != "windows" {
+		secret := filepath.Join(dir, ".secret")
+		if err := os.WriteFile(secret, []byte("top-secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(target); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(secret, target); err != nil {
+			t.Fatal(err)
+		}
+		if f, err := approved.Open(); err == nil {
+			_ = f.Close()
+			t.Fatal("expected Open to reject post-approval symlink swap")
+		}
 	}
 }

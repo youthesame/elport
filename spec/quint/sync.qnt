@@ -2,8 +2,8 @@
 // Formal protocol model for elport's Markdown synchronization state machine.
 // Models two-form bases (local_base vs server-normalized remote_base),
 // interrupted creation & lost PATCH responses, Web UI edits, locks, HTML mode,
-// conflict sidecars & merge promotion, remote-linked path protection, and
-// monotonic attachment retention (never deleting uploads).
+// conflict sidecar no-clobber & merge promotion, remote-linked path protection,
+// and monotonic attachment retention (never deleting uploads).
 module elport_sync {
   pure val NORMAL_TEXTS = Set("v1", "v2", "v3")
   pure val LINK_SECRET = "link_secret"
@@ -32,6 +32,9 @@ module elport_sync {
   var hasId: bool
   var listedSecret: bool
   var sidecarsExist: bool
+  var sidecarRemote: str
+  var sidecarBase: str
+  var sidecarListedSecret: bool
 
   // Persisted sync base state (~/.config/elport/state/<hash>)
   var hasBase: bool
@@ -60,6 +63,9 @@ module elport_sync {
   var prevSecretUploaded: bool
   var prevListedSecret: bool
   var prevSecretRemoteLinked: bool
+  var prevSidecarsExist: bool
+  var prevSidecarRemote: str
+  var prevSidecarBase: str
 
   pure def isResuming(
     pHasBase: bool,
@@ -80,11 +86,31 @@ module elport_sync {
       or hasBareSecretPath(pRemoteBase)
       or hasBareSecretPath(pPendingRemote)
 
+  // Existing conflict sidecars may only be re-written idempotently when both
+  // their bodies and front matter (attachments listing) match exactly.
+  pure def sidecarWouldClobber(
+    pSidecarsExist: bool,
+    pSidecarRemote: str,
+    pSidecarBase: str,
+    pSidecarListed: bool,
+    wantRemote: str,
+    wantBase: str,
+    wantListed: bool
+  ): bool =
+    pSidecarsExist and (
+      pSidecarRemote != wantRemote
+        or pSidecarBase != wantBase
+        or pSidecarListed != wantListed
+    )
+
   action init = all {
     localBody' = "v1",
     hasId' = false,
     listedSecret' = false,
     sidecarsExist' = false,
+    sidecarRemote' = "",
+    sidecarBase' = "",
+    sidecarListedSecret' = false,
 
     hasBase' = false,
     localBase' = "",
@@ -110,6 +136,9 @@ module elport_sync {
     prevSecretUploaded' = false,
     prevListedSecret' = false,
     prevSecretRemoteLinked' = false,
+    prevSidecarsExist' = false,
+    prevSidecarRemote' = "",
+    prevSidecarBase' = "",
   }
 
   action recordGhost(act: str, arg: str, outcome: str): bool = all {
@@ -122,6 +151,36 @@ module elport_sync {
     prevSecretUploaded' = secretUploaded,
     prevListedSecret' = listedSecret,
     prevSecretRemoteLinked' = isSecretRemoteLinked(remoteBody, remoteBase, pendingRemote, rememberedSecret),
+    prevSidecarsExist' = sidecarsExist,
+    prevSidecarRemote' = sidecarRemote,
+    prevSidecarBase' = sidecarBase,
+  }
+
+  action unchangedSidecars: bool = all {
+    sidecarsExist' = sidecarsExist,
+    sidecarRemote' = sidecarRemote,
+    sidecarBase' = sidecarBase,
+    sidecarListedSecret' = sidecarListedSecret,
+  }
+
+  action unchangedState: bool = all {
+    localBody' = localBody,
+    hasId' = hasId,
+    listedSecret' = listedSecret,
+    unchangedSidecars,
+    hasBase' = hasBase,
+    localBase' = localBase,
+    remoteBase' = remoteBase,
+    pendingCreate' = pendingCreate,
+    bodySent' = bodySent,
+    hasPendingRemote' = hasPendingRemote,
+    pendingRemote' = pendingRemote,
+    rememberedSecret' = rememberedSecret,
+    remoteExists' = remoteExists,
+    remoteBody' = remoteBody,
+    remoteLocked' = remoteLocked,
+    remoteIsHtml' = remoteIsHtml,
+    secretUploaded' = secretUploaded,
   }
 
   action localEdit(newBody: str): bool = all {
@@ -129,7 +188,7 @@ module elport_sync {
     localBody' = newBody,
     hasId' = hasId,
     listedSecret' = listedSecret,
-    sidecarsExist' = sidecarsExist,
+    unchangedSidecars,
     hasBase' = hasBase,
     localBase' = localBase,
     remoteBase' = remoteBase,
@@ -151,7 +210,7 @@ module elport_sync {
     listedSecret' = listed,
     localBody' = localBody,
     hasId' = hasId,
-    sidecarsExist' = sidecarsExist,
+    unchangedSidecars,
     hasBase' = hasBase,
     localBase' = localBase,
     remoteBase' = remoteBase,
@@ -176,7 +235,7 @@ module elport_sync {
     localBody' = localBody,
     hasId' = hasId,
     listedSecret' = listedSecret,
-    sidecarsExist' = sidecarsExist,
+    unchangedSidecars,
     hasBase' = hasBase,
     localBase' = localBase,
     remoteBase' = remoteBase,
@@ -199,7 +258,7 @@ module elport_sync {
     localBody' = localBody,
     hasId' = hasId,
     listedSecret' = listedSecret,
-    sidecarsExist' = sidecarsExist,
+    unchangedSidecars,
     hasBase' = hasBase,
     localBase' = localBase,
     remoteBase' = remoteBase,
@@ -222,7 +281,7 @@ module elport_sync {
     localBody' = localBody,
     hasId' = hasId,
     listedSecret' = listedSecret,
-    sidecarsExist' = sidecarsExist,
+    unchangedSidecars,
     hasBase' = hasBase,
     localBase' = localBase,
     remoteBase' = remoteBase,
@@ -259,7 +318,7 @@ module elport_sync {
       rememberedSecret' = rememberedSecret,
       localBody' = localBody,
       listedSecret' = listedSecret,
-      sidecarsExist' = sidecarsExist,
+      unchangedSidecars,
       remoteLocked' = false,
       remoteIsHtml' = false,
       secretUploaded' = (secretUploaded or uploadedNow),
@@ -278,81 +337,41 @@ module elport_sync {
     val shouldUploadSecret =
       listedSecret or (hasBareSecretPath(localBody) and not(secretLinked))
     if (remoteExists and remoteIsHtml and remoteBody != "") all {
-      localBody' = localBody,
-      hasId' = hasId,
-      listedSecret' = listedSecret,
-      sidecarsExist' = sidecarsExist,
-      hasBase' = hasBase,
-      localBase' = localBase,
-      remoteBase' = remoteBase,
-      pendingCreate' = pendingCreate,
-      bodySent' = bodySent,
-      hasPendingRemote' = hasPendingRemote,
-      pendingRemote' = pendingRemote,
-      rememberedSecret' = rememberedSecret,
-      remoteExists' = remoteExists,
-      remoteBody' = remoteBody,
-      remoteLocked' = remoteLocked,
-      remoteIsHtml' = remoteIsHtml,
-      secretUploaded' = secretUploaded,
+      unchangedState,
       recordGhost(actName, "", "refused_html"),
     } else if (remoteExists and remoteLocked) all {
-      localBody' = localBody,
-      hasId' = hasId,
-      listedSecret' = listedSecret,
-      sidecarsExist' = sidecarsExist,
-      hasBase' = hasBase,
-      localBase' = localBase,
-      remoteBase' = remoteBase,
-      pendingCreate' = pendingCreate,
-      bodySent' = bodySent,
-      hasPendingRemote' = hasPendingRemote,
-      pendingRemote' = pendingRemote,
-      rememberedSecret' = rememberedSecret,
-      remoteExists' = remoteExists,
-      remoteBody' = remoteBody,
-      remoteLocked' = remoteLocked,
-      remoteIsHtml' = remoteIsHtml,
-      secretUploaded' = secretUploaded,
+      unchangedState,
       recordGhost(actName, "", "refused_locked"),
     } else if (hasId and not(hasBase) and not(force)) all {
-      localBody' = localBody,
-      hasId' = hasId,
-      listedSecret' = listedSecret,
-      sidecarsExist' = sidecarsExist,
-      hasBase' = hasBase,
-      localBase' = localBase,
-      remoteBase' = remoteBase,
-      pendingCreate' = pendingCreate,
-      bodySent' = bodySent,
-      hasPendingRemote' = hasPendingRemote,
-      pendingRemote' = pendingRemote,
-      rememberedSecret' = rememberedSecret,
-      remoteExists' = remoteExists,
-      remoteBody' = remoteBody,
-      remoteLocked' = remoteLocked,
-      remoteIsHtml' = remoteIsHtml,
-      secretUploaded' = secretUploaded,
+      unchangedState,
       recordGhost(actName, "", "refused_no_base"),
-    } else if (hasId and hasBase and not(resuming) and remoteBody != remoteBase and not(force)) all {
-      localBody' = localBody,
-      hasId' = hasId,
-      listedSecret' = listedSecret,
-      sidecarsExist' = true,
-      hasBase' = hasBase,
-      localBase' = localBase,
-      remoteBase' = remoteBase,
-      pendingCreate' = pendingCreate,
-      bodySent' = bodySent,
-      hasPendingRemote' = true,
-      pendingRemote' = remoteBody,
-      rememberedSecret' = (rememberedSecret or hasBareSecretPath(pendingRemote)),
-      remoteExists' = remoteExists,
-      remoteBody' = remoteBody,
-      remoteLocked' = remoteLocked,
-      remoteIsHtml' = remoteIsHtml,
-      secretUploaded' = secretUploaded,
-      recordGhost(actName, "", "conflict"),
+    } else if (hasId and hasBase and not(resuming) and remoteBody != remoteBase and not(force)) {
+      if (sidecarWouldClobber(sidecarsExist, sidecarRemote, sidecarBase, sidecarListedSecret, remoteBody, localBase, listedSecret)) all {
+        unchangedState,
+        recordGhost(actName, "", "refused_sidecar"),
+      } else all {
+        localBody' = localBody,
+        hasId' = hasId,
+        listedSecret' = listedSecret,
+        sidecarsExist' = true,
+        sidecarRemote' = remoteBody,
+        sidecarBase' = localBase,
+        sidecarListedSecret' = listedSecret,
+        hasBase' = hasBase,
+        localBase' = localBase,
+        remoteBase' = remoteBase,
+        pendingCreate' = pendingCreate,
+        bodySent' = bodySent,
+        hasPendingRemote' = true,
+        pendingRemote' = remoteBody,
+        rememberedSecret' = (rememberedSecret or hasBareSecretPath(pendingRemote)),
+        remoteExists' = remoteExists,
+        remoteBody' = remoteBody,
+        remoteLocked' = remoteLocked,
+        remoteIsHtml' = remoteIsHtml,
+        secretUploaded' = secretUploaded,
+        recordGhost(actName, "", "conflict"),
+      }
     } else {
       val nextRemoteBody = serverNorm(localBody)
       val nextRemembered =
@@ -365,7 +384,7 @@ module elport_sync {
         localBody' = localBody,
         hasId' = true,
         listedSecret' = listedSecret,
-        sidecarsExist' = sidecarsExist,
+        unchangedSidecars,
         hasBase' = true,
         localBase' = localBody,
         remoteBase' = nextRemoteBody,
@@ -391,10 +410,14 @@ module elport_sync {
     not(remoteIsHtml and remoteBody != ""),
     isResuming(hasBase, pendingCreate, bodySent, hasPendingRemote),
     concurrentWebBody != remoteBody,
+    not(sidecarWouldClobber(sidecarsExist, sidecarRemote, sidecarBase, sidecarListedSecret, concurrentWebBody, localBase, listedSecret)),
     localBody' = localBody,
     hasId' = hasId,
     listedSecret' = listedSecret,
     sidecarsExist' = true,
+    sidecarRemote' = concurrentWebBody,
+    sidecarBase' = localBase,
+    sidecarListedSecret' = listedSecret,
     hasBase' = hasBase,
     localBase' = localBase,
     remoteBase' = remoteBase,
@@ -415,62 +438,38 @@ module elport_sync {
     hasId,
     remoteExists,
     if (remoteIsHtml and remoteBody != "") all {
-      localBody' = localBody,
-      hasId' = hasId,
-      listedSecret' = listedSecret,
-      sidecarsExist' = sidecarsExist,
-      hasBase' = hasBase,
-      localBase' = localBase,
-      remoteBase' = remoteBase,
-      pendingCreate' = pendingCreate,
-      bodySent' = bodySent,
-      hasPendingRemote' = hasPendingRemote,
-      pendingRemote' = pendingRemote,
-      rememberedSecret' = rememberedSecret,
-      remoteExists' = remoteExists,
-      remoteBody' = remoteBody,
-      remoteLocked' = remoteLocked,
-      remoteIsHtml' = remoteIsHtml,
-      secretUploaded' = secretUploaded,
+      unchangedState,
       recordGhost("pull", "", "refused_html"),
     } else if (hasBase and localBody != localBase and remoteBody == remoteBase) all {
-      localBody' = localBody,
-      hasId' = hasId,
-      listedSecret' = listedSecret,
-      sidecarsExist' = sidecarsExist,
-      hasBase' = hasBase,
-      localBase' = localBase,
-      remoteBase' = remoteBase,
-      pendingCreate' = pendingCreate,
-      bodySent' = bodySent,
-      hasPendingRemote' = hasPendingRemote,
-      pendingRemote' = pendingRemote,
-      rememberedSecret' = rememberedSecret,
-      remoteExists' = remoteExists,
-      remoteBody' = remoteBody,
-      remoteLocked' = remoteLocked,
-      remoteIsHtml' = remoteIsHtml,
-      secretUploaded' = secretUploaded,
+      unchangedState,
       recordGhost("pull", "", "up_to_date"),
-    } else if (hasBase and localBody != localBase and remoteBody != remoteBase) all {
-      localBody' = localBody,
-      hasId' = hasId,
-      listedSecret' = listedSecret,
-      sidecarsExist' = true,
-      hasBase' = hasBase,
-      localBase' = localBase,
-      remoteBase' = remoteBase,
-      pendingCreate' = pendingCreate,
-      bodySent' = bodySent,
-      hasPendingRemote' = true,
-      pendingRemote' = remoteBody,
-      rememberedSecret' = (rememberedSecret or hasBareSecretPath(pendingRemote)),
-      remoteExists' = remoteExists,
-      remoteBody' = remoteBody,
-      remoteLocked' = remoteLocked,
-      remoteIsHtml' = remoteIsHtml,
-      secretUploaded' = secretUploaded,
-      recordGhost("pull", "", "conflict"),
+    } else if (hasBase and localBody != localBase and remoteBody != remoteBase) {
+      if (sidecarWouldClobber(sidecarsExist, sidecarRemote, sidecarBase, sidecarListedSecret, remoteBody, localBase, listedSecret)) all {
+        unchangedState,
+        recordGhost("pull", "", "refused_sidecar"),
+      } else all {
+        localBody' = localBody,
+        hasId' = hasId,
+        listedSecret' = listedSecret,
+        sidecarsExist' = true,
+        sidecarRemote' = remoteBody,
+        sidecarBase' = localBase,
+        sidecarListedSecret' = listedSecret,
+        hasBase' = hasBase,
+        localBase' = localBase,
+        remoteBase' = remoteBase,
+        pendingCreate' = pendingCreate,
+        bodySent' = bodySent,
+        hasPendingRemote' = true,
+        pendingRemote' = remoteBody,
+        rememberedSecret' = (rememberedSecret or hasBareSecretPath(pendingRemote)),
+        remoteExists' = remoteExists,
+        remoteBody' = remoteBody,
+        remoteLocked' = remoteLocked,
+        remoteIsHtml' = remoteIsHtml,
+        secretUploaded' = secretUploaded,
+        recordGhost("pull", "", "conflict"),
+      }
     } else {
       val rev = serverReverse(remoteBody)
       val nextRemembered =
@@ -481,7 +480,7 @@ module elport_sync {
         localBody' = rev,
         hasId' = hasId,
         listedSecret' = listedSecret,
-        sidecarsExist' = sidecarsExist,
+        unchangedSidecars,
         hasBase' = true,
         localBase' = rev,
         remoteBase' = remoteBody,
@@ -512,6 +511,9 @@ module elport_sync {
       hasId' = hasId,
       listedSecret' = listedSecret,
       sidecarsExist' = false,
+      sidecarRemote' = "",
+      sidecarBase' = "",
+      sidecarListedSecret' = false,
       hasBase' = true,
       localBase' = promotedLocal,
       remoteBase' = pendingRemote,
@@ -570,12 +572,17 @@ module elport_sync {
   val invConflictEndsResume =
     hasPendingRemote implies not(isResuming(hasBase, pendingCreate, bodySent, hasPendingRemote))
 
+  val invNoSidecarClobber =
+    (prevSidecarsExist and lastAction != "merge_resolved")
+      implies (sidecarsExist and sidecarRemote == prevSidecarRemote and sidecarBase == prevSidecarBase)
+
   val allSafetyInvariants = and {
     invNoPushToLocked,
     invNoSyncOnNonEmptyHtml,
     invAttachmentsNeverDeleted,
     invNoUnauthorizedRemoteLinkedUpload,
     invConflictEndsResume,
+    invNoSidecarClobber,
   }
 
   // --- Reproducible Trace Runs for ITF JSON Export ---
@@ -616,6 +623,18 @@ module elport_sync {
     init
       .then(pushCreateInterrupted(false))
       .then(webEdit("v2|norm"))
+      .then(push(false))
+      .then(mergeResolved)
+      .then(push(false))
+
+  run traceSidecarCollisionRefusedTest =
+    init
+      .then(push(false))
+      .then(webEdit("v2|norm"))
+      .then(localEdit("v3"))
+      .then(push(false))
+      .then(webEdit("v3|norm"))
+      // Existing sidecar holds v2|norm; new remote is v3|norm so sidecar overwrite must be refused.
       .then(push(false))
       .then(mergeResolved)
       .then(push(false))

@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,8 +18,23 @@ import (
 	"github.com/youthesame/elport/internal/transclude"
 )
 
+func verifyDocUnchanged(docPath string, initial []byte) error {
+	current, err := os.ReadFile(docPath)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(current, initial) {
+		return errors.New("local document changed during pull; re-run 'elport pull'")
+	}
+	return nil
+}
+
 func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profile string, stdout, stderr io.Writer) (string, error) {
-	doc, err := ReadDocument(docPath, cfg)
+	initialRaw, err := os.ReadFile(docPath)
+	if err != nil {
+		return "", err
+	}
+	doc, err := parseDocumentBytes(docPath, initialRaw, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -61,6 +77,9 @@ func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 			return UpToDate, nil
 		}
 		if !metaEqual(merged, doc.Meta) {
+			if err := verifyDocUnchanged(docPath, initialRaw); err != nil {
+				return "", err
+			}
 			if err := AtomicWriteDoc(docPath, frontmatter.Render(merged, string(doc.Body))); err != nil {
 				return "", err
 			}
@@ -166,6 +185,9 @@ func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 	}
 
 	mergedMeta, newBase := mergeMeta(doc.Meta, baseMeta, remoteDoc)
+	if err := verifyDocUnchanged(docPath, initialRaw); err != nil {
+		return "", err
+	}
 	if err := AtomicWriteDoc(docPath, frontmatter.Render(mergedMeta, string(source))); err != nil {
 		return "", err
 	}

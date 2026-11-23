@@ -270,12 +270,6 @@ func replayTrace(t *testing.T, trace itfTrace) {
 		case "push", "push_force":
 			ensureFigUpload("experiments/42")
 			force := want.LastAction == "push_force"
-			// If a previous conflict left stale sidecars with different content and another conflict occurs,
-			// remove old sidecars only when Quint models overwriting sidecars on a new conflict with a different remoteBody.
-			if prev.SidecarsExist && want.LastOutcome == "conflict" && prev.PendingRemote != want.PendingRemote {
-				_ = os.Remove(sync.SidecarPath(docPath))
-				_ = os.Remove(sync.BaseSidecarPath(docPath))
-			}
 			_, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: force, WorkDir: dir}, &out, &errBuf)
 			gotOutcome = classifySyncOutcome("push", err)
 
@@ -290,10 +284,6 @@ func replayTrace(t *testing.T, trace itfTrace) {
 			gotOutcome = classifySyncOutcome("push", err)
 
 		case "pull":
-			if prev.SidecarsExist && want.LastOutcome == "conflict" && prev.PendingRemote != want.PendingRemote {
-				_ = os.Remove(sync.SidecarPath(docPath))
-				_ = os.Remove(sync.BaseSidecarPath(docPath))
-			}
 			res, err := sync.Pull(context.Background(), docPath, api, cfg, "", &out, &errBuf)
 			if err != nil {
 				gotOutcome = classifySyncOutcome("pull", err)
@@ -370,15 +360,35 @@ func replayTrace(t *testing.T, trace itfTrace) {
 			t.Fatalf("step %d (%s): secretUploaded = %v, want %v", idx, want.LastAction, hasUploadedSecret(), want.SecretUploaded)
 		}
 
-		// Also verify plan.Approve refuses secret.csv whenever it is remote-linked and not listed.
-		if !want.ListedSecret && want.RememberedSecret {
-			res, err := plan.Approve(concreteLocal("link_secret"), dir, nil, nil, nil, []string{"secret.csv"}, nil)
-			if err != nil {
-				t.Fatalf("step %d: plan.Approve: %v", idx, err)
+		// Verify persisted remote_paths in state actually recorded secret.csv,
+		// and pass those real saved paths into plan.Approve.
+		if want.RememberedSecret {
+			if saved == nil {
+				t.Fatalf("step %d: expected saved state with remote_paths", idx)
 			}
-			for _, ap := range res.Files {
-				if filepath.Base(ap.Path()) == "secret.csv" {
-					t.Fatalf("step %d: secret.csv was approved despite being remembered remote-linked", idx)
+			rawPaths, _ := saved["remote_paths"].([]any)
+			var persistedPaths []string
+			foundSecret := false
+			for _, item := range rawPaths {
+				if s, ok := item.(string); ok {
+					persistedPaths = append(persistedPaths, s)
+					if s == "secret.csv" {
+						foundSecret = true
+					}
+				}
+			}
+			if !foundSecret {
+				t.Fatalf("step %d (%s): persisted remote_paths %v missing secret.csv", idx, want.LastAction, persistedPaths)
+			}
+			if !want.ListedSecret {
+				res, err := plan.Approve(concreteLocal("link_secret"), dir, nil, nil, nil, persistedPaths, nil)
+				if err != nil {
+					t.Fatalf("step %d: plan.Approve: %v", idx, err)
+				}
+				for _, ap := range res.Files {
+					if filepath.Base(ap.Path()) == "secret.csv" {
+						t.Fatalf("step %d: secret.csv was approved despite being in persisted remote_paths", idx)
+					}
 				}
 			}
 		}
@@ -402,6 +412,8 @@ func classifySyncOutcome(op string, err error) string {
 		return "refused_locked"
 	case strings.Contains(msg, "base unavailable"):
 		return "refused_no_base"
+	case strings.Contains(msg, "refusing to overwrite existing file at sidecar path"):
+		return "refused_sidecar"
 	case strings.Contains(msg, "remote changed") || strings.Contains(msg, "local changes conflict"):
 		return "conflict"
 	default:

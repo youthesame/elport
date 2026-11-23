@@ -655,27 +655,48 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 		len(transclude.UnmatchedDownloadURLs(string(remoteBody), uploads, baseURL)) == 0 &&
 		payloadMatchesRemote
 
-	if saved != nil && !opts.Force && !unchanged && (len(approved.Files) > 0 || moved) {
-		reference := savedRemoteBase
-		if resuming {
-			reference = remoteBody
-		}
+	if doc.HasID && !unchanged && (len(approved.Files) > 0 || moved) {
 		latest, err := remote.Get(ctx)
 		if err != nil {
 			return "", err
 		}
-		latestBody := RemoteBody(strField(latest, "body"))
-		if latestBody != reference {
-			latestUploads, err := remote.Uploads(ctx, latest)
-			if err != nil {
-				return "", err
+		if err := RefuseHTML(latest, doc.Entity, eid); err != nil {
+			return "", err
+		}
+		if truthyField(latest, "locked") {
+			return "", fmt.Errorf("%s/%d is locked; unlock it in the Web UI to push (--force does not override a lock)", doc.Entity, eid)
+		}
+		if saved != nil && !opts.Force {
+			reference := savedRemoteBase
+			if resuming {
+				reference = remoteBody
 			}
-			return "", raiseConflict(ctx, docPath, latestBody, saved, latestUploads, remote, "remote changed after uploads; body was not updated and uploads remain", stderr)
+			latestBody := RemoteBody(strField(latest, "body"))
+			if latestBody != reference {
+				latestUploads, err := remote.Uploads(ctx, latest)
+				if err != nil {
+					return "", err
+				}
+				return "", raiseConflict(ctx, docPath, latestBody, saved, latestUploads, remote, "remote changed after uploads; body was not updated and uploads remain", stderr)
+			}
 		}
 	}
 
 	if pendingCreate {
-		if err := MarkCreated(baseURL, doc.Entity, eid, true); err != nil {
+		provisional := map[string]any{
+			"remote_base":    "",
+			"local_base":     "",
+			"meta_base":      map[string]any{},
+			"pending_create": true,
+			"body_sent":      true,
+		}
+		if hasKey(saved, "pending_remote") {
+			provisional["pending_remote"] = strField(saved, "pending_remote")
+		}
+		if rememberedPre := rememberRemotePaths(saved, strField(saved, "remote_base"), strField(saved, "pending_remote"), string(remoteBody)); len(rememberedPre) > 0 {
+			provisional["remote_paths"] = rememberedPre
+		}
+		if err := state.Save(baseURL, doc.Entity, strconv.Itoa(eid), provisional); err != nil {
 			return "", err
 		}
 	}

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -43,6 +44,8 @@ type writeFakeAPI struct {
 	nextUploadID int
 
 	patchTransform func(payload map[string]any) map[string]any
+	onGet          func(entity string, eid int)
+	onUpload       func(entity string, eid int, name string)
 	failUploadOnce bool
 	failPatchOnce  bool
 	failVerifyOnce bool
@@ -76,6 +79,9 @@ func (f *writeFakeAPI) Info(context.Context) (map[string]any, error) {
 
 func (f *writeFakeAPI) Get(_ context.Context, entity string, eid int) (map[string]any, error) {
 	f.calls = append(f.calls, fmt.Sprintf("get:%s/%d", entity, eid))
+	if f.onGet != nil {
+		f.onGet(entity, eid)
+	}
 	if len(f.getQueue) > 0 {
 		doc := f.getQueue[0]
 		f.getQueue = f.getQueue[1:]
@@ -172,6 +178,9 @@ func (f *writeFakeAPI) Upload(_ context.Context, entity string, eid int, approve
 	key := fmt.Sprintf("%s/%d", entity, eid)
 	f.uploads[key] = append(f.uploads[key], entry)
 	f.downloads[uid] = raw
+	if f.onUpload != nil {
+		f.onUpload(entity, eid, name)
+	}
 	// Simulate eLabFTW returning only {"id": uid} so completeUploads must fetch metadata.
 	return map[string]any{"id": json.Number(fmt.Sprintf("%d", uid))}, nil
 }
@@ -696,5 +705,203 @@ func TestMergeResolvedWithoutGitAndRefusesAttachmentConflict(t *testing.T) {
 	}
 	if _, hasPending := saved["pending_remote"]; hasPending {
 		t.Fatalf("pending_remote should be cleared: %v", saved)
+	}
+}
+
+func TestPushPendingCreateForcePatchFailurePreservesRemotePathsAndConflict(t *testing.T) {
+	// Interrupted create -> conflict recording secret.csv in pending_remote -> Web removes link
+	// -> push --force fails at PATCH -> next plain push must still conflict AND secret.csv must remain blocked.
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(filepath.Join(dir, "secret.csv"), []byte("top-secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(docPath, []byte("---\nid: 21\nentity: experiments\nprofile: test\n---\n\n[s](secret.csv)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Save("https://e.example", "experiments", "21", map[string]any{
+		"remote_base":    "",
+		"local_base":     "",
+		"meta_base":      map[string]any{},
+		"pending_create": true,
+		"body_sent":      true,
+		"pending_remote": "[s](secret.csv)\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	api := newWriteFakeAPI()
+	// Web side already removed the link from remote body.
+	api.entities["experiments/21"] = map[string]any{"body": "clean remote\n", "content_type": 2, "userid": 1, "team": 7}
+	api.failPatchOnce = true
+
+	var out, errBuf bytes.Buffer
+	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected PATCH failure")
+	}
+	if len(api.uploaded) != 0 {
+		t.Fatalf("remote-linked secret.csv must not be uploaded during failed force push: %v", api.uploaded)
+	}
+
+	// Next plain push must NOT skip conflict detection (pending_remote must survive failed PATCH).
+	api.patches = nil
+	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err == nil || !strings.Contains(err.Error(), "remote changed") {
+		t.Fatalf("expected conflict on plain push after failed force PATCH, got: %v", err)
+	}
+	if len(api.patches) != 0 {
+		t.Fatalf("plain push must not PATCH on unresolved conflict")
+	}
+
+	// Even a subsequent --force push must still remember secret.csv in remote_paths and NOT upload it.
+	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("second force push failed: %v", err)
+	}
+	if len(api.uploaded) != 0 {
+		t.Fatalf("secret.csv was uploaded after remote_paths should have been preserved: %v", api.uploaded)
+	}
+}
+
+func TestPushMidUploadLockOrHTMLSwitchRefusedEvenWithForce(t *testing.T) {
+	for _, mode := range []string{"lock", "html"} {
+		for _, force := range []bool{false, true} {
+			name := fmt.Sprintf("%s_force=%v", mode, force)
+			t.Run(name, func(t *testing.T) {
+				setIsolatedHome(t)
+				dir := t.TempDir()
+				docPath := filepath.Join(dir, "report.md")
+				if err := os.WriteFile(filepath.Join(dir, "a.bin"), []byte("payload"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(docPath, []byte("---\nid: 22\nentity: experiments\nprofile: test\n---\n\n[a](a.bin)\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := state.Save("https://e.example", "experiments", "22", map[string]any{
+					"remote_base": "old\n",
+					"local_base":  "old\n",
+				}); err != nil {
+					t.Fatal(err)
+				}
+
+				api := newWriteFakeAPI()
+				api.entities["experiments/22"] = map[string]any{"body": "old\n", "content_type": 2, "userid": 1, "team": 7}
+				api.onUpload = func(entity string, eid int, _ string) {
+					doc := api.entities[fmt.Sprintf("%s/%d", entity, eid)]
+					if mode == "lock" {
+						doc["locked"] = 1
+					} else {
+						doc["content_type"] = 1
+					}
+				}
+
+				var out, errBuf bytes.Buffer
+				_, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{Force: force, WorkDir: dir}, &out, &errBuf)
+				if err == nil {
+					t.Fatalf("expected refusal when %s toggled mid-upload", mode)
+				}
+				if len(api.patches) != 0 {
+					t.Fatalf("PATCH must not run after mid-upload %s toggle", mode)
+				}
+			})
+		}
+	}
+}
+
+func TestPullRefusesOverwritingConcurrentLocalEdit(t *testing.T) {
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(docPath, []byte("---\nid: 23\nentity: experiments\nprofile: test\n---\n\nbase\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Save("https://e.example", "experiments", "23", map[string]any{
+		"remote_base": "base\n",
+		"local_base":  "base\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	api := newWriteFakeAPI()
+	api.entities["experiments/23"] = map[string]any{"body": "web edit\n", "content_type": 2}
+	api.onGet = func(_ string, _ int) {
+		_ = os.WriteFile(docPath, []byte("---\nid: 23\nentity: experiments\nprofile: test\n---\n\nconcurrent editor save\n"), 0o644)
+	}
+
+	var out, errBuf bytes.Buffer
+	_, err := sync.Pull(context.Background(), docPath, api, testConfig(), "", &out, &errBuf)
+	if err == nil || !strings.Contains(err.Error(), "local document changed during pull") {
+		t.Fatalf("expected concurrent local edit refusal, got: %v", err)
+	}
+	got, err := os.ReadFile(docPath)
+	if err != nil || !strings.Contains(string(got), "concurrent editor save") {
+		t.Fatalf("concurrent local edit was overwritten: %q err=%v", got, err)
+	}
+	saved, _ := state.Load("https://e.example", "experiments", "23")
+	if saved["remote_base"] != "base\n" {
+		t.Fatalf("state base must not advance after aborted pull: %v", saved)
+	}
+}
+
+func TestNewDocumentsAndConflictSidecarsDefaultTo0600(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file mode bits are not enforced on Windows")
+	}
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "report.md")
+	if err := sync.WriteNewDocNoClobber(docPath, "---\nid: 24\nentity: experiments\nprofile: test\n---\n\nlocal secret\n"); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("new doc perm = %o, want 0600", info.Mode().Perm())
+	}
+	if err := state.Save("https://e.example", "experiments", "24", map[string]any{
+		"remote_base": "base\n",
+		"local_base":  "base\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	api := newWriteFakeAPI()
+	api.entities["experiments/24"] = map[string]any{"body": "remote\n", "content_type": 2, "userid": 1, "team": 7}
+	var out, errBuf bytes.Buffer
+	_, _ = sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf)
+	for _, sidecar := range []string{sync.BaseSidecarPath(docPath), sync.SidecarPath(docPath)} {
+		si, err := os.Stat(sidecar)
+		if err != nil {
+			t.Fatalf("stat %s: %v", sidecar, err)
+		}
+		if si.Mode().Perm() != 0o600 {
+			t.Fatalf("sidecar %s perm = %o, want 0600", filepath.Base(sidecar), si.Mode().Perm())
+		}
+	}
+}
+
+func TestPushNumericTitleChangeNotTreatedAsUnchanged(t *testing.T) {
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(docPath, []byte("---\nid: 25\nentity: experiments\nprofile: test\ntitle: '001'\n---\n\nsame body\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Save("https://e.example", "experiments", "25", map[string]any{
+		"remote_base": "same body\n",
+		"local_base":  "same body\n",
+		"meta_base":   map[string]any{"title": "1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	api := newWriteFakeAPI()
+	api.entities["experiments/25"] = map[string]any{"body": "same body\n", "title": "1", "content_type": 2, "userid": 1, "team": 7}
+
+	var out, errBuf bytes.Buffer
+	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+	if len(api.patches) != 1 || api.patches[0]["title"] != "001" {
+		t.Fatalf("expected PATCH with title='001', got patches=%+v", api.patches)
 	}
 }

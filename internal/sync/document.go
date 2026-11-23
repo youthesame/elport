@@ -211,11 +211,7 @@ func ignoreLayers(cfg *config.Data) []transclude.IgnoreLayer {
 	return out
 }
 
-func ReadDocument(path string, cfg *config.Data) (*Document, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
+func parseDocumentBytes(path string, raw []byte, cfg *config.Data) (*Document, error) {
 	if !utf8.Valid(raw) {
 		return nil, fmt.Errorf("document is not valid UTF-8: %s", path)
 	}
@@ -247,6 +243,14 @@ func ReadDocument(path string, cfg *config.Data) (*Document, error) {
 		doc.HasID = true
 	}
 	return doc, nil
+}
+
+func ReadDocument(path string, cfg *config.Data) (*Document, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return parseDocumentBytes(path, raw, cfg)
 }
 
 func metaProfile(meta frontmatter.Meta) string {

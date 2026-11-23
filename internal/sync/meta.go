@@ -419,13 +419,14 @@ func remoteValEqual(remoteVal, payloadVal any) bool {
 	if remoteVal == nil || payloadVal == nil {
 		return remoteVal == nil && payloadVal == nil
 	}
-	if pi, ok := anyToInt(payloadVal); ok {
-		if ri, rok := anyToInt(remoteVal); rok {
-			return ri == pi
-		}
-		return false
+	switch payloadVal.(type) {
+	case int, int64, float64, json.Number:
+		pi, pok := anyToInt(payloadVal)
+		ri, rok := anyToInt(remoteVal)
+		return pok && rok && ri == pi
+	default:
+		return fmt.Sprint(remoteVal) == fmt.Sprint(payloadVal)
 	}
-	return fmt.Sprint(remoteVal) == fmt.Sprint(payloadVal)
 }
 
 func docLinksEqual(a, b map[string]map[string]string) bool {

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -295,5 +296,58 @@ func TestClientHonorsSSLCertFileEnv(t *testing.T) {
 	info, err := c.Info(context.Background())
 	if err != nil || info["elabftw_version"] != "6.0.0" {
 		t.Fatalf("Info via SSL_CERT_FILE = %v, err=%v", info, err)
+	}
+
+	// REQUESTS_CA_BUNDLE fallback keeps Python-configured environments working.
+	t.Setenv("SSL_CERT_FILE", "")
+	t.Setenv("REQUESTS_CA_BUNDLE", caPath)
+	c2, err := client.New(srv.URL, config.NewAPIKey("1-key"), true)
+	if err != nil {
+		t.Fatalf("client.New with REQUESTS_CA_BUNDLE: %v", err)
+	}
+	info2, err := c2.Info(context.Background())
+	if err != nil || info2["elabftw_version"] != "6.0.0" {
+		t.Fatalf("Info via REQUESTS_CA_BUNDLE = %v, err=%v", info2, err)
+	}
+}
+
+func TestClientUploadRefusesPostApprovalSymlinkSwap(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privilege on Windows")
+	}
+	dir := t.TempDir()
+	dataPath := filepath.Join(dir, "data.csv")
+	secretPath := filepath.Join(dir, ".secret")
+	if err := os.WriteFile(dataPath, []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(secretPath, []byte("TOP-SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res, err := plan.Approve("[d](data.csv)\n", dir, nil, nil, nil, nil, nil)
+	if err != nil || len(res.Files) != 1 {
+		t.Fatalf("Approve: %v", err)
+	}
+	if err := os.Remove(dataPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secretPath, dataPath); err != nil {
+		t.Fatal(err)
+	}
+
+	uploaded := false
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uploaded = true
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+	defer srv.Close()
+
+	c := tlsClientForServer(t, srv, "1-key")
+	if _, err := c.Upload(context.Background(), "experiments", 1, res.Files[0]); err == nil {
+		t.Fatal("expected Upload to refuse post-approval symlink swap")
+	}
+	if uploaded {
+		t.Fatal("server must not receive any upload request after symlink swap")
 	}
 }

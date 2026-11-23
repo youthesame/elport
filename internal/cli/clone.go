@@ -299,7 +299,10 @@ func runCloneAll(ctx context.Context, cmd *Command, stdout, stderr io.Writer, en
 
 			var capOut, capErr bytes.Buffer
 			summary, workErr := func() (string, error) {
-				if err := os.MkdirAll(directory, 0o755); err != nil {
+				if err := os.MkdirAll(filepath.Dir(directory), 0o755); err != nil {
+					return "", err
+				}
+				if err := os.Mkdir(directory, 0o755); err != nil {
 					return "", err
 				}
 				res, err := cloneTo(ctx, eidStr, entity, docPath, profileName, c, data, profileName, &capOut, &capErr, env)

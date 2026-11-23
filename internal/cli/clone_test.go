@@ -221,3 +221,52 @@ func TestCLINewCloneAllAndPushPullMergeFlow(t *testing.T) {
 func strconvItoa(n int) string {
 	return json.Number(string([]byte{byte('0' + n/10), byte('0' + n%10)})).String()
 }
+
+func TestCloneAllDoesNotDeleteConcurrentProcessDirectory(t *testing.T) {
+	// If another process creates the destination directory after clone --all scans
+	// existing folders, exclusive os.Mkdir fails without removing the other process's work.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	backupDir := t.TempDir()
+	otherDir := filepath.Join(backupDir, "experiments", "10-Race Note")
+	otherDoc := filepath.Join(otherDir, "report.md")
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments":
+			if r.URL.Query().Get("offset") != "" && r.URL.Query().Get("offset") != "0" {
+				_ = json.NewEncoder(w).Encode([]map[string]any{})
+				return
+			}
+			// Simulate concurrent process creating the target directory after ReadDir.
+			_ = os.MkdirAll(otherDir, 0o755)
+			_ = os.WriteFile(otherDoc, []byte("precious concurrent work"), 0o644)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 10, "title": "Race Note"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/items":
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	t.Setenv("ELABFTW_BASE_URL", srv.URL)
+	t.Setenv("ELABFTW_API_KEY", "1-test-key")
+	env := cli.Env{
+		WorkDir:    t.TempDir(),
+		ClientOpts: []client.Option{client.WithRootCAs(srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs)},
+	}
+
+	var out, errBuf bytes.Buffer
+	code := cli.RunWithEnv(context.Background(), []string{"clone", "--all", backupDir}, nil, &out, &errBuf, env)
+	if code != cli.ExitError {
+		t.Fatalf("expected failure for racing directory, got code=%d stdout=%q", code, out.String())
+	}
+	got, err := os.ReadFile(otherDoc)
+	if err != nil || string(got) != "precious concurrent work" {
+		t.Fatalf("concurrent process file was deleted or modified: content=%q err=%v", got, err)
+	}
+}
