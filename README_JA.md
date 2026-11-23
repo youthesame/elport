@@ -8,11 +8,35 @@
 
 ## インストール
 
-`elport` は macOS・Linux・Windows 向けの **単一静的バイナリ**（`CGO_ENABLED=0`、ランタイム依存なし）として配布しています。
+`elport` は **単一の静的バイナリ** です（Python などのランタイムは不要）。[GitHub Releases](https://github.com/youthesame/elport/releases) から手動ダウンロードするか、お使いの OS のコマンドをそのまま実行してください：
 
-[GitHub Releases](https://github.com/youthesame/elport/releases) からお使いの環境向けアーカイブをダウンロードし、`checksums.txt` で検証のうえ `elport`（Windows は `elport.exe`）を `PATH` の通った場所へ配置してください。
+**macOS / Linux**（`~/.local/bin/elport` に配置）:
 
-Go 1.26 以上があればソースから直接ビルドもできます:
+```sh
+V=0.2.0-alpha.1
+OS=$(uname -s | tr A-Z a-z)
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+mkdir -p ~/.local/bin
+curl -fsSL "https://github.com/youthesame/elport/releases/download/v${V}/elport_${V}_${OS}_${ARCH}.tar.gz" \
+  | tar -xz -C ~/.local/bin elport
+```
+
+*(※`~/.local/bin` が `PATH` に入っていない場合は `export PATH="$HOME/.local/bin:$PATH"` を設定してください。)*
+
+**Windows (PowerShell)**（`%LOCALAPPDATA%\elport\elport.exe` に配置）:
+
+```powershell
+$v = "0.2.0-alpha.1"
+$dir = "$env:LOCALAPPDATA\elport"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$zip = "$env:TEMP\elport.zip"
+Invoke-WebRequest -UseBasicParsing "https://github.com/youthesame/elport/releases/download/v$v/elport_${v}_windows_amd64.zip" -OutFile $zip
+Expand-Archive -Force $zip $dir
+# 初回のみユーザー PATH に追加（未登録の場合）:
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path","User") + ";$dir", "User")
+```
+
+**Go 1.26 以上がある場合**:
 
 ```sh
 go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1

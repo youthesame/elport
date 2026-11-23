@@ -7,12 +7,35 @@ along with every figure and data file the body references, to eLabFTW entities. 
 
 ## Install
 
-`elport` ships as a single static binary (`CGO_ENABLED=0`, no runtime dependencies) for macOS, Linux, and Windows.
+`elport` is a single static binary (no Python or other runtime needed). Download from [GitHub Releases](https://github.com/youthesame/elport/releases), or copy-paste for your OS:
 
-Download the archive for your platform from [GitHub Releases](https://github.com/youthesame/elport/releases), verify
-against `checksums.txt`, and place `elport` (or `elport.exe`) on your `PATH`.
+**macOS / Linux** (installs to `~/.local/bin/elport`):
 
-Or build from source with Go 1.26+:
+```sh
+V=0.2.0-alpha.1
+OS=$(uname -s | tr A-Z a-z)
+ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+mkdir -p ~/.local/bin
+curl -fsSL "https://github.com/youthesame/elport/releases/download/v${V}/elport_${V}_${OS}_${ARCH}.tar.gz" \
+  | tar -xz -C ~/.local/bin elport
+```
+
+*(Ensure `~/.local/bin` is on your `PATH`, e.g. `export PATH="$HOME/.local/bin:$PATH"`.)*
+
+**Windows (PowerShell)** (installs to `%LOCALAPPDATA%\elport\elport.exe`):
+
+```powershell
+$v = "0.2.0-alpha.1"
+$dir = "$env:LOCALAPPDATA\elport"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$zip = "$env:TEMP\elport.zip"
+Invoke-WebRequest -UseBasicParsing "https://github.com/youthesame/elport/releases/download/v$v/elport_${v}_windows_amd64.zip" -OutFile $zip
+Expand-Archive -Force $zip $dir
+# Add $dir to your user PATH once if not already present:
+[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path","User") + ";$dir", "User")
+```
+
+**With Go 1.26+**:
 
 ```sh
 go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1
