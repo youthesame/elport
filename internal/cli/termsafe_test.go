@@ -22,7 +22,8 @@ func TestSanitizeTerminal(t *testing.T) {
 		{"bare ESC is shown", "x\x1b", "x^["},
 		{"NUL, backspace, and DEL are shown", "a\x00b\x08c\x7f", "a^@b^Hc^?"},
 		{"C1 CSI is replaced", "a\u009b2Jb", "a�2Jb"},
-		{"invalid UTF-8 passes", "a\xffb", "a\xffb"},
+		{"raw C1 CSI byte is replaced", "a\x9b2Jb", "a�2Jb"},
+		{"invalid UTF-8 is replaced", "a\xffb", "a�b"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

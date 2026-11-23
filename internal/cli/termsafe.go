@@ -3,6 +3,7 @@ package cli
 import (
 	"io"
 	"os"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -54,12 +55,13 @@ func sgrEnd(p []byte, i int) int {
 func sanitizeTerminal(p []byte) []byte {
 	out := make([]byte, 0, len(p))
 	for i := 0; i < len(p); {
-		c := p[i]
 		if end := sgrEnd(p, i); end > 0 {
 			out = append(out, p[i:end]...)
 			i = end
 			continue
 		}
+		c := p[i]
+		r, size := utf8.DecodeRune(p[i:])
 		switch {
 		case c == '\n' || c == '\t' || (c == '\r' && i+1 < len(p) && p[i+1] == '\n'):
 			out = append(out, c)
@@ -67,13 +69,12 @@ func sanitizeTerminal(p []byte) []byte {
 			out = append(out, '^', c^0x40)
 		case c == 0x7f:
 			out = append(out, '^', '?')
-		case c == 0xc2 && i+1 < len(p) && p[i+1] >= 0x80 && p[i+1] <= 0x9f:
-			out = append(out, "�"...)
-			i++
+		case (r >= 0x80 && r <= 0x9f) || (r == utf8.RuneError && size == 1):
+			out = utf8.AppendRune(out, utf8.RuneError)
 		default:
-			out = append(out, c)
+			out = append(out, p[i:i+size]...)
 		}
-		i++
+		i += size
 	}
 	return out
 }
