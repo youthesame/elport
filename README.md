@@ -15,7 +15,7 @@ against `checksums.txt`, and place `elport` (or `elport.exe`) on your `PATH`.
 Or build from source with Go 1.26+:
 
 ```sh
-go install github.com/youthesame/elport/cmd/elport@latest
+go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1
 ```
 
 ### Upgrading from Python `v0.1.x`

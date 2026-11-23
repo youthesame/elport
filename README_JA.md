@@ -15,7 +15,7 @@
 Go 1.26 以上があればソースから直接ビルドもできます:
 
 ```sh
-go install github.com/youthesame/elport/cmd/elport@latest
+go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1
 ```
 
 ### Python 版 `v0.1.x` からのアップグレード

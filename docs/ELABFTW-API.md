@@ -7,7 +7,7 @@
 - **Nature**: a living reference. It records **observations of the external world that is eLabFTW**. Re-acquiring
   these facts requires hitting a live server (expensive), so they are kept as settled findings. **Update it only
   when the demo's version changes** (all live checks run on demo.elabftw.net only; no other instance is used).
-- **What it is not**: not elport's own design rationale (that is [DESIGN.md](DESIGN.md)); not the behavioral contract
+- **What it is not**: not elport's own design rationale (preserved in [DESIGN.md on the `python` branch](https://github.com/youthesame/elport/blob/python/docs/DESIGN.md)); not the behavioral contract
   (that is the **tests**). It holds only "how eLabFTW actually behaves."
 - **Observation environment**: unless noted, "measured" means confirmed on **demo.elabftw.net 5.6.12
   (2026-08-07..08)**. Base URL is `{base_url}/api/v2`. **Each fact names the demo version it was measured on**

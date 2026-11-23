@@ -63,7 +63,7 @@ Keep features **thin** (YAGNI): single engine, markdown-native, explicit-and-sim
   even with `--force` and re-checks before `PATCH`; `internal/sync.RefuseHTML` blocks non-empty HTML
   entities in `push`, `pull`, and `clone`.
 - **Secret isolation:** `internal/config.APIKey` redacts all formatting; config/state live under
-  `<home>/.config/elport/` with mode `0600` on all OSes.
+  `<home>/.config/elport/` on all OSes (mode `0600` on Unix).
 
 ## Testing and verification
 
