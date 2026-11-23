@@ -29,7 +29,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.version]
 source = "vcs"
-tag-pattern = "^v(?P<version>0\\.1\\.[0-9]+)$"
+tag-pattern = "^v(?P<version>0\\.1\\.(?:0|[1-9][0-9]*))$"
 
 [tool.hatch.version.raw-options]
 git_describe_command = [
@@ -42,7 +42,9 @@ git_describe_command = [
   "--match",
   "v0.1.[0-9]*",
   "--exclude",
-  "*-*",
+  "v0.1.*[!0-9]*",
+  "--exclude",
+  "v0.1.0[0-9]*",
 ]
 
 [project.optional-dependencies]

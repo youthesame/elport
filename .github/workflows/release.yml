@@ -24,8 +24,8 @@ jobs:
             echo "Expected a tag ref, got: $REF_TYPE" >&2
             exit 1
           }
-          printf '%s\n' "$TAG_NAME" | grep -Eq '^v0\.1\.[0-9]+$' || {
-            echo "Tag must match v0.1.<patch>: $TAG_NAME" >&2
+          printf '%s\n' "$TAG_NAME" | grep -Eq '^v0\.1\.(0|[1-9][0-9]*)$' || {
+            echo "Tag must match v0.1.<patch> without leading zeros: $TAG_NAME" >&2
             exit 1
           }
           git fetch --no-tags origin +refs/heads/python:refs/remotes/origin/python
