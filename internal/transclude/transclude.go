@@ -294,7 +294,7 @@ func candidate(docDir, value string, ignore []IgnoreLayer, dirCache map[string][
 	if Ignored(relPosix, ignore) || Ignored(onDisk, ignore) {
 		return "", "", ""
 	}
-	return p, "", fragment
+	return filepath.Join(root, filepath.FromSlash(onDisk)), "", fragment
 }
 
 func linkedDocument(docDir, value string) (string, string, bool, error) {

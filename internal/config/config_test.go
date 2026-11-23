@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -188,12 +189,14 @@ func TestConfigLoginEnforces0600EvenOver0644File(t *testing.T) {
 	if err := config.Login("lab", "https://elab.example.test", config.NewAPIKey("secret"), brokenKR, &warn); err != nil {
 		t.Fatalf("Login: %v", err)
 	}
-	info, err := os.Stat(cfgPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("config.toml perm = %o, want 0600", info.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Fatalf("config.toml perm = %o, want 0600", info.Mode().Perm())
+		}
 	}
 }
 
