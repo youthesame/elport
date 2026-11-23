@@ -6,6 +6,8 @@ import (
 	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -164,5 +166,110 @@ func TestRunLoginRejectsEOFAndCanceledContext(t *testing.T) {
 	errBuf.Reset()
 	if code := cli.RunWithEnv(canceled, []string{"login", "lab"}, strings.NewReader("https://elab.example.test\nsecret\n"), &out, &errBuf, env); code != cli.ExitError {
 		t.Fatalf("login with canceled ctx should exit 1, got %d", code)
+	}
+}
+
+func TestRunViewCommentsStatusDiffAndFetchEndToEnd(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("ELABFTW_BASE_URL", "")
+	t.Setenv("ELABFTW_API_KEY", "")
+
+	var postedComment string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/42":
+			_, _ = w.Write([]byte(`{"id":42,"content_type":2,"body":"remote line\n","uploads":[{"id":9,"real_name":"a.csv","long_name":"x/a.csv","storage":1}],"steps":[{"ordering":1,"finished":1,"body":"Done step"}]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/42/uploads":
+			_, _ = w.Write([]byte(`[{"id":9,"real_name":"a.csv","long_name":"x/a.csv","storage":1}]`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/42/uploads/9":
+			_, _ = w.Write([]byte("col\n1\n"))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/42/comments":
+			_, _ = w.Write([]byte(`[{"fullname":"Ada","created_at":"2026-11-23","modified_at":"2026-11-23","comment":"Hi"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/experiments/42/comments":
+			postedComment = "ok"
+			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/info":
+			_, _ = w.Write([]byte(`{"elabftw_version":"6.0.9"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	kr := &memKeyring{}
+	work := t.TempDir()
+	env := cli.Env{
+		WorkDir:    work,
+		Keyring:    kr,
+		ClientOpts: []client.Option{client.WithRootCAs(pool)},
+	}
+
+	var out, errBuf bytes.Buffer
+	if code := cli.RunWithEnv(context.Background(), []string{"login", "lab"}, strings.NewReader(srv.URL+"\n1-key\n"), &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("login: %d %s", code, errBuf.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	entityURL := srv.URL + "/experiments.php?mode=view&id=42"
+	if code := cli.RunWithEnv(context.Background(), []string{"view", entityURL}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("view URL: %d %s", code, errBuf.String())
+	}
+	if out.String() != "remote line\n" || !strings.Contains(errBuf.String(), "step [x] Done step") {
+		t.Fatalf("view output mismatch: stdout=%q stderr=%q", out.String(), errBuf.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"comments", "42"}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("comments 42: %d %s", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "Ada 2026-11-23\nHi") {
+		t.Fatalf("comments output: %q", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"comment", "42", "hello"}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("comment 42: %d %s", code, errBuf.String())
+	}
+	if postedComment != "ok" {
+		t.Fatal("comment was not posted")
+	}
+
+	docDir := filepath.Join(work, "exp42")
+	_ = os.MkdirAll(docDir, 0o755)
+	docPath := filepath.Join(docDir, "report.md")
+	_ = os.WriteFile(docPath, []byte("---\nid: 42\nentity: experiments\nprofile: lab\n---\n\nlocal line\n"), 0o644)
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"status", docPath}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("status: %d %s", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "mode: markdown") {
+		t.Fatalf("status output: %q", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"diff", docPath}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("diff: %d %s", code, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "-remote line") || !strings.Contains(out.String(), "+local line") {
+		t.Fatalf("diff output: %q", out.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"fetch", docDir}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("batch fetch: %d %s", code, errBuf.String())
+	}
+	if got, err := os.ReadFile(filepath.Join(docDir, "a.csv")); err != nil || string(got) != "col\n1\n" {
+		t.Fatalf("batch fetch did not save a.csv: (%q, %v)", string(got), err)
 	}
 }

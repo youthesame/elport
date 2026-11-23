@@ -2,16 +2,20 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -19,7 +23,10 @@ import (
 	"github.com/youthesame/elport/internal/browse"
 	"github.com/youthesame/elport/internal/client"
 	"github.com/youthesame/elport/internal/config"
+	"github.com/youthesame/elport/internal/frontmatter"
 	"github.com/youthesame/elport/internal/help"
+	"github.com/youthesame/elport/internal/sync"
+	"github.com/youthesame/elport/internal/transclude"
 )
 
 type Env struct {
@@ -243,8 +250,8 @@ func runProfile(cmd *Command, stdout, stderr io.Writer, env Env) error {
 	return nil
 }
 
-func resolveClient(data *config.Data, profile string, stderr io.Writer, env Env) (string, *client.Client, error) {
-	name, baseURL, apiKey, verifySSL, err := config.Resolve(data, profile, "", env.keyring(), stderr)
+func resolveClient(data *config.Data, profile, metaProfile string, stderr io.Writer, env Env) (string, *client.Client, error) {
+	name, baseURL, apiKey, verifySSL, err := config.Resolve(data, profile, metaProfile, env.keyring(), stderr)
 	if err != nil {
 		return "", nil, err
 	}
@@ -275,11 +282,319 @@ func browseTarget(cmd *Command, stderr io.Writer, env Env) (string, *client.Clie
 	if !slices.Contains(entities, entity) {
 		return "", nil, errors.New("entity must be one of: experiments, items")
 	}
-	_, c, err := resolveClient(data, cmd.Profile, stderr, env)
+	_, c, err := resolveClient(data, cmd.Profile, "", stderr, env)
 	if err != nil {
 		return "", nil, err
 	}
 	return entity, c, nil
+}
+
+func isASCIIAllDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func isRemoteTarget(text string) bool {
+	if isASCIIAllDigits(text) || strings.Contains(text, "://") {
+		return true
+	}
+	trimmed := strings.TrimLeft(text, " \t\r\n")
+	low := strings.ToLower(trimmed)
+	return strings.HasPrefix(trimmed, "//") || strings.HasPrefix(low, "http:") || strings.HasPrefix(low, "https:")
+}
+
+func isExistingFile(text string) (bool, error) {
+	info, err := os.Stat(text)
+	if err == nil {
+		return info.Mode().IsRegular(), nil
+	}
+	if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) || errors.Is(err, syscall.ENAMETOOLONG) || errors.Is(err, syscall.EINVAL) {
+		return false, nil
+	}
+	return false, errors.New("cannot inspect local target path")
+}
+
+func parseRemoteTarget(raw, explicitEntity, defaultEntity string, c *client.Client) (string, int, error) {
+	if strings.Contains(raw, "://") {
+		entity, eid, err := sync.ParseEntityURL(raw, c.Root())
+		if err != nil {
+			return "", 0, err
+		}
+		if explicitEntity != "" && explicitEntity != entity {
+			return "", 0, fmt.Errorf("entity mismatch between URL (%s) and --entity (%s)", entity, explicitEntity)
+		}
+		return entity, eid, nil
+	}
+	num, err := strconv.Atoi(raw)
+	if err != nil {
+		return "", 0, errors.New("invalid entity id or URL")
+	}
+	eid, err := frontmatter.ValidateID(num)
+	if err != nil {
+		return "", 0, err
+	}
+	entity := explicitEntity
+	if entity == "" {
+		entity = defaultEntity
+	}
+	return entity, eid, nil
+}
+
+func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env) (*config.Data, *client.Client, error) {
+	wd, err := env.workDir()
+	if err != nil {
+		return nil, nil, err
+	}
+	data, err := config.Load(wd, filepath.Dir(docPath), stderr)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := os.Stat(docPath)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("document not found: %s", docPath)
+	}
+	doc, err := sync.ReadDocument(docPath, data)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !slices.Contains(entities, doc.Entity) {
+		return nil, nil, errors.New("entity must be one of: experiments, items")
+	}
+	metaEntity, _ := doc.Meta.Values["entity"].(string)
+	if cliEntity != "" && metaEntity != "" && cliEntity != metaEntity {
+		return nil, nil, errors.New("entity mismatch between frontmatter and CLI")
+	}
+	if cliEntity != "" && metaEntity == "" {
+		data.Raw["entity"] = cliEntity
+	}
+	metaProf, _ := doc.Meta.Values["profile"].(string)
+	if !doc.HasID {
+		return data, nil, nil
+	}
+	_, c, err := resolveClient(data, cliProfile, metaProf, stderr, env)
+	if err != nil {
+		return nil, nil, err
+	}
+	return data, c, nil
+}
+
+func runView(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) error {
+	defaultEntity, c, err := browseTarget(cmd, stderr, env)
+	if err != nil {
+		return err
+	}
+	entity, eid, err := parseRemoteTarget(cmd.ID, cmd.Entity, defaultEntity, c)
+	if err != nil {
+		return err
+	}
+	return sync.View(ctx, c, entity, eid, c.Root(), cmd.Output, stdout, stderr)
+}
+
+func runComments(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) error {
+	remote := isRemoteTarget(cmd.Doc)
+	if remote && cmd.Name == "comment" {
+		exists, err := isExistingFile(cmd.Doc)
+		if err != nil {
+			return err
+		}
+		if exists {
+			remote = false
+		}
+	}
+	if remote {
+		if cmd.Name == "comment" && strings.TrimSpace(cmd.Text) == "" {
+			return errors.New("comment text is empty")
+		}
+		defaultEntity, c, err := browseTarget(cmd, stderr, env)
+		if err != nil {
+			return err
+		}
+		entity, eid, err := parseRemoteTarget(cmd.Doc, cmd.Entity, defaultEntity, c)
+		if err != nil {
+			return err
+		}
+		if cmd.Name == "comments" {
+			return sync.ShowComments(ctx, c, entity, eid, stdout)
+		}
+		return sync.PostComment(ctx, c, entity, eid, cmd.Text, stdout)
+	}
+	data, c, err := docTarget(cmd.Doc, cmd.Profile, cmd.Entity, stderr, env)
+	if err != nil {
+		return err
+	}
+	if cmd.Name == "comments" {
+		return sync.Comments(ctx, cmd.Doc, c, data, stdout)
+	}
+	return sync.Comment(ctx, cmd.Doc, c, data, cmd.Text, stdout)
+}
+
+func discoverDocuments(root string) ([]string, int) {
+	var found []string
+	skipped := 0
+	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil || rel == "." {
+			return nil
+		}
+		for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
+			if strings.HasPrefix(part, ".") {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+		if d.IsDir() {
+			return nil
+		}
+		name := d.Name()
+		if !strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".remote.md") || strings.HasSuffix(name, ".base.md") {
+			return nil
+		}
+		if _, ok := frontmatter.DocumentMeta(p); !ok {
+			skipped++
+			return nil
+		}
+		found = append(found, p)
+		return nil
+	})
+	sort.Strings(found)
+	return found, skipped
+}
+
+func expandDocPaths(paths []string) ([]string, int) {
+	var found []string
+	skipped := 0
+	seen := map[string]bool{}
+	for _, p := range paths {
+		var inside []string
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			var passed int
+			inside, passed = discoverDocuments(p)
+			skipped += passed
+		} else {
+			inside = []string{p}
+		}
+		for _, doc := range inside {
+			res := transclude.ResolveNonStrict(doc)
+			if !seen[res] {
+				seen[res] = true
+				found = append(found, doc)
+			}
+		}
+	}
+	return found, skipped
+}
+
+func docIdent(p string) string {
+	meta, ok := frontmatter.DocumentMeta(p)
+	if !ok {
+		return "experiments/-"
+	}
+	ent, _ := meta.Values["entity"].(string)
+	if ent == "" {
+		ent = "experiments"
+	}
+	return fmt.Sprintf("%s/%v", ent, meta.Values["id"])
+}
+
+func runDocOne(ctx context.Context, cmd *Command, docPath string, stdout, stderr io.Writer, env Env) (string, bool, error) {
+	data, c, err := docTarget(docPath, cmd.Profile, cmd.Entity, stderr, env)
+	if err != nil {
+		return "", false, err
+	}
+	switch cmd.Name {
+	case "status":
+		s, err := sync.Status(ctx, docPath, c, data, cmd.Profile, stdout, stderr)
+		return s, true, err
+	case "diff":
+		err := sync.Diff(ctx, docPath, c, data, cmd.Profile, cmd.Base, stdout, stderr)
+		return "", false, err
+	case "fetch":
+		s, err := sync.Fetch(ctx, docPath, c, data, cmd.Profile, stdout, stderr)
+		return s, true, err
+	default:
+		return "", false, fmt.Errorf("%s: not yet implemented in Go build", cmd.Name)
+	}
+}
+
+func runDocCommand(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) int {
+	if len(cmd.Docs) == 1 {
+		if info, err := os.Stat(cmd.Docs[0]); err != nil || !info.IsDir() {
+			if _, _, err := runDocOne(ctx, cmd, cmd.Docs[0], stdout, stderr, env); err != nil {
+				_, _ = fmt.Fprintln(stderr, err.Error())
+				return ExitError
+			}
+			return ExitOK
+		}
+	}
+	if cmd.Force {
+		_, _ = fmt.Fprintln(stderr, "--force works on one document at a time")
+		return ExitError
+	}
+	docs, skipped := expandDocPaths(cmd.Docs)
+	if len(docs) == 0 {
+		_, _ = fmt.Fprintf(stderr, "no elport documents under %s (%d skipped)\n", strings.Join(cmd.Docs, ", "), skipped)
+		return ExitError
+	}
+	mark := "✓"
+	if cmd.Name == "status" {
+		mark = "*"
+	}
+	counts := map[string]int{}
+	for _, p := range docs {
+		var capOut, capErr bytes.Buffer
+		summary, hasSummary, err := runDocOne(ctx, cmd, p, &capOut, &capErr, env)
+		if err != nil {
+			counts["✗"]++
+			_, _ = fmt.Fprintf(stdout, "✗ %s  %s  %s\n", p, docIdent(p), err.Error())
+		} else if hasSummary {
+			m := mark
+			if summary == sync.UpToDate {
+				m = "·"
+			}
+			counts[m]++
+			_, _ = fmt.Fprintf(stdout, "%s %s  %s  %s\n", m, p, docIdent(p), summary)
+		}
+		for _, line := range strings.Split(strings.TrimSuffix(capErr.String(), "\n"), "\n") {
+			if line != "" {
+				_, _ = fmt.Fprintf(stderr, "    %s\n", line)
+			}
+		}
+		if capOut.Len() > 0 && (cmd.Name == "diff" || cmd.DryRun) {
+			_, _ = fmt.Fprintf(stdout, "=== %s\n", p)
+			_, _ = io.WriteString(stdout, capOut.String())
+		}
+	}
+	var tally []string
+	for _, item := range []struct {
+		m string
+		w string
+	}{{"✓", "done"}, {"·", sync.UpToDate}, {"*", "to sync"}, {"✗", "failed"}} {
+		if counts[item.m] > 0 {
+			tally = append(tally, fmt.Sprintf("%d %s", counts[item.m], item.w))
+		}
+	}
+	if skipped > 0 {
+		tally = append(tally, fmt.Sprintf("%d skipped", skipped))
+	}
+	if len(tally) > 0 {
+		_, _ = fmt.Fprintln(stdout, strings.Join(tally, ", "))
+	}
+	if counts["✗"] > 0 {
+		return ExitError
+	}
+	return ExitOK
 }
 
 func strVal(m map[string]any, key string) string {
@@ -355,7 +670,7 @@ func runWhoami(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env 
 	if err != nil {
 		return err
 	}
-	profileName, c, err := resolveClient(data, cmd.Profile, stderr, env)
+	profileName, c, err := resolveClient(data, cmd.Profile, "", stderr, env)
 	if err != nil {
 		return err
 	}
@@ -565,6 +880,12 @@ func RunWithEnv(ctx context.Context, args []string, stdin io.Reader, stdout, std
 		runErr = runList(ctx, cmd, stdout, stderr, env)
 	case "activity":
 		runErr = runActivity(ctx, cmd, stdout, stderr, env)
+	case "view":
+		runErr = runView(ctx, cmd, stdout, stderr, env)
+	case "comments", "comment":
+		runErr = runComments(ctx, cmd, stdout, stderr, env)
+	case "status", "diff", "fetch":
+		return runDocCommand(ctx, cmd, stdout, stderr, env)
 	case "clone":
 		if cmd.HasAll && cmd.ID != "" {
 			runErr = errors.New("clone: pass either an entity id or --all ROOT, not both")
