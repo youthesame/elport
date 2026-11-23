@@ -1,0 +1,557 @@
+{
+  "parse": [
+    {
+      "name": "plain_body",
+      "input": "Body\n",
+      "meta": {},
+      "key_order": [],
+      "body": "Body\n"
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "meta": {},
+      "key_order": [],
+      "body": ""
+    },
+    {
+      "name": "non_mapping_text",
+      "input": "---\nIntroduction\n---\nBody\n",
+      "meta": {},
+      "key_order": [],
+      "body": "---\nIntroduction\n---\nBody\n"
+    },
+    {
+      "name": "non_mapping_list",
+      "input": "---\n- one\n- two\n---\nBody\n",
+      "meta": {},
+      "key_order": [],
+      "body": "---\n- one\n- two\n---\nBody\n"
+    },
+    {
+      "name": "non_mapping_null",
+      "input": "---\nnull\n---\nBody\n",
+      "meta": {},
+      "key_order": [],
+      "body": "---\nnull\n---\nBody\n"
+    },
+    {
+      "name": "four_dashes",
+      "input": "----\nBody\n",
+      "meta": {},
+      "key_order": [],
+      "body": "----\nBody\n"
+    },
+    {
+      "name": "no_newline_after_opener",
+      "input": "---not-frontmatter\nBody\n",
+      "meta": {},
+      "key_order": [],
+      "body": "---not-frontmatter\nBody\n"
+    },
+    {
+      "name": "unclosed_opener",
+      "input": "---\nid: 5\nBody\n",
+      "meta": {},
+      "key_order": [],
+      "body": "---\nid: 5\nBody\n"
+    },
+    {
+      "name": "bom_plain",
+      "input": "﻿Body\n",
+      "meta": {},
+      "key_order": [],
+      "body": "﻿Body\n"
+    },
+    {
+      "name": "bom_crlf_preserve_body_bom",
+      "input": "﻿---\r\nid: 5\r\n---\r\n\r\n﻿Body\r\n",
+      "meta": {
+        "id": 5
+      },
+      "key_order": [
+        "id"
+      ],
+      "body": "﻿Body\r\n"
+    },
+    {
+      "name": "crlf_full",
+      "input": "---\r\nid: 42\r\ntitle: Hello\r\n---\r\n\r\nLine 1\r\nLine 2\r\n",
+      "meta": {
+        "id": 42,
+        "title": "Hello"
+      },
+      "key_order": [
+        "id",
+        "title"
+      ],
+      "body": "Line 1\r\nLine 2\r\n"
+    },
+    {
+      "name": "lone_cr_after_closer",
+      "input": "---\nid: 7\n---\rBody\n",
+      "meta": {},
+      "key_order": [],
+      "body": "---\nid: 7\n---\rBody\n"
+    },
+    {
+      "name": "trailing_spaces_on_delims",
+      "input": "---   \t\nid: 7\n--- \t \n\nBody\n",
+      "meta": {
+        "id": 7
+      },
+      "key_order": [
+        "id"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "all_allowed_keys",
+      "input": "---\nid: 42\nentity: experiments\ntitle: 実験記録 🧪\ntags: [one, 二]\ncategory: 3\nstatus: 2\nprofile: lab\nread: team\nwrite: owner\nattachments: [raw.csv, 123]\n---\n\nBody\n",
+      "meta": {
+        "id": 42,
+        "entity": "experiments",
+        "title": "実験記録 🧪",
+        "tags": [
+          "one",
+          "二"
+        ],
+        "category": 3,
+        "status": 2,
+        "profile": "lab",
+        "read": "team",
+        "write": "owner",
+        "attachments": [
+          "raw.csv",
+          "123"
+        ]
+      },
+      "key_order": [
+        "id",
+        "entity",
+        "title",
+        "tags",
+        "category",
+        "status",
+        "profile",
+        "read",
+        "write",
+        "attachments"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "category_status_strings",
+      "input": "---\nid: 1\ncategory: Assay\nstatus: Running\n---\nBody\n",
+      "meta": {
+        "id": 1,
+        "category": "Assay",
+        "status": "Running"
+      },
+      "key_order": [
+        "id",
+        "category",
+        "status"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "scalar_tag_str",
+      "input": "---\ntags: PCR\n---\nBody\n",
+      "meta": {
+        "tags": [
+          "PCR"
+        ]
+      },
+      "key_order": [
+        "tags"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "scalar_tag_int",
+      "input": "---\ntags: 42\n---\nBody\n",
+      "meta": {
+        "tags": [
+          42
+        ]
+      },
+      "key_order": [
+        "tags"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "scalar_tag_bool",
+      "input": "---\ntags: true\n---\nBody\n",
+      "meta": {
+        "tags": [
+          true
+        ]
+      },
+      "key_order": [
+        "tags"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "tags_null",
+      "input": "---\ntags: null\n---\nBody\n",
+      "meta": {
+        "tags": []
+      },
+      "key_order": [
+        "tags"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "attachments_null",
+      "input": "---\nattachments: null\n---\nBody\n",
+      "meta": {
+        "attachments": []
+      },
+      "key_order": [
+        "attachments"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "attachments_scalar_str",
+      "input": "---\nattachments: data.csv\n---\nBody\n",
+      "meta": {
+        "attachments": [
+          "data.csv"
+        ]
+      },
+      "key_order": [
+        "attachments"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "attachments_scalar_int",
+      "input": "---\nattachments: 100\n---\nBody\n",
+      "meta": {
+        "attachments": [
+          "100"
+        ]
+      },
+      "key_order": [
+        "attachments"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "title_int_coerced_to_str",
+      "input": "---\ntitle: 2026\nprofile: 1\n---\nBody\n",
+      "meta": {
+        "title": "2026",
+        "profile": "1"
+      },
+      "key_order": [
+        "title",
+        "profile"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "yaml_1_1_yes_no_on_off",
+      "input": "---\ntitle: yes\nprofile: on\ntags: [no, off, 017, ~]\n---\nBody\n",
+      "meta": {
+        "title": "True",
+        "profile": "True",
+        "tags": [
+          false,
+          false,
+          15,
+          null
+        ]
+      },
+      "key_order": [
+        "title",
+        "profile",
+        "tags"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "preserve_key_order",
+      "input": "---\nprofile: p\ntitle: T\nid: 9\nentity: items\n---\nBody\n",
+      "meta": {
+        "profile": "p",
+        "title": "T",
+        "id": 9,
+        "entity": "items"
+      },
+      "key_order": [
+        "profile",
+        "title",
+        "id",
+        "entity"
+      ],
+      "body": "Body\n"
+    },
+    {
+      "name": "empty_body",
+      "input": "---\ntitle: Test\n---\n\n",
+      "meta": {
+        "title": "Test"
+      },
+      "key_order": [
+        "title"
+      ],
+      "body": ""
+    },
+    {
+      "name": "leading_blank_lines_body",
+      "input": "---\ntitle: Test\n---\n\n\n\nBody\n",
+      "meta": {
+        "title": "Test"
+      },
+      "key_order": [
+        "title"
+      ],
+      "body": "\n\nBody\n"
+    },
+    {
+      "name": "error_unknown_key",
+      "input": "---\ncatetory: x\n---\nBody\n",
+      "error": "unknown front matter key(s): catetory"
+    },
+    {
+      "name": "error_id_zero",
+      "input": "---\nid: 0\n---\nBody\n",
+      "error": "id must be a positive integer"
+    },
+    {
+      "name": "error_id_negative",
+      "input": "---\nid: -1\n---\nBody\n",
+      "error": "id must be a positive integer"
+    },
+    {
+      "name": "error_id_bool",
+      "input": "---\nid: true\n---\nBody\n",
+      "error": "id must be a positive integer"
+    },
+    {
+      "name": "error_id_str",
+      "input": "---\nid: '42'\n---\nBody\n",
+      "error": "id must be a positive integer"
+    },
+    {
+      "name": "error_id_float",
+      "input": "---\nid: 5.0\n---\nBody\n",
+      "error": "id must be a positive integer"
+    },
+    {
+      "name": "error_duplicate_key",
+      "input": "---\nid: 1\nid: 2\n---\nBody\n",
+      "error": "invalid frontmatter YAML: found duplicate key 'id'\n  in \"<unicode string>\", line 2, column 1:\n    id: 2\n    ^"
+    },
+    {
+      "name": "error_yaml_alias",
+      "input": "---\ntags: &a [x]\ntitle: *a\n---\nBody\n",
+      "error": "invalid frontmatter YAML: found an alias\n  in \"<unicode string>\", line 2, column 8:\n    title: *a\n           ^"
+    },
+    {
+      "name": "error_deep_nesting",
+      "input": "---\ntitle: [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]\n---\nBody\n",
+      "error": "invalid frontmatter YAML: maximum recursion depth exceeded"
+    },
+    {
+      "name": "error_invalid_read",
+      "input": "---\nread: everyone\n---\nBody\n",
+      "error": "read must be one of: owner, owner+admin, team, account, public"
+    },
+    {
+      "name": "error_invalid_write",
+      "input": "---\nwrite: 10\n---\nBody\n",
+      "error": "write must be one of: owner, owner+admin, team, account, public"
+    },
+    {
+      "name": "error_tags_mapping",
+      "input": "---\ntags:\n  assay: PCR\n---\nBody\n",
+      "error": "tags must be a list or scalar"
+    },
+    {
+      "name": "error_attachments_bool",
+      "input": "---\nattachments: [true]\n---\nBody\n",
+      "error": "attachments must be a list of paths"
+    },
+    {
+      "name": "error_attachments_mapping",
+      "input": "---\nattachments: [{a: 1}]\n---\nBody\n",
+      "error": "attachments must be a list of paths"
+    }
+  ],
+  "render": [
+    {
+      "name": "basic",
+      "meta": {
+        "title": "Test",
+        "tags": [
+          "one"
+        ]
+      },
+      "key_order": [
+        "title",
+        "tags"
+      ],
+      "body": "Body\n",
+      "output": "---\ntitle: Test\ntags:\n- one\n---\n\nBody\n"
+    },
+    {
+      "name": "empty_body",
+      "meta": {
+        "title": "Test"
+      },
+      "key_order": [
+        "title"
+      ],
+      "body": "",
+      "output": "---\ntitle: Test\n---\n\n"
+    },
+    {
+      "name": "leading_newlines",
+      "meta": {
+        "title": "Test"
+      },
+      "key_order": [
+        "title"
+      ],
+      "body": "\n\nBody\n",
+      "output": "---\ntitle: Test\n---\n\n\n\nBody\n"
+    },
+    {
+      "name": "key_order_and_unicode",
+      "meta": {
+        "profile": "lab",
+        "id": 42,
+        "entity": "experiments",
+        "title": "温度測定: 300K #1",
+        "tags": [
+          "yes",
+          "on",
+          "日本語",
+          "017"
+        ],
+        "category": 3,
+        "status": "Running",
+        "read": "team",
+        "write": "owner",
+        "attachments": [
+          "raw data.csv"
+        ]
+      },
+      "key_order": [
+        "profile",
+        "id",
+        "entity",
+        "title",
+        "tags",
+        "category",
+        "status",
+        "read",
+        "write",
+        "attachments"
+      ],
+      "body": "結果\n",
+      "output": "---\nprofile: lab\nid: 42\nentity: experiments\ntitle: '温度測定: 300K #1'\ntags:\n- 'yes'\n- 'on'\n- 日本語\n- '017'\ncategory: 3\nstatus: Running\nread: team\nwrite: owner\nattachments:\n- raw data.csv\n---\n\n結果\n"
+    },
+    {
+      "name": "quoting_traps",
+      "meta": {
+        "title": "yes",
+        "profile": "foo: bar"
+      },
+      "key_order": [
+        "title",
+        "profile"
+      ],
+      "body": "x\n",
+      "output": "---\ntitle: 'yes'\nprofile: 'foo: bar'\n---\n\nx\n"
+    }
+  ],
+  "text_meta": [
+    {
+      "name": "valid_elport_doc",
+      "input": "---\nid: 5\nprofile: lab\ntitle: T\n---\nBody\n",
+      "meta": {
+        "id": 5,
+        "profile": "lab",
+        "title": "T"
+      }
+    },
+    {
+      "name": "valid_crlf",
+      "input": "---\r\nid: 5\r\nprofile: lab\r\n---\r\nBody\r\n",
+      "meta": {
+        "id": 5,
+        "profile": "lab"
+      }
+    },
+    {
+      "name": "missing_profile",
+      "input": "---\nid: 5\n---\nBody\n",
+      "meta": null
+    },
+    {
+      "name": "empty_profile",
+      "input": "---\nid: 5\nprofile: ''\n---\nBody\n",
+      "meta": null
+    },
+    {
+      "name": "missing_id",
+      "input": "---\nprofile: lab\n---\nBody\n",
+      "meta": null
+    },
+    {
+      "name": "invalid_yaml",
+      "input": "---\nid: [1\n---\nBody\n",
+      "meta": null
+    }
+  ],
+  "parse_server_id": [
+    {
+      "name": "int_positive",
+      "input": 42,
+      "id": 42
+    },
+    {
+      "name": "str_positive",
+      "input": "42",
+      "id": 42
+    },
+    {
+      "name": "int_zero",
+      "input": 0,
+      "error": "server did not return a valid entity id"
+    },
+    {
+      "name": "int_negative",
+      "input": -1,
+      "error": "server did not return a valid entity id"
+    },
+    {
+      "name": "str_zero",
+      "input": "0",
+      "error": "server did not return a valid entity id"
+    },
+    {
+      "name": "str_non_digit",
+      "input": "abc",
+      "error": "server did not return a valid entity id"
+    },
+    {
+      "name": "bool_true",
+      "input": true,
+      "error": "server did not return a valid entity id"
+    },
+    {
+      "name": "none",
+      "input": null,
+      "error": "server did not return a valid entity id"
+    }
+  ]
+}

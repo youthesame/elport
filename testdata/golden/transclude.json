@@ -1,0 +1,688 @@
+{
+  "extract": [
+    {
+      "name": "md_image_and_link",
+      "input": "![plot](fig/a.png) and [data](raw.csv)\n",
+      "refs": [
+        {
+          "path": "fig/a.png",
+          "kind": "markdown",
+          "char_start": 8,
+          "char_end": 17,
+          "byte_start": 8,
+          "byte_end": 17,
+          "slice": "fig/a.png"
+        },
+        {
+          "path": "raw.csv",
+          "kind": "markdown",
+          "char_start": 30,
+          "char_end": 37,
+          "byte_start": 30,
+          "byte_end": 37,
+          "slice": "raw.csv"
+        }
+      ]
+    },
+    {
+      "name": "md_angle_with_spaces",
+      "input": "![plot](<my fig (1).png> \"Title (x)\")\n",
+      "refs": [
+        {
+          "path": "my fig (1).png",
+          "kind": "angle",
+          "char_start": 8,
+          "char_end": 24,
+          "byte_start": 8,
+          "byte_end": 24,
+          "slice": "<my fig (1).png>"
+        }
+      ]
+    },
+    {
+      "name": "md_balanced_parens",
+      "input": "[file](dir/run(1)/out(2).csv)\n",
+      "refs": [
+        {
+          "path": "dir/run(1)/out(2).csv",
+          "kind": "markdown",
+          "char_start": 7,
+          "char_end": 28,
+          "byte_start": 7,
+          "byte_end": 28,
+          "slice": "dir/run(1)/out(2).csv"
+        }
+      ]
+    },
+    {
+      "name": "md_escaped_parens_and_space",
+      "input": "[file](dir/a\\ b\\(1\\).csv)\n",
+      "refs": [
+        {
+          "path": "dir/a\\ b(1).csv",
+          "kind": "markdown",
+          "char_start": 7,
+          "char_end": 24,
+          "byte_start": 7,
+          "byte_end": 24,
+          "slice": "dir/a\\ b\\(1\\).csv"
+        }
+      ]
+    },
+    {
+      "name": "md_fragment_and_query",
+      "input": "[sec](other.md#results) [q](a.csv?v=1)\n",
+      "refs": [
+        {
+          "path": "other.md#results",
+          "kind": "markdown",
+          "char_start": 6,
+          "char_end": 22,
+          "byte_start": 6,
+          "byte_end": 22,
+          "slice": "other.md#results"
+        },
+        {
+          "path": "a.csv?v=1",
+          "kind": "markdown",
+          "char_start": 28,
+          "char_end": 37,
+          "byte_start": 28,
+          "byte_end": 37,
+          "slice": "a.csv?v=1"
+        }
+      ]
+    },
+    {
+      "name": "md_reference_def",
+      "input": "[fig1]: plot.png \"Plot\"\n[fig2]: <sp ace.png>\n",
+      "refs": []
+    },
+    {
+      "name": "html_figure_and_tags",
+      "input": "<figure><img src=\"fig.png\" width=\"80%\"><figcaption>図1</figcaption></figure>\n<a href='doc.pdf'>pdf</a> <source src=clip.mp4>\n",
+      "refs": [
+        {
+          "path": "fig.png",
+          "kind": "html",
+          "char_start": 18,
+          "char_end": 25,
+          "byte_start": 18,
+          "byte_end": 25,
+          "slice": "fig.png"
+        },
+        {
+          "path": "doc.pdf",
+          "kind": "html",
+          "char_start": 85,
+          "char_end": 92,
+          "byte_start": 87,
+          "byte_end": 94,
+          "slice": "doc.pdf"
+        },
+        {
+          "path": "clip.mp4",
+          "kind": "html",
+          "char_start": 114,
+          "char_end": 122,
+          "byte_start": 116,
+          "byte_end": 124,
+          "slice": "clip.mp4"
+        }
+      ]
+    },
+    {
+      "name": "html_comments_masked",
+      "input": "<!-- ![skip](a.png) <img src=\"b.png\"> -->\n![keep](c.png)\n",
+      "refs": [
+        {
+          "path": "c.png",
+          "kind": "markdown",
+          "char_start": 50,
+          "char_end": 55,
+          "byte_start": 50,
+          "byte_end": 55,
+          "slice": "c.png"
+        }
+      ]
+    },
+    {
+      "name": "fences_backtick_and_tilde",
+      "input": "```md\n![skip1](a.png)\n```\n~~~\n![skip2](b.png)\n~~~\n![keep](c.png)\n",
+      "refs": [
+        {
+          "path": "c.png",
+          "kind": "markdown",
+          "char_start": 58,
+          "char_end": 63,
+          "byte_start": 58,
+          "byte_end": 63,
+          "slice": "c.png"
+        }
+      ]
+    },
+    {
+      "name": "nested_fence_and_blockquote",
+      "input": "> ```\n> ![skip](a.png)\n> ```\n- ~~~\n  ![skip2](b.png)\n  ~~~\n![keep](c.png)\n",
+      "refs": [
+        {
+          "path": "c.png",
+          "kind": "markdown",
+          "char_start": 67,
+          "char_end": 72,
+          "byte_start": 67,
+          "byte_end": 72,
+          "slice": "c.png"
+        }
+      ]
+    },
+    {
+      "name": "unclosed_fence",
+      "input": "```\n![skip](a.png)\n![also_skip](b.png)\n",
+      "refs": []
+    },
+    {
+      "name": "inline_code_multi_backtick",
+      "input": "``![skip](a.png)`` and `![skip2](b.png)` and ![keep](c.png)\n",
+      "refs": [
+        {
+          "path": "c.png",
+          "kind": "markdown",
+          "char_start": 53,
+          "char_end": 58,
+          "byte_start": 53,
+          "byte_end": 58,
+          "slice": "c.png"
+        }
+      ]
+    },
+    {
+      "name": "raw_text_elements_masked",
+      "input": "<pre><img src=\"skip.png\"></pre><script>var x='<img src=\"s.png\">';</script>\n<style>a{background:url(x.png)}</style>\n<img src=\"keep.png\">\n",
+      "refs": [
+        {
+          "path": "keep.png",
+          "kind": "html",
+          "char_start": 125,
+          "char_end": 133,
+          "byte_start": 125,
+          "byte_end": 133,
+          "slice": "keep.png"
+        }
+      ]
+    },
+    {
+      "name": "angle_code_tag_not_raw_text",
+      "input": "[x](<code>) and ![keep](a.png)\n",
+      "refs": [
+        {
+          "path": "code",
+          "kind": "angle",
+          "char_start": 4,
+          "char_end": 10,
+          "byte_start": 4,
+          "byte_end": 10,
+          "slice": "<code>"
+        },
+        {
+          "path": "a.png",
+          "kind": "markdown",
+          "char_start": 24,
+          "char_end": 29,
+          "byte_start": 24,
+          "byte_end": 29,
+          "slice": "a.png"
+        }
+      ]
+    },
+    {
+      "name": "unicode_japanese_fullwidth_emoji",
+      "input": "日本語テスト　🧪 ![図表](図/グラフ_1.png) と <img src=\"データ/結果.svg\" width=\"60%\">\n",
+      "refs": [
+        {
+          "path": "図/グラフ_1.png",
+          "kind": "markdown",
+          "char_start": 15,
+          "char_end": 26,
+          "byte_start": 36,
+          "byte_end": 55,
+          "slice": "図/グラフ_1.png"
+        },
+        {
+          "path": "データ/結果.svg",
+          "kind": "html",
+          "char_start": 40,
+          "char_end": 50,
+          "byte_start": 71,
+          "byte_end": 91,
+          "slice": "データ/結果.svg"
+        }
+      ]
+    },
+    {
+      "name": "python_ascii_control_whitespace",
+      "input": "A\u001cB\u001dC\u001eD\u001fE ![img](a.png) [b](<x.png\u001c>)\n",
+      "refs": [
+        {
+          "path": "a.png",
+          "kind": "markdown",
+          "char_start": 17,
+          "char_end": 22,
+          "byte_start": 17,
+          "byte_end": 22,
+          "slice": "a.png"
+        },
+        {
+          "path": "x.png",
+          "kind": "angle",
+          "char_start": 28,
+          "char_end": 36,
+          "byte_start": 28,
+          "byte_end": 36,
+          "slice": "<x.png\u001c>"
+        }
+      ]
+    }
+  ],
+  "has_raw_html": [
+    {
+      "name": "plain_md",
+      "input": "# Heading\n\n![a](a.png)\n",
+      "has_raw_html": false
+    },
+    {
+      "name": "figure_img",
+      "input": "<figure><img src=\"a.png\" width=\"80%\"><figcaption>cap</figcaption></figure>\n",
+      "has_raw_html": true
+    },
+    {
+      "name": "sub_sup_br",
+      "input": "H<sub>2</sub>O and x<sup>2</sup><br>\n",
+      "has_raw_html": true
+    },
+    {
+      "name": "details_tag",
+      "input": "<details><summary>more</summary>x</details>\n",
+      "has_raw_html": true
+    },
+    {
+      "name": "autolink_url",
+      "input": "See <https://example.com> and <user@example.com>\n",
+      "has_raw_html": false
+    },
+    {
+      "name": "html_in_fence",
+      "input": "```html\n<figure><img src=\"a.png\"></figure>\n```\n",
+      "has_raw_html": false
+    },
+    {
+      "name": "html_in_inline_code",
+      "input": "Use `<figure>` and `<img>` tags.\n",
+      "has_raw_html": false
+    },
+    {
+      "name": "html_in_comment",
+      "input": "<!-- <figure><img src=\"a.png\"></figure> -->\n",
+      "has_raw_html": false
+    }
+  ],
+  "bare_paths": [
+    {
+      "name": "mixed_refs",
+      "input": "![a](fig/a.png) [u](https://example.com/x) [m](mailto:a@b) [f](#sec) [q](b.csv?x=1#y)\n",
+      "paths": [
+        "fig/a.png"
+      ]
+    },
+    {
+      "name": "windows_drive_and_spaces",
+      "input": "[w](C:/tmp/a.csv) [s](<my file.csv>)\n",
+      "paths": [
+        "C:/tmp/a.csv",
+        "my file.csv"
+      ]
+    }
+  ],
+  "ignore": [
+    {
+      "name": "glob_star",
+      "relative": "a.csv",
+      "patterns": [
+        "*.csv"
+      ],
+      "prefix": "",
+      "ignored": true
+    },
+    {
+      "name": "glob_star_nested",
+      "relative": "sub/a.csv",
+      "patterns": [
+        "*.csv"
+      ],
+      "prefix": "",
+      "ignored": true
+    },
+    {
+      "name": "anchored_root",
+      "relative": "sub/a.csv",
+      "patterns": [
+        "/a.csv"
+      ],
+      "prefix": "",
+      "ignored": false
+    },
+    {
+      "name": "anchored_match",
+      "relative": "a.csv",
+      "patterns": [
+        "/a.csv"
+      ],
+      "prefix": "",
+      "ignored": true
+    },
+    {
+      "name": "dir_only",
+      "relative": "build/out.png",
+      "patterns": [
+        "build/"
+      ],
+      "prefix": "",
+      "ignored": true
+    },
+    {
+      "name": "dir_only_file_no_match",
+      "relative": "build",
+      "patterns": [
+        "build/"
+      ],
+      "prefix": "",
+      "ignored": false
+    },
+    {
+      "name": "doublestar",
+      "relative": "a/b/c/d.png",
+      "patterns": [
+        "a/**/d.png"
+      ],
+      "prefix": "",
+      "ignored": true
+    },
+    {
+      "name": "fnmatch_negated_class",
+      "relative": "b.csv",
+      "patterns": [
+        "[!a].csv"
+      ],
+      "prefix": "",
+      "ignored": true
+    },
+    {
+      "name": "fnmatch_negated_class_no_match",
+      "relative": "a.csv",
+      "patterns": [
+        "[!a].csv"
+      ],
+      "prefix": "",
+      "ignored": false
+    },
+    {
+      "name": "negation_override",
+      "relative": "keep.csv",
+      "patterns": [
+        "*.csv",
+        "!keep.csv"
+      ],
+      "prefix": "",
+      "ignored": true
+    },
+    {
+      "name": "layer_prefix",
+      "relative": "data.csv",
+      "patterns": [
+        "sub/*.csv"
+      ],
+      "prefix": "sub",
+      "ignored": true
+    }
+  ],
+  "name_uploads": {
+    "input": [
+      {
+        "id": 10,
+        "real_name": "image.png",
+        "long_name": "aaa/111.png",
+        "storage": 1
+      },
+      {
+        "id": 20,
+        "real_name": "image.png",
+        "long_name": "bbb/222.png",
+        "storage": 1
+      },
+      {
+        "id": 30,
+        "real_name": "raw data (1).csv",
+        "long_name": "ccc/333.csv",
+        "storage": 2
+      },
+      {
+        "id": 40,
+        "real_name": "run#12.csv",
+        "long_name": "ddd/444.csv",
+        "storage": 1
+      }
+    ],
+    "output": [
+      {
+        "id": 10,
+        "real_name": "image.png",
+        "long_name": "aaa/111.png",
+        "storage": 1,
+        "elport_name": "image.png"
+      },
+      {
+        "id": 20,
+        "real_name": "image.png",
+        "long_name": "bbb/222.png",
+        "storage": 1,
+        "elport_name": "image-20.png"
+      },
+      {
+        "id": 30,
+        "real_name": "raw data (1).csv",
+        "long_name": "ccc/333.csv",
+        "storage": 2,
+        "elport_name": "raw data (1).csv"
+      },
+      {
+        "id": 40,
+        "real_name": "run#12.csv",
+        "long_name": "ddd/444.csv",
+        "storage": 1,
+        "elport_name": "run#12.csv"
+      }
+    ]
+  },
+  "download_url": [
+    {
+      "upload": {
+        "id": 10,
+        "real_name": "image.png",
+        "long_name": "aaa/111.png",
+        "storage": 1,
+        "elport_name": "image.png"
+      },
+      "url": "https://elab.example.test/app/download.php?f=aaa%2F111.png&name=image.png&storage=1",
+      "parsed": [
+        "aaa/111.png",
+        "image.png",
+        "1"
+      ]
+    },
+    {
+      "upload": {
+        "id": 20,
+        "real_name": "image.png",
+        "long_name": "bbb/222.png",
+        "storage": 1,
+        "elport_name": "image-20.png"
+      },
+      "url": "https://elab.example.test/app/download.php?f=bbb%2F222.png&name=image.png&storage=1",
+      "parsed": [
+        "bbb/222.png",
+        "image.png",
+        "1"
+      ]
+    },
+    {
+      "upload": {
+        "id": 30,
+        "real_name": "raw data (1).csv",
+        "long_name": "ccc/333.csv",
+        "storage": 2,
+        "elport_name": "raw data (1).csv"
+      },
+      "url": "https://elab.example.test/app/download.php?f=ccc%2F333.csv&name=raw+data+%281%29.csv&storage=2",
+      "parsed": [
+        "ccc/333.csv",
+        "raw data (1).csv",
+        "2"
+      ]
+    },
+    {
+      "upload": {
+        "id": 40,
+        "real_name": "run#12.csv",
+        "long_name": "ddd/444.csv",
+        "storage": 1,
+        "elport_name": "run#12.csv"
+      },
+      "url": "https://elab.example.test/app/download.php?f=ddd%2F444.csv&name=run%2312.csv&storage=1",
+      "parsed": [
+        "ddd/444.csv",
+        "run#12.csv",
+        "1"
+      ]
+    }
+  ],
+  "reverse": {
+    "base_url": "https://elab.example.test",
+    "uploads": [
+      {
+        "id": 10,
+        "real_name": "image.png",
+        "long_name": "aaa/111.png",
+        "storage": 1,
+        "elport_name": "image.png"
+      },
+      {
+        "id": 20,
+        "real_name": "image.png",
+        "long_name": "bbb/222.png",
+        "storage": 1,
+        "elport_name": "image-20.png"
+      },
+      {
+        "id": 30,
+        "real_name": "raw data (1).csv",
+        "long_name": "ccc/333.csv",
+        "storage": 2,
+        "elport_name": "raw data (1).csv"
+      },
+      {
+        "id": 40,
+        "real_name": "run#12.csv",
+        "long_name": "ddd/444.csv",
+        "storage": 1,
+        "elport_name": "run#12.csv"
+      }
+    ],
+    "input": "![a](https://elab.example.test/app/download.php?f=aaa%2F111.png&name=image.png&storage=1)\n![b](app/download.php?f=bbb/222.png&name=image.png&storage=1)\n[c](https://elab.example.test/app/download.php?f=ccc%2F333.csv&name=raw+data+%281%29.csv&storage=2)\n<img src=\"https://elab.example.test/app/download.php?f=ccc%2F333.csv&name=raw+data+%281%29.csv&storage=2\" width=\"50%\">\n[hash](https://elab.example.test/app/download.php?f=ddd%2F444.csv&name=run%2312.csv&storage=1)\n![other](https://elab.example.test/app/download.php?f=zzz/999.png&name=missing.png&storage=1)\n`https://elab.example.test/app/download.php?f=aaa%2F111.png&name=image.png&storage=1`\n",
+    "output": "![a](image.png)\n![b](image-20.png)\n[c](<raw data (1).csv>)\n<img src=\"raw data (1).csv\" width=\"50%\">\n[hash](https://elab.example.test/app/download.php?f=ddd%2F444.csv&name=run%2312.csv&storage=1)\n![other](https://elab.example.test/app/download.php?f=zzz/999.png&name=missing.png&storage=1)\n`https://elab.example.test/app/download.php?f=aaa%2F111.png&name=image.png&storage=1`\n",
+    "placed_ids": [
+      10,
+      20,
+      30
+    ],
+    "unmatched": [
+      "missing.png"
+    ]
+  },
+  "relink": {
+    "input": "[other](https://elab.example.test/experiments.php?mode=view&id=99)\n<a href=\"https://elab.example.test/experiments.php?mode=view&id=99\">x</a>\n[pasted](https://elab.example.test/experiments.php?mode=view&id=100)\n",
+    "doc_links": {
+      "https://elab.example.test/experiments.php?mode=view&id=99": {
+        "markdown": "../other/report.md",
+        "html": "../other/report.md"
+      }
+    },
+    "output": "[other](../other/report.md)\n<a href=\"../other/report.md\">x</a>\n[pasted](https://elab.example.test/experiments.php?mode=view&id=100)\n"
+  },
+  "absolute_links": {
+    "base_url": "https://elab.example.test",
+    "input": "[e](experiments.php?mode=view&id=12) [d](database.php?mode=view&id=5) [a](a.png)\n",
+    "output": "[e](https://elab.example.test/experiments.php?mode=view&id=12) [d](https://elab.example.test/database.php?mode=view&id=5) [a](a.png)\n"
+  },
+  "safe_name": {
+    "posix": {
+      "normal.png": "normal.png",
+      "dir/sub/file.csv": "file.csv",
+      "dir\\win\\file.csv": "file.csv",
+      "~~~tilde.txt": "tilde.txt",
+      "  spaced.txt  ": "spaced.txt",
+      "": "attachment",
+      ".": "attachment",
+      "..": "attachment",
+      "#anchor.csv": "_anchor.csv",
+      "a<b>c:d?e`f.txt": "a_b_c_d_e_f.txt",
+      "a\"b|c*d.txt": "a\"b|c*d.txt",
+      "trailing. ": "trailing.",
+      "CON.txt": "CON.txt",
+      "nul": "nul",
+      "COM1.csv": "COM1.csv",
+      "LPT9.dat": "LPT9.dat",
+      "日本語_図.png": "日本語_図.png"
+    },
+    "windows": {
+      "normal.png": "normal.png",
+      "dir/sub/file.csv": "file.csv",
+      "dir\\win\\file.csv": "file.csv",
+      "~~~tilde.txt": "tilde.txt",
+      "  spaced.txt  ": "spaced.txt",
+      "": "attachment",
+      ".": "attachment",
+      "..": "attachment",
+      "#anchor.csv": "_anchor.csv",
+      "a<b>c:d?e`f.txt": "a_b_c_d_e_f.txt",
+      "a\"b|c*d.txt": "a_b_c_d.txt",
+      "trailing. ": "trailing",
+      "CON.txt": "_CON.txt",
+      "nul": "_nul",
+      "COM1.csv": "_COM1.csv",
+      "LPT9.dat": "_LPT9.dat",
+      "日本語_図.png": "日本語_図.png"
+    }
+  },
+  "readable_html": [
+    {
+      "name": "basic_html",
+      "input": "<h1>Title</h1><p>Hello <b>world</b> &amp; friends.</p>",
+      "output": "<h1>Title</h1><p>Hello <b>world</b> &amp; friends.</p>"
+    },
+    {
+      "name": "figure_and_list",
+      "input": "<figure><img src=\"a.png\" width=\"80%\"><figcaption>Fig 1</figcaption></figure><ul><li>One</li><li>Two</li></ul>",
+      "output": "<figure><img src=\"a.png\"><figcaption>Fig 1</figcaption></figure><ul><li>One</li><li>Two</li></ul>"
+    },
+    {
+      "name": "links_and_code",
+      "input": "<p>See <a href=\"https://example.com\">link</a> and <code>x &lt; y</code>.</p>",
+      "output": "<p>See <a href=\"https://example.com\">link</a> and <code>x &lt; y</code>.</p>"
+    },
+    {
+      "name": "table",
+      "input": "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>",
+      "output": "<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table>"
+    }
+  ]
+}
