@@ -972,6 +972,24 @@ def _batch(args, paths: list[Path]) -> int:
     return report.finish(skipped)
 
 
+_MIGRATION_NOTICE = (
+    "notice: elport v0.2.0+ is now a standalone Go binary "
+    "(this Python package is maintenance-only). "
+    "Upgrade: https://github.com/youthesame/elport#install"
+)
+
+
+def _maybe_emit_migration_notice() -> None:
+    if os.environ.get("ELPORT_NO_MIGRATION_NOTICE") == "1":
+        return
+    try:
+        is_tty = sys.stderr.isatty()
+    except (AttributeError, ValueError, OSError):
+        return
+    if is_tty:
+        print(_MIGRATION_NOTICE, file=sys.stderr)
+
+
 def main(argv=None) -> int:
     # Windows encodes a piped stdout with the locale code page, which cannot hold
     # most titles, names or emoji; whoever reads elport's output gets UTF-8.
@@ -988,6 +1006,7 @@ def main(argv=None) -> int:
             topic = resources.files("elport") / "help" / f"{args.topic}.md"
             sys.stdout.write(topic.read_text("utf-8"))
         return 0
+    _maybe_emit_migration_notice()
     try:
         if args.cmd == "login":
             base_url = input("base_url: ").strip()
