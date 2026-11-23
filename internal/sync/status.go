@@ -68,33 +68,29 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 		_, _ = fmt.Fprintln(stdout, `local: dirty (use "elport push")`)
 		summary = append(summary, "local dirty")
 	}
-	_, _ = fmt.Fprintf(stdout, "uploads local: %s\n", joinBaseNames(localPlan.Files))
+	localFiles := localPlan.LocalFiles()
+	_, _ = fmt.Fprintf(stdout, "uploads local: %s\n", joinBaseNames(localFiles))
 
 	if remote == nil {
-		_, _ = fmt.Fprintf(stdout, "uploads new: %s\n", joinBaseNames(localPlan.Files))
+		_, _ = fmt.Fprintf(stdout, "uploads new: %s\n", joinBaseNames(localFiles))
 		_, _ = fmt.Fprintln(stdout, "uploads reuse: none")
 		_, _ = fmt.Fprintln(stdout, "remote: no id (comparison unavailable)")
 		return "not pushed yet", nil
 	}
 
 	remoteDoc, err := remote.Get(ctx)
+	var uploads []transclude.Upload
+	if err == nil {
+		uploads, err = remote.Uploads(ctx, remoteDoc)
+	}
 	if err != nil {
 		var notFound client.NotFoundError
 		if errors.As(err, &notFound) {
 			_, _ = fmt.Fprintln(stdout, "remote: missing (deleted on the server?)")
 			return "remote missing", nil
 		}
-		if strings.Contains(err.Error(), "connection failed") {
-			_, _ = fmt.Fprintln(stdout, "uploads reuse: unavailable (offline?)")
-			_, _ = fmt.Fprintln(stdout, "remote: unavailable (offline?)")
-			_, _ = fmt.Fprintln(stdout, "mode: unavailable (offline?)")
-			return "remote unavailable (offline?)", nil
-		}
-		return "", err
-	}
-	uploads, err := remote.Uploads(ctx, remoteDoc)
-	if err != nil {
-		if strings.Contains(err.Error(), "connection failed") {
+		var connErr client.ConnectionError
+		if errors.As(err, &connErr) {
 			_, _ = fmt.Fprintln(stdout, "uploads reuse: unavailable (offline?)")
 			_, _ = fmt.Fprintln(stdout, "remote: unavailable (offline?)")
 			_, _ = fmt.Fprintln(stdout, "mode: unavailable (offline?)")
@@ -114,7 +110,10 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 		strField(saved, "remote_base"),
 		strField(saved, "pending_remote"),
 	}
-	approved := plan.ApproveFromLocal(localPlan, filepath.Dir(docPath), ignore, remoteBodies, savedStringList(saved, "remote_paths"), stderr)
+	approved, err := plan.ApproveFromLocal(localPlan, filepath.Dir(docPath), ignore, remoteBodies, savedStringList(saved, "remote_paths"), stderr)
+	if err != nil {
+		return "", err
+	}
 
 	var reusedNames, newNames []string
 	for _, ap := range approved.Files {
@@ -203,6 +202,24 @@ func normalizeRemoteDiff(text string) string {
 	return strings.TrimRight(s, "\n") + "\n"
 }
 
+func splitLinesKeepEnds(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var lines []string
+	start := 0
+	for i := range len(s) {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i+1])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
 func Diff(ctx context.Context, docPath string, api API, cfg *config.Data, profile string, baseOnly bool, stdout, stderr io.Writer) error {
 	doc, err := ReadDocument(docPath, cfg)
 	if err != nil {
@@ -250,8 +267,8 @@ func Diff(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 	}
 
 	ud := difflib.UnifiedDiff{
-		A:        difflib.SplitLines(other),
-		B:        difflib.SplitLines(local),
+		A:        splitLinesKeepEnds(other),
+		B:        splitLinesKeepEnds(local),
 		FromFile: fromFile,
 		ToFile:   "local",
 		Context:  3,

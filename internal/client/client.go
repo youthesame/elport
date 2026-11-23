@@ -41,6 +41,19 @@ func (e NotFoundError) Error() string {
 	return e.Msg
 }
 
+type ConnectionError struct {
+	Root string
+	Err  error
+}
+
+func (e ConnectionError) Error() string {
+	return fmt.Sprintf("could not reach %s (connection failed): %v", e.Root, e.Err)
+}
+
+func (e ConnectionError) Unwrap() error {
+	return e.Err
+}
+
 type Option func(*options)
 
 type options struct {
@@ -285,13 +298,13 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("could not reach %s (connection failed): %w", c.root, err)
+		return 0, nil, nil, ConnectionError{Root: c.root, Err: err}
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	data, err := readAllWithIdleTimeout(resp.Body, c.idleTimeout, cancel)
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("could not reach %s (connection failed): %w", c.root, err)
+		return 0, nil, nil, ConnectionError{Root: c.root, Err: err}
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

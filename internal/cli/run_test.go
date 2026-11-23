@@ -272,4 +272,17 @@ func TestRunViewCommentsStatusDiffAndFetchEndToEnd(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(docDir, "a.csv")); err != nil || string(got) != "col\n1\n" {
 		t.Fatalf("batch fetch did not save a.csv: (%q, %v)", string(got), err)
 	}
+
+	// diff --base must work without stored credentials (only base_url and local state).
+	_ = cli.RunWithEnv(context.Background(), []string{"logout", "lab"}, nil, &out, &errBuf, env)
+	_ = os.WriteFile(filepath.Join(home, ".config", "elport", "config.toml"), []byte("default_profile = \"lab\"\n[profiles.lab]\nbase_url = \""+srv.URL+"\"\n"), 0o600)
+	_ = os.MkdirAll(filepath.Join(home, ".config", "elport", "state"), 0o700)
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"status", docPath}, nil, &out, &errBuf, env); code != cli.ExitError {
+		t.Fatalf("status without credentials should fail at remote step, got %d", code)
+	}
+	if !strings.Contains(out.String(), "uploads local:") {
+		t.Errorf("status should print local section before failing on missing credentials: stdout=%q stderr=%q", out.String(), errBuf.String())
+	}
 }

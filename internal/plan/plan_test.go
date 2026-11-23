@@ -67,3 +67,32 @@ func TestApproveBlocksRemoteLinkedUnlessListed(t *testing.T) {
 		t.Errorf("expected remote-linked ref.File to be cleared, got %q", res.Refs[1].File)
 	}
 }
+
+func TestApproveFromLocalRejectsUnvalidatedAndCaseInsensitiveRemoteLinked(t *testing.T) {
+	// Zero/unvalidated LocalResult must never mint ApprovedUploadPath, and
+	// differing case (DATA.csv vs ./data.csv#top) on case-insensitive FS must still block.
+	var forged plan.LocalResult
+	if _, err := plan.ApproveFromLocal(&forged, t.TempDir(), nil, nil, nil, nil); err == nil {
+		t.Fatal("expected unvalidated LocalResult to be rejected")
+	}
+
+	dir := t.TempDir()
+	dataFile := filepath.Join(dir, "DATA.csv")
+	if err := os.WriteFile(dataFile, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	infoA, errA := os.Stat(filepath.Join(dir, "DATA.csv"))
+	infoB, errB := os.Stat(filepath.Join(dir, "data.csv"))
+	if errA != nil || errB != nil || !os.SameFile(infoA, infoB) {
+		t.Skip("filesystem is case-sensitive")
+	}
+
+	var warn bytes.Buffer
+	res, err := plan.Approve("[d](./data.csv#top)\n", dir, nil, nil, []string{"[r](DATA.csv)\n"}, nil, &warn)
+	if err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if len(res.Files) != 0 {
+		t.Fatalf("expected case-variant remote-linked path to be excluded, got %+v", res.Files)
+	}
+}

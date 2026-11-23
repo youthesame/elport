@@ -103,6 +103,10 @@ func TestParseEntityURLStrictValidation(t *testing.T) {
 	if err != nil || entity != "items" || id != 12 {
 		t.Fatalf("valid items URL failed: (%q, %d, %v)", entity, id, err)
 	}
+	entity, id, err = sync.ParseEntityURL("https://elab.example.test:0443/experiments.php?mode=view&id=7", "https://elab.example.test")
+	if err != nil || entity != "experiments" || id != 7 {
+		t.Fatalf("leading-zero port :0443 should match default 443: (%q, %d, %v)", entity, id, err)
+	}
 	for _, bad := range []string{
 		"http://elab.example.test:50011/experiments.php?mode=view&id=1",
 		"https://user:pass@elab.example.test:50011/experiments.php?mode=view&id=1",
@@ -112,6 +116,7 @@ func TestParseEntityURLStrictValidation(t *testing.T) {
 		"https://elab.example.test:50011/experiments.php?mode=view&id=1&extra=2",
 		"https://elab.example.test:50011/experiments.php?mode=view&id=0",
 		"https://elab.example.test:50011/other.php?mode=view&id=1",
+		"https://elab.example.test:50011/experiments%2ephp?mode=view&id=1",
 	} {
 		if _, _, err := sync.ParseEntityURL(bad, base); err == nil {
 			t.Errorf("expected invalid entity URL %q to be rejected", bad)
@@ -299,5 +304,45 @@ func TestStatusDiffFetchViewSnapshotAndComments(t *testing.T) {
 		if _, err := sync.PlaceAttachments(context.Background(), symDir, remote, uploads, ".remote", &errBuf); err == nil {
 			t.Fatal("expected PlaceAttachments to refuse symlink destination")
 		}
+	}
+}
+
+func TestDiffBaseTrailingNewlineAndWorkingCopyWithoutProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("ELABFTW_BASE_URL", "")
+	t.Setenv("ELABFTW_API_KEY", "")
+
+	const baseURL = "https://elab.example.test"
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "report.md")
+	otherPath := filepath.Join(dir, "other.md")
+	_ = os.WriteFile(docPath, []byte("---\nid: 5\nentity: experiments\nprofile: lab\n---\n\nx\n"), 0o644)
+	_ = os.WriteFile(otherPath, []byte("---\nid: 5\nentity: experiments\n---\n\nold\n"), 0o644)
+	_ = state.Save(baseURL, "experiments", "5", map[string]any{
+		"local_base": "x",
+		"path":       docPath,
+	})
+
+	cfg := &config.Data{
+		Raw: map[string]any{
+			"default_profile": "lab",
+			"profiles": map[string]any{
+				"lab": map[string]any{"base_url": baseURL},
+			},
+		},
+	}
+
+	var out, errBuf bytes.Buffer
+	if err := sync.Diff(context.Background(), docPath, nil, cfg, "", true, &out, &errBuf); err != nil {
+		t.Fatalf("Diff --base without API: %v", err)
+	}
+	if strings.Contains(out.String(), "\n+\n") {
+		t.Errorf("Diff --base should not emit phantom blank line:\n%q", out.String())
+	}
+
+	if err := sync.CheckWorkingCopy(map[string]any{"path": otherPath}, docPath, "experiments", 5); err == nil {
+		t.Fatal("CheckWorkingCopy must detect existing working copy even without profile in front matter")
 	}
 }

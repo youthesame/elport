@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -25,6 +26,7 @@ import (
 	"github.com/youthesame/elport/internal/config"
 	"github.com/youthesame/elport/internal/frontmatter"
 	"github.com/youthesame/elport/internal/help"
+	"github.com/youthesame/elport/internal/plan"
 	"github.com/youthesame/elport/internal/sync"
 	"github.com/youthesame/elport/internal/transclude"
 )
@@ -347,7 +349,150 @@ func parseRemoteTarget(raw, explicitEntity, defaultEntity string, c *client.Clie
 	return entity, eid, nil
 }
 
-func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env) (*config.Data, *client.Client, error) {
+type lazyAPI struct {
+	init   func() (*client.Client, error)
+	client *client.Client
+	err    error
+	done   bool
+}
+
+func (l *lazyAPI) get() (*client.Client, error) {
+	if !l.done {
+		l.client, l.err = l.init()
+		l.done = true
+	}
+	return l.client, l.err
+}
+
+func (l *lazyAPI) Root() string {
+	c, err := l.get()
+	if err != nil {
+		return ""
+	}
+	return c.Root()
+}
+
+func (l *lazyAPI) Me(ctx context.Context) (map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Me(ctx)
+}
+
+func (l *lazyAPI) Info(ctx context.Context) (map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Info(ctx)
+}
+
+func (l *lazyAPI) Get(ctx context.Context, entity string, eid int) (map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Get(ctx, entity, eid)
+}
+
+func (l *lazyAPI) Create(ctx context.Context, entity, title string) (map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Create(ctx, entity, title)
+}
+
+func (l *lazyAPI) Patch(ctx context.Context, entity string, eid int, payload map[string]any) (map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Patch(ctx, entity, eid, payload)
+}
+
+func (l *lazyAPI) Uploads(ctx context.Context, entity string, eid int) ([]map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Uploads(ctx, entity, eid)
+}
+
+func (l *lazyAPI) Comments(ctx context.Context, entity string, eid int) ([]map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Comments(ctx, entity, eid)
+}
+
+func (l *lazyAPI) Upload(ctx context.Context, entity string, eid int, approved plan.ApprovedUploadPath) (map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Upload(ctx, entity, eid, approved)
+}
+
+func (l *lazyAPI) Download(ctx context.Context, entity string, eid, uid int) ([]byte, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Download(ctx, entity, eid, uid)
+}
+
+func (l *lazyAPI) AddTag(ctx context.Context, entity string, eid int, tag string) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.AddTag(ctx, entity, eid, tag)
+}
+
+func (l *lazyAPI) AddLink(ctx context.Context, entity string, eid int, targetEntity string, targetID int) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.AddLink(ctx, entity, eid, targetEntity, targetID)
+}
+
+func (l *lazyAPI) AddComment(ctx context.Context, entity string, eid int, text string) error {
+	c, err := l.get()
+	if err != nil {
+		return err
+	}
+	return c.AddComment(ctx, entity, eid, text)
+}
+
+func (l *lazyAPI) Categories(ctx context.Context, teamID any, entity string) ([]map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Categories(ctx, teamID, entity)
+}
+
+func (l *lazyAPI) Statuses(ctx context.Context, teamID any, entity string) ([]map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Statuses(ctx, teamID, entity)
+}
+
+func (l *lazyAPI) Search(ctx context.Context, entity string, params url.Values) ([]map[string]any, error) {
+	c, err := l.get()
+	if err != nil {
+		return nil, err
+	}
+	return c.Search(ctx, entity, params)
+}
+
+func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env) (*config.Data, sync.API, error) {
 	wd, err := env.workDir()
 	if err != nil {
 		return nil, nil, err
@@ -375,14 +520,13 @@ func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env)
 		data.Raw["entity"] = cliEntity
 	}
 	metaProf, _ := doc.Meta.Values["profile"].(string)
-	if !doc.HasID {
-		return data, nil, nil
+	api := &lazyAPI{
+		init: func() (*client.Client, error) {
+			_, c, err := resolveClient(data, cliProfile, metaProf, stderr, env)
+			return c, err
+		},
 	}
-	_, c, err := resolveClient(data, cliProfile, metaProf, stderr, env)
-	if err != nil {
-		return nil, nil, err
-	}
-	return data, c, nil
+	return data, api, nil
 }
 
 func runView(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) error {
@@ -399,7 +543,7 @@ func runView(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env En
 
 func runComments(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) error {
 	remote := isRemoteTarget(cmd.Doc)
-	if remote && cmd.Name == "comment" {
+	if remote && cmd.Name == "comment" && isASCIIAllDigits(cmd.Doc) {
 		exists, err := isExistingFile(cmd.Doc)
 		if err != nil {
 			return err
@@ -436,13 +580,14 @@ func runComments(ctx context.Context, cmd *Command, stdout, stderr io.Writer, en
 }
 
 func discoverDocuments(root string) ([]string, int) {
+	walkRoot := transclude.ResolveNonStrict(root)
 	var found []string
 	skipped := 0
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(walkRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		rel, err := filepath.Rel(root, p)
+		rel, err := filepath.Rel(walkRoot, p)
 		if err != nil || rel == "." {
 			return nil
 		}
@@ -461,11 +606,20 @@ func discoverDocuments(root string) ([]string, int) {
 		if !strings.HasSuffix(name, ".md") || strings.HasSuffix(name, ".remote.md") || strings.HasSuffix(name, ".base.md") {
 			return nil
 		}
+		if !d.Type().IsRegular() {
+			if d.Type()&fs.ModeSymlink == 0 {
+				return nil
+			}
+			info, statErr := os.Stat(p)
+			if statErr != nil || !info.Mode().IsRegular() {
+				return nil
+			}
+		}
 		if _, ok := frontmatter.DocumentMeta(p); !ok {
 			skipped++
 			return nil
 		}
-		found = append(found, p)
+		found = append(found, filepath.Join(root, rel))
 		return nil
 	})
 	sort.Strings(found)

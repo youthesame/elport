@@ -81,6 +81,7 @@ jobs:
           go-version-file: go.mod
 
       - name: gofmt check
+        if: runner.os == 'Linux'
         shell: bash
         run: test -z "$(gofmt -l .)"
 

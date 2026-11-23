@@ -274,24 +274,33 @@ func ParseEntityURL(rawURL, baseURL string) (string, int, error) {
 	if parsed.User != nil {
 		return "", 0, errors.New("entity URL must not include credentials")
 	}
-	pPort := parsed.Port()
-	if pPort == "" {
-		pPort = "443"
+	pPortNum := 443
+	if pPort := parsed.Port(); pPort != "" {
+		n, err := strconv.Atoi(pPort)
+		if err != nil {
+			return "", 0, errors.New("invalid entity URL")
+		}
+		pPortNum = n
 	}
-	bPort := base.Port()
-	if bPort == "" {
-		bPort = "443"
+	bPortNum := 443
+	if bPort := base.Port(); bPort != "" {
+		n, err := strconv.Atoi(bPort)
+		if err != nil {
+			return "", 0, errors.New("invalid entity URL")
+		}
+		bPortNum = n
 	}
 	pHost, pOK := canonicalHost(parsed.Hostname())
 	bHost, bOK := canonicalHost(base.Hostname())
-	if !pOK || !bOK || pHost != bHost || pPort != bPort {
+	if !pOK || !bOK || pHost != bHost || pPortNum != bPortNum {
 		return "", 0, fmt.Errorf("URL does not match configured server %s", baseURL)
 	}
-	prefix := strings.TrimRight(base.Path, "/") + "/"
-	if !strings.HasPrefix(parsed.Path, prefix) {
+	prefix := strings.TrimRight(base.EscapedPath(), "/") + "/"
+	rawPath := parsed.EscapedPath()
+	if !strings.HasPrefix(rawPath, prefix) {
 		return "", 0, fmt.Errorf("URL does not match configured server %s", baseURL)
 	}
-	page := parsed.Path[len(prefix):]
+	page := rawPath[len(prefix):]
 	entity := ""
 	for e, ep := range EntityPages {
 		if ep == page {
@@ -354,11 +363,19 @@ func CheckWorkingCopy(saved map[string]any, docPath, entity string, eid int) err
 	if samePath(recorded, resolved) || samePath(transclude.ResolveNonStrict(recorded), resolved) {
 		return nil
 	}
-	meta, ok := frontmatter.DocumentMeta(recorded)
-	if !ok {
+	raw, err := os.ReadFile(recorded)
+	if err != nil || !utf8.Valid(raw) {
 		return nil
 	}
-	otherID, _ := frontmatter.ValidateID(meta.Values["id"])
+	normalized := strings.ReplaceAll(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\r", "\n")
+	meta, _, err := frontmatter.Parse(normalized)
+	if err != nil || !meta.Has("id") {
+		return nil
+	}
+	otherID, err := frontmatter.ValidateID(meta.Values["id"])
+	if err != nil {
+		return nil
+	}
 	otherEntity := entity
 	if e, ok := meta.Values["entity"].(string); ok && e != "" {
 		otherEntity = e

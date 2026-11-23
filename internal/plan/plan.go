@@ -1,8 +1,10 @@
 package plan
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 
 	"github.com/youthesame/elport/internal/transclude"
@@ -28,9 +30,19 @@ type Result struct {
 }
 
 type LocalResult struct {
-	Refs   []transclude.Reference
-	Listed map[string]bool
-	Files  []string
+	validated bool
+	refs      []transclude.Reference
+	listed    map[string]bool
+	files     []string
+}
+
+func (l *LocalResult) LocalFiles() []string {
+	if l == nil {
+		return nil
+	}
+	out := make([]string, len(l.files))
+	copy(out, l.files)
+	return out
 }
 
 func LocalCandidates(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries []string, warn io.Writer) (*LocalResult, error) {
@@ -65,10 +77,24 @@ func LocalCandidates(body, docDir string, ignore []transclude.IgnoreLayer, liste
 	}
 	sort.Strings(files)
 	return &LocalResult{
-		Refs:   refs,
-		Listed: listed,
-		Files:  files,
+		validated: true,
+		refs:      refs,
+		listed:    listed,
+		files:     files,
 	}, nil
+}
+
+func sameDiskFile(path string, targetStats []os.FileInfo) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	for _, ts := range targetStats {
+		if os.SameFile(info, ts) {
+			return true
+		}
+	}
+	return false
 }
 
 func Approve(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries []string, remoteBodies []string, remotePaths []string, warn io.Writer) (*Result, error) {
@@ -76,12 +102,15 @@ func Approve(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries
 	if err != nil {
 		return nil, err
 	}
-	return ApproveFromLocal(local, docDir, ignore, remoteBodies, remotePaths, warn), nil
+	return ApproveFromLocal(local, docDir, ignore, remoteBodies, remotePaths, warn)
 }
 
-func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.IgnoreLayer, remoteBodies []string, remotePaths []string, warn io.Writer) *Result {
-	refs := make([]transclude.Reference, len(local.Refs))
-	copy(refs, local.Refs)
+func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.IgnoreLayer, remoteBodies []string, remotePaths []string, warn io.Writer) (*Result, error) {
+	if local == nil || !local.validated {
+		return nil, errors.New("unvalidated local plan cannot mint approved upload paths")
+	}
+	refs := make([]transclude.Reference, len(local.refs))
+	copy(refs, local.refs)
 
 	allRemotePaths := make([]string, 0, len(remotePaths))
 	allRemotePaths = append(allRemotePaths, remotePaths...)
@@ -89,9 +118,29 @@ func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.Ign
 		allRemotePaths = append(allRemotePaths, transclude.BarePaths(rb)...)
 	}
 	linked := transclude.ResolveLocalPaths(allRemotePaths, docDir, ignore)
+	linkedStats := make([]os.FileInfo, 0, len(linked))
+	for lp := range linked {
+		if info, err := os.Stat(lp); err == nil {
+			linkedStats = append(linkedStats, info)
+		}
+	}
+
+	listedStats := make([]os.FileInfo, 0, len(local.listed))
+	for lp, ok := range local.listed {
+		if ok {
+			if info, err := os.Stat(lp); err == nil {
+				listedStats = append(listedStats, info)
+			}
+		}
+	}
 
 	for i := range refs {
-		if refs[i].File != "" && linked[refs[i].File] && !local.Listed[refs[i].File] {
+		if refs[i].File == "" {
+			continue
+		}
+		isRemoteLinked := linked[refs[i].File] || sameDiskFile(refs[i].File, linkedStats)
+		isListed := local.listed[refs[i].File] || sameDiskFile(refs[i].File, listedStats)
+		if isRemoteLinked && !isListed {
 			if warn != nil {
 				_, _ = fmt.Fprintf(warn, "warning: not uploaded, linked from the remote body (a path written on the server side; list it under attachments: only to upload it on purpose): %s\n", refs[i].Path)
 			}
@@ -105,8 +154,10 @@ func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.Ign
 			unionSet[r.File] = true
 		}
 	}
-	for p := range local.Listed {
-		unionSet[p] = true
+	for p, ok := range local.listed {
+		if ok && p != "" {
+			unionSet[p] = true
+		}
 	}
 	paths := make([]string, 0, len(unionSet))
 	for p := range unionSet {
@@ -122,14 +173,16 @@ func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.Ign
 		byPath[p] = ap
 	}
 
-	listedCopy := make(map[string]bool, len(local.Listed))
-	for k, v := range local.Listed {
-		listedCopy[k] = v
+	listedCopy := make(map[string]bool, len(local.listed))
+	for k, v := range local.listed {
+		if v {
+			listedCopy[k] = true
+		}
 	}
 	return &Result{
 		Refs:   refs,
 		Listed: listedCopy,
 		Files:  files,
 		ByPath: byPath,
-	}
+	}, nil
 }

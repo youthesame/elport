@@ -408,8 +408,11 @@ func Snapshot(ctx context.Context, api API, entity string, eid int, directory, b
 	if err != nil {
 		return nil, err
 	}
-	if err := root.AtomicWrite("report.md", []byte(source), 0o644); err != nil {
+	if err := root.WriteNewNoClobber("report.md", []byte(source), 0o644); err != nil {
 		_ = root.Close()
+		if errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("output already exists: %s", filepath.Join(directory, "report.md"))
+		}
 		return nil, err
 	}
 	_ = root.Close()
