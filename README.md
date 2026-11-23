@@ -27,7 +27,7 @@ irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/in
 
 <details><summary>Other ways (Go, GitHub Releases)</summary>
 
-- Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@latest`
+- Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1`
 - [GitHub Releases](https://github.com/youthesame/elport/releases) (on macOS, browser downloads are quarantined; prefer Homebrew or `install.sh`)
 
 </details>

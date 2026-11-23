@@ -42,6 +42,21 @@ jobs:
             exit 1
           }
 
+      - name: Verify Homebrew tap token for stable releases
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          case "$TAG_NAME" in
+            *-*) ;;
+            *)
+              if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+                echo "error: HOMEBREW_TAP_GITHUB_TOKEN secret is required for stable releases" >&2
+                exit 1
+              fi
+              ;;
+          esac
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
@@ -68,8 +83,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
-      attestations: write
+    outputs:
+      checksums: ${{ steps.export-checksums.outputs.checksums }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -78,21 +93,6 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
-
-      - name: Verify Homebrew tap token for stable releases
-        env:
-          TAG_NAME: ${{ github.ref_name }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-        run: |
-          case "$TAG_NAME" in
-            *-*) ;;
-            *)
-              if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
-                echo "error: HOMEBREW_TAP_GITHUB_TOKEN secret is required for stable releases" >&2
-                exit 1
-              fi
-              ;;
-          esac
 
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
@@ -104,10 +104,38 @@ jobs:
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
+      - name: Export release checksums
+        id: export-checksums
+        run: |
+          test -s dist/checksums.txt
+          {
+            echo "checksums<<EOF"
+            cat dist/checksums.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  attest:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Write checksums from release job
+        env:
+          CHECKSUMS: ${{ needs.release.outputs.checksums }}
+        run: |
+          test -n "$CHECKSUMS" || {
+            echo "error: missing checksums output from release job" >&2
+            exit 1
+          }
+          printf '%s\n' "$CHECKSUMS" > checksums.txt
+
       - name: Attest release archives
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-checksums: dist/checksums.txt
+          subject-checksums: checksums.txt
 
   smoke:
     needs: release
