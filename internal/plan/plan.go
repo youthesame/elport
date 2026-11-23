@@ -50,7 +50,7 @@ func (p ApprovedUploadPath) Open() (*os.File, error) {
 		_ = f.Close()
 		return nil, err
 	}
-	if !finfo.Mode().IsRegular() || !os.SameFile(finfo, p.info) {
+	if !finfo.Mode().IsRegular() || !os.SameFile(finfo, p.info) || finfo.Size() != p.info.Size() || !finfo.ModTime().Equal(p.info.ModTime()) {
 		_ = f.Close()
 		return nil, fmt.Errorf("approved upload file changed before upload: %s", base)
 	}

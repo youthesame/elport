@@ -112,16 +112,18 @@ func TestApprovedUploadPathRejectsPostApprovalSwap(t *testing.T) {
 	}
 	approved := res.Files[0]
 
-	// Replace with a brand-new regular file (new inode).
-	if err := os.Remove(target); err != nil {
+	// Replace atomically with another existing file so the new target has a distinct inode
+	// even on filesystems (ext4/NTFS) that immediately recycle freed inode numbers.
+	other := filepath.Join(dir, "other.csv")
+	if err := os.WriteFile(other, []byte("swapped"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(target, []byte("swapped"), 0o644); err != nil {
+	if err := os.Rename(other, target); err != nil {
 		t.Fatal(err)
 	}
 	if f, err := approved.Open(); err == nil {
 		_ = f.Close()
-		t.Fatal("expected Open to reject replaced inode")
+		t.Fatal("expected Open to reject replaced file")
 	}
 
 	if runtime.GOOS != "windows" {
