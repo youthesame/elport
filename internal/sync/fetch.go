@@ -19,12 +19,48 @@ import (
 	"github.com/youthesame/elport/internal/transclude"
 )
 
+func PathStem(base string) string {
+	idx := strings.LastIndexByte(base, '.')
+	if idx <= 0 || idx == len(base)-1 {
+		return base
+	}
+	allDots := true
+	for i := range idx {
+		if base[i] != '.' {
+			allDots = false
+			break
+		}
+	}
+	if allDots {
+		return base
+	}
+	return base[:idx]
+}
+
 func SidecarPath(docPath string) string {
-	return docPath + ".remote.md"
+	return filepath.Join(filepath.Dir(docPath), PathStem(filepath.Base(docPath))+".remote.md")
 }
 
 func BaseSidecarPath(docPath string) string {
-	return docPath + ".base.md"
+	return filepath.Join(filepath.Dir(docPath), PathStem(filepath.Base(docPath))+".base.md")
+}
+
+func AtomicWriteDoc(docPath, content string) error {
+	root, err := fsx.OpenRoot(filepath.Dir(docPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.AtomicWrite(filepath.Base(docPath), []byte(content), 0o600)
+}
+
+func WriteNewDocNoClobber(docPath, content string) error {
+	root, err := fsx.OpenRoot(filepath.Dir(docPath))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = root.Close() }()
+	return root.WriteNewNoClobber(filepath.Base(docPath), []byte(content), 0o600)
 }
 
 func rejectSidecarAttachmentCollisions(uploads []transclude.Upload, sidecars []string) error {
@@ -69,7 +105,7 @@ func hasElportFrontmatter(data []byte) bool {
 }
 
 func placeConflictAttachment(root *fsx.RootDir, name string, data []byte) error {
-	err := root.WriteNewNoClobber(name, data, 0o644)
+	err := root.WriteNewNoClobber(name, data, 0o600)
 	if err == nil {
 		return nil
 	}
@@ -130,7 +166,7 @@ func PlaceAttachments(ctx context.Context, docDir string, remote *Remote, upload
 			return nil, fmt.Errorf("refusing to place attachment with elport front matter: %s", name)
 		}
 
-		err = root.WriteNewNoClobber(name, data, 0o644)
+		err = root.WriteNewNoClobber(name, data, 0o666)
 		if err == nil {
 			continue
 		}
@@ -408,7 +444,7 @@ func Snapshot(ctx context.Context, api API, entity string, eid int, directory, b
 	if err != nil {
 		return nil, err
 	}
-	if err := root.WriteNewNoClobber("report.md", []byte(source), 0o644); err != nil {
+	if err := root.WriteNewNoClobber("report.md", []byte(source), 0o600); err != nil {
 		_ = root.Close()
 		if errors.Is(err, os.ErrExist) {
 			return nil, fmt.Errorf("output already exists: %s", filepath.Join(directory, "report.md"))

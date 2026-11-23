@@ -2,6 +2,7 @@ package frontmatter
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -83,6 +84,44 @@ func (m Meta) Has(key string) bool {
 	return ok
 }
 
+func (m *Meta) Delete(key string) {
+	if m.Values == nil {
+		return
+	}
+	if _, exists := m.Values[key]; !exists {
+		return
+	}
+	delete(m.Values, key)
+	out := m.Order[:0]
+	for _, k := range m.Order {
+		if k != key {
+			out = append(out, k)
+		}
+	}
+	m.Order = out
+}
+
+func (m Meta) Clone() Meta {
+	vals := make(map[string]any, len(m.Values))
+	for k, v := range m.Values {
+		switch s := v.(type) {
+		case []string:
+			cp := make([]string, len(s))
+			copy(cp, s)
+			vals[k] = cp
+		case []any:
+			cp := make([]any, len(s))
+			copy(cp, s)
+			vals[k] = cp
+		default:
+			vals[k] = v
+		}
+	}
+	order := make([]string, len(m.Order))
+	copy(order, m.Order)
+	return Meta{Values: vals, Order: order}
+}
+
 func (m Meta) Len() int {
 	return len(m.Values)
 }
@@ -116,6 +155,25 @@ func ParseServerID(value any) (int, error) {
 		return id, nil
 	case int64:
 		id, err := ValidateID(v)
+		if err != nil {
+			return 0, errors.New("server did not return a valid entity id")
+		}
+		return id, nil
+	case json.Number:
+		s := string(v)
+		if s == "" {
+			return 0, errors.New("server did not return a valid entity id")
+		}
+		for i := range len(s) {
+			if s[i] < '0' || s[i] > '9' {
+				return 0, errors.New("server did not return a valid entity id")
+			}
+		}
+		n, err := strconv.Atoi(s)
+		if err != nil {
+			return 0, errors.New("server did not return a valid entity id")
+		}
+		id, err := ValidateID(n)
 		if err != nil {
 			return 0, errors.New("server did not return a valid entity id")
 		}

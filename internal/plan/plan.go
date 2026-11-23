@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/youthesame/elport/internal/transclude"
 )
 
 type ApprovedUploadPath struct {
-	abs string
+	abs  string
+	info os.FileInfo
 }
 
 func (p ApprovedUploadPath) Path() string {
@@ -19,7 +21,40 @@ func (p ApprovedUploadPath) Path() string {
 }
 
 func (p ApprovedUploadPath) Valid() bool {
-	return p.abs != ""
+	return p.abs != "" && p.info != nil
+}
+
+func (p ApprovedUploadPath) Open() (*os.File, error) {
+	if !p.Valid() {
+		return nil, errors.New("refusing unapproved upload path")
+	}
+	root, err := os.OpenRoot(filepath.Dir(p.abs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	base := filepath.Base(p.abs)
+	linfo, err := root.Lstat(base)
+	if err != nil {
+		return nil, err
+	}
+	if linfo.Mode()&os.ModeSymlink != 0 {
+		return nil, fmt.Errorf("refusing to upload symlink: %s", base)
+	}
+	f, err := root.Open(base)
+	if err != nil {
+		return nil, err
+	}
+	finfo, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if !finfo.Mode().IsRegular() || !os.SameFile(finfo, p.info) || finfo.Size() != p.info.Size() || !finfo.ModTime().Equal(p.info.ModTime()) {
+		_ = f.Close()
+		return nil, fmt.Errorf("approved upload file changed before upload: %s", base)
+	}
+	return f, nil
 }
 
 type Result struct {
@@ -42,6 +77,20 @@ func (l *LocalResult) LocalFiles() []string {
 	}
 	out := make([]string, len(l.files))
 	copy(out, l.files)
+	return out
+}
+
+func (l *LocalResult) DocRefs() []transclude.Reference {
+	if l == nil {
+		return nil
+	}
+	var out []transclude.Reference
+	for _, r := range l.refs {
+		if r.Doc != "" {
+			r.File = ""
+			out = append(out, r)
+		}
+	}
 	return out
 }
 
@@ -168,7 +217,14 @@ func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.Ign
 	files := make([]ApprovedUploadPath, 0, len(paths))
 	byPath := make(map[string]ApprovedUploadPath, len(paths))
 	for _, p := range paths {
-		ap := ApprovedUploadPath{abs: p}
+		linfo, err := os.Lstat(p)
+		if err != nil {
+			return nil, err
+		}
+		if linfo.Mode()&os.ModeSymlink != 0 || !linfo.Mode().IsRegular() {
+			return nil, fmt.Errorf("refusing to approve non-regular upload path: %s", filepath.Base(p))
+		}
+		ap := ApprovedUploadPath{abs: p, info: linfo}
 		files = append(files, ap)
 		byPath[p] = ap
 	}

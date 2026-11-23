@@ -91,6 +91,9 @@ jobs:
       - name: arch & guardrails
         run: go test -v -run TestArch .
 
+      - name: Quint ITF vector replay
+        run: go test -v -run TestQuintITFTracesReplayAgainstGoSync ./internal/sync
+
       - name: go test (race)
         if: runner.os != 'Windows'
         run: go test -race ./...
@@ -105,3 +108,23 @@ jobs:
         env:
           CGO_ENABLED: "0"
         run: go build ./cmd/elport
+
+  go-differential:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # hatch-vcs derives the version from tags.
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+
+      - run: uv sync --locked
+
+      - name: Python vs Go differential and state round-trip tests
+        env:
+          ELPORT_DIFF_REQUIRE: "1"
+        run: go test -v -race -count=1 ./internal/difftest/...

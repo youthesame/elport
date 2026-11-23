@@ -164,9 +164,30 @@ func New(baseURL string, apiKey config.APIKey, verifySSL bool, opts ...Option) (
 		Timeout:   cfg.dialTimeout,
 		KeepAlive: 30 * time.Second,
 	}
+	rootCAs := cfg.rootCAs
+	if rootCAs == nil && verifySSL {
+		certFile := os.Getenv("SSL_CERT_FILE")
+		if certFile == "" {
+			certFile = os.Getenv("REQUESTS_CA_BUNDLE")
+		}
+		if certFile != "" {
+			pemBytes, err := os.ReadFile(certFile)
+			if err != nil {
+				return nil, fmt.Errorf("read CA bundle: %w", err)
+			}
+			pool, err := x509.SystemCertPool()
+			if err != nil || pool == nil {
+				pool = x509.NewCertPool()
+			}
+			if !pool.AppendCertsFromPEM(pemBytes) {
+				return nil, fmt.Errorf("invalid certificate in CA bundle: %s", certFile)
+			}
+			rootCAs = pool
+		}
+	}
 	tlsCfg := &tls.Config{
 		InsecureSkipVerify: !verifySSL,
-		RootCAs:            cfg.rootCAs,
+		RootCAs:            rootCAs,
 	}
 	idle := cfg.idleTimeout
 	transport := &http.Transport{
@@ -516,8 +537,8 @@ func (c *Client) Comments(ctx context.Context, entity string, eid int) ([]map[st
 	return res, nil
 }
 
-func openMultipartBody(filePath, boundary string) (io.ReadCloser, error) {
-	f, err := os.Open(filePath)
+func openMultipartBody(approved plan.ApprovedUploadPath, boundary string) (io.ReadCloser, error) {
+	f, err := approved.Open()
 	if err != nil {
 		return nil, err
 	}
@@ -529,9 +550,10 @@ func openMultipartBody(filePath, boundary string) (io.ReadCloser, error) {
 		_ = pr.Close()
 		return nil, err
 	}
+	fileName := filepath.Base(approved.Path())
 	go func() {
 		defer func() { _ = f.Close() }()
-		part, err := mw.CreateFormFile("file", filepath.Base(filePath))
+		part, err := mw.CreateFormFile("file", fileName)
 		if err != nil {
 			_ = pw.CloseWithError(err)
 			return
@@ -557,14 +579,14 @@ func (c *Client) Upload(ctx context.Context, entity string, eid int, approved pl
 	boundary := tmpWriter.Boundary()
 	contentType := tmpWriter.FormDataContentType()
 
-	body, err := openMultipartBody(approved.Path(), boundary)
+	body, err := openMultipartBody(approved, boundary)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = body.Close() }()
 
 	getBody := func() (io.ReadCloser, error) {
-		return openMultipartBody(approved.Path(), boundary)
+		return openMultipartBody(approved, boundary)
 	}
 	_, hdr, data, err := c.do(ctx, http.MethodPost, p, nil, contentType, body, getBody)
 	if err != nil {
