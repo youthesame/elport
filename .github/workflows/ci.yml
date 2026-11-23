@@ -66,3 +66,26 @@ jobs:
       - run: uv sync --locked --extra dev
 
       - run: uv run pytest
+
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: gofmt check
+        run: test -z "$(gofmt -l .)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: go build (CGO_ENABLED=0)
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./cmd/elport
