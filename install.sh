@@ -29,12 +29,16 @@ case "$ARCH" in
 esac
 
 if [ -z "$TAG" ]; then
-  TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
-    | sed -n 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  if [ -z "$TAG" ]; then
-    echo "error: could not determine latest release tag" >&2
-    exit 1
-  fi
+  FINAL_URL="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest")"
+  case "$FINAL_URL" in
+    "https://github.com/${REPO}/releases/tag/"*)
+      TAG="${FINAL_URL#"https://github.com/${REPO}/releases/tag/"}"
+      ;;
+    *)
+      echo "error: could not determine latest release tag from ${FINAL_URL}" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 case "$TAG" in
@@ -42,9 +46,14 @@ case "$TAG" in
   *) TAG="v${TAG}" ;;
 esac
 
+if ! printf '%s\n' "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$'; then
+  echo "error: invalid release tag: ${TAG}" >&2
+  exit 1
+fi
+
 case "$TAG" in
   v0.1.*)
-    echo "error: latest release ${TAG} is the Python v0.1.x line; pass ELPORT_VERSION=v0.2.0-alpha.1 to install the Go pre-release" >&2
+    echo "error: latest release ${TAG} is the Python v0.1.x line; pass a Go release tag via ELPORT_VERSION" >&2
     exit 1
     ;;
 esac

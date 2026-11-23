@@ -42,9 +42,24 @@ jobs:
             exit 1
           }
 
+      - name: Verify Homebrew tap token for stable releases
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+        run: |
+          case "$TAG_NAME" in
+            *-*) ;;
+            *)
+              if [ -z "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
+                echo "error: HOMEBREW_TAP_GITHUB_TOKEN secret is required for stable releases" >&2
+                exit 1
+              fi
+              ;;
+          esac
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
 
       - name: Verify ldflags --version matches tag
         env:
@@ -68,6 +83,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      checksums: ${{ steps.export-checksums.outputs.checksums }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -75,7 +92,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: go.mod
+          go-version: stable
 
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
@@ -84,4 +101,104 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
+
+      - name: Export release checksums
+        id: export-checksums
+        run: |
+          test -s dist/checksums.txt
+          {
+            echo "checksums<<EOF"
+            cat dist/checksums.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  attest:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Write checksums from release job
+        env:
+          CHECKSUMS: ${{ needs.release.outputs.checksums }}
+        run: |
+          test -n "$CHECKSUMS" || {
+            echo "error: missing checksums output from release job" >&2
+            exit 1
+          }
+          printf '%s\n' "$CHECKSUMS" > checksums.txt
+
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: checksums.txt
+
+  smoke:
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Smoke test install.sh
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          INSTALL_DIR="${RUNNER_TEMP}/elport-smoke"
+          case "$TAG_NAME" in
+            *-*)
+              ELPORT_VERSION="$TAG_NAME" ELPORT_INSTALL_DIR="$INSTALL_DIR" sh install.sh
+              ;;
+            *)
+              ELPORT_INSTALL_DIR="$INSTALL_DIR" sh install.sh
+              ;;
+          esac
+          got="$("${INSTALL_DIR}/elport" --version)"
+          want="elport ${TAG_NAME#v}"
+          test "$got" = "$want" || {
+            echo "install.sh version mismatch: got '$got', want '$want'" >&2
+            exit 1
+          }
+
+      - name: Smoke test Homebrew cask (stable macOS)
+        if: runner.os == 'macOS' && !contains(github.ref_name, '-')
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          brew install --cask youthesame/tap/elport
+          got="$("$(brew --prefix)/bin/elport" --version)"
+          want="elport ${TAG_NAME#v}"
+          test "$got" = "$want" || {
+            echo "Homebrew version mismatch: got '$got', want '$want'" >&2
+            exit 1
+          }
+
+      - name: Smoke test install.ps1 (Windows PowerShell 5.1)
+        if: runner.os == 'Windows'
+        shell: powershell
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          $env:ELPORT_NO_MODIFY_PATH = "1"
+          $env:ELPORT_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "elport-smoke"
+          if ($env:TAG_NAME.Contains("-")) {
+            $env:ELPORT_VERSION = $env:TAG_NAME
+          } else {
+            Remove-Item Env:ELPORT_VERSION -ErrorAction SilentlyContinue
+          }
+          & .\install.ps1
+          $got = (& (Join-Path $env:ELPORT_INSTALL_DIR "elport.exe") --version).Trim()
+          $want = "elport $($env:TAG_NAME.TrimStart('v'))"
+          if ($got -ne $want) {
+            throw "install.ps1 version mismatch: got '$got', want '$want'"
+          }

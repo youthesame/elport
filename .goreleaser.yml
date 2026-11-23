@@ -52,3 +52,23 @@ changelog:
 
 release:
   prerelease: auto
+
+homebrew_casks:
+  - name: elport
+    ids:
+      - default
+    binaries:
+      - elport
+    homepage: https://github.com/youthesame/elport
+    description: Git-like sync CLI for eLabFTW
+    skip_upload: auto
+    repository:
+      owner: youthesame
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/elport"]
+          end

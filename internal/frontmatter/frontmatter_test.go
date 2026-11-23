@@ -236,4 +236,20 @@ func TestFrontmatterYAML11EdgeCasesAndUTF8Validation(t *testing.T) {
 	if _, ok := frontmatter.DocumentMeta(badUTF8); ok {
 		t.Error("DocumentMeta must reject files with invalid UTF-8 bytes in body")
 	}
+
+	// Underscore-containing YAML 1.1 floats (e.g. "0E0_", "1_0.5") must be quoted on
+	// Render so yaml.v3 does not decode them as !!float on Parse.
+	for _, profile := range []string{"0E0_", "1_0.5"} {
+		meta := frontmatter.NewMeta()
+		meta.Set("id", 1)
+		meta.Set("profile", profile)
+		rendered := frontmatter.Render(meta, "")
+		parsed, _, err := frontmatter.Parse(rendered)
+		if err != nil {
+			t.Fatalf("Parse(Render(%q)) failed: %v\nrendered=%q", profile, err, rendered)
+		}
+		if parsed.Values["profile"] != profile {
+			t.Errorf("profile round-trip for %q = %#v (rendered=%q)", profile, parsed.Values["profile"], rendered)
+		}
+	}
 }

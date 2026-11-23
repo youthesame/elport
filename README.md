@@ -7,9 +7,13 @@ along with every figure and data file the body references, to eLabFTW entities. 
 
 ## Install
 
-Single static binary (no Python or other runtime required).
-
 **macOS / Linux:**
+
+```sh
+brew install youthesame/tap/elport
+```
+
+Without Homebrew:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/youthesame/elport/main/install.sh | sh
@@ -18,18 +22,26 @@ curl -fsSL https://raw.githubusercontent.com/youthesame/elport/main/install.sh |
 **Windows (PowerShell):**
 
 ```powershell
-irm https://raw.githubusercontent.com/youthesame/elport/main/install.ps1 | iex
+irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/install.ps1 | iex
 ```
 
-Or download directly from [GitHub Releases](https://github.com/youthesame/elport/releases) (Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1`).
+<details><summary>Other ways (Go, GitHub Releases)</summary>
+
+- Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@v0.2.0-alpha.1`
+- [GitHub Releases](https://github.com/youthesame/elport/releases) (on macOS, browser downloads are quarantined; prefer Homebrew or `install.sh`)
+
+</details>
 
 ### Upgrading from Python `v0.1.x`
 
-Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` work as-is on all OSes.
+Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` work as-is on all OSes (do not delete them).
+
+1. Uninstall the Python package first (`uv tool uninstall elport`, `pipx uninstall elport`, `pip uninstall elport`, or your conda environment) so it does not shadow the Go binary on `PATH`.
+2. Install the Go binary above, then check `command -v elport` (PowerShell: `Get-Command elport`) and `elport --version` (`0.2.x`).
 
 - **macOS**: on first read of a Keychain entry created by Python `v0.1.x`, macOS prompts once for Keychain access
   (`/usr/bin/security`); click **Always Allow** or re-run `elport login <profile>` once.
-- **Windows / KDE KWallet**: run `elport login <profile>` once after upgrading (native keyring storage format differs).
+- **Windows / Linux (KDE)**: run `elport login <profile>` once after upgrading (native keyring storage format differs).
 - **Python `v0.1.x` line**: preserved on the [`python` branch](https://github.com/youthesame/elport/tree/python) and PyPI.
 
 ## The core idea
