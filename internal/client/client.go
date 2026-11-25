@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/idna"
@@ -271,8 +272,12 @@ func normalizeEntity(entity map[string]any) map[string]any {
 	return entity
 }
 
-func readAllWithIdleTimeout(r io.Reader, idle time.Duration, cancel context.CancelFunc) ([]byte, error) {
-	timer := time.AfterFunc(idle, cancel)
+func readAllWithIdleTimeout(ctx context.Context, r io.Reader, idle time.Duration, cancel context.CancelFunc) ([]byte, error) {
+	var timedOut atomic.Bool
+	timer := time.AfterFunc(idle, func() {
+		timedOut.Store(true)
+		cancel()
+	})
 	defer timer.Stop()
 
 	var out bytes.Buffer
@@ -285,6 +290,12 @@ func readAllWithIdleTimeout(r io.Reader, idle time.Duration, cancel context.Canc
 		}
 		if err != nil {
 			if errors.Is(err, io.EOF) {
+				if timedOut.Load() {
+					return nil, context.DeadlineExceeded
+				}
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
 				return out.Bytes(), nil
 			}
 			return nil, err
@@ -323,7 +334,7 @@ func (c *Client) do(ctx context.Context, method, path string, query url.Values, 
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	data, err := readAllWithIdleTimeout(resp.Body, c.idleTimeout, cancel)
+	data, err := readAllWithIdleTimeout(reqCtx, resp.Body, c.idleTimeout, cancel)
 	if err != nil {
 		return 0, nil, nil, ConnectionError{Root: c.root, Err: err}
 	}
