@@ -15,6 +15,7 @@ import (
 	"github.com/youthesame/elport/internal/config"
 	"github.com/youthesame/elport/internal/frontmatter"
 	"github.com/youthesame/elport/internal/plan"
+	"github.com/youthesame/elport/internal/render"
 	"github.com/youthesame/elport/internal/state"
 	"github.com/youthesame/elport/internal/transclude"
 )
@@ -53,13 +54,23 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 	}
 
 	ignore := ignoreLayers(cfg)
-	localPlan, err := plan.LocalCandidates(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+	docFormat := DocFormat(doc.Meta)
+	var localPlan *plan.LocalResult
+	if docFormat == "html" {
+		localPlan, err = plan.LocalCandidatesHTML(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+	} else {
+		localPlan, err = plan.LocalCandidates(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+	}
 	if err != nil {
 		return "", err
 	}
 
+	hasBase := HasBase(saved)
 	var summary []string
-	if saved == nil {
+	if docFormat != "" {
+		_, _ = fmt.Fprintf(stdout, "format: %s\n", docFormat)
+	}
+	if !hasBase {
 		_, _ = fmt.Fprintln(stdout, "local: base unavailable (comparison unavailable)")
 		summary = append(summary, "no base")
 	} else if doc.Body == LocalBody(strField(saved, "local_base")) {
@@ -100,17 +111,12 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 	}
 
 	WarnUnmatchedAttachments(string(doc.Body), uploads, remote.BaseURL, stderr)
-	if !IsHTML(remoteDoc) {
+	if !IsHTML(remoteDoc) && docFormat != "html" {
 		WarnRawHTMLOnV6(ctx, api, string(doc.Body), stderr)
 	}
 
 	remoteBody := RemoteBody(strField(remoteDoc, "body"))
-	remoteBodies := []string{
-		string(remoteBody),
-		strField(saved, "remote_base"),
-		strField(saved, "pending_remote"),
-	}
-	approved, err := plan.ApproveFromLocal(localPlan, filepath.Dir(docPath), ignore, remoteBodies, savedStringList(saved, "remote_paths"), stderr)
+	approved, err := plan.ApproveFromLocalSources(localPlan, filepath.Dir(docPath), ignore, remoteSourcesForPlan(remoteDoc, saved, remoteBody), savedStringList(saved, "remote_paths"), stderr)
 	if err != nil {
 		return "", err
 	}
@@ -136,13 +142,18 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 		_, _ = fmt.Fprintf(stdout, "uploads reuse: %s\n", strings.Join(reusedNames, ", "))
 	}
 
+	isRegHTML := IsRegisteredHTML(saved)
 	mode := "unknown"
 	if ct, ok := intField(remoteDoc, "content_type"); ok {
 		switch ct {
 		case 2:
 			mode = "markdown"
 		case 1:
-			mode = "html (elport only reads it)"
+			if isRegHTML {
+				mode = "html (published by elport)"
+			} else {
+				mode = "html (elport only reads it)"
+			}
 		default:
 			mode = strconv.Itoa(ct)
 		}
@@ -180,13 +191,34 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 		}
 	}
 
-	if saved == nil {
+	_, hasPP := PendingPublish(saved)
+	if !hasBase {
 		_, _ = fmt.Fprintln(stdout, "remote: base unavailable (comparison unavailable)")
 	} else if remoteBody == RemoteBody(strField(saved, "remote_base")) {
 		_, _ = fmt.Fprintln(stdout, "remote: unchanged")
+	} else if isRegHTML || IsHTML(remoteDoc) || hasPP {
+		_, _ = fmt.Fprintln(stdout, `remote: changed (use "elport diff")`)
+		summary = append(summary, "remote changed")
 	} else {
 		_, _ = fmt.Fprintln(stdout, `remote: changed (use "elport pull")`)
 		summary = append(summary, "remote changed")
+	}
+	if hasPP {
+		_, _ = fmt.Fprintln(stdout, `publish: interrupted (inspect with "elport diff" and re-run "elport push")`)
+		summary = append(summary, "interrupted publish")
+	}
+	if isRegHTML && !IsHTML(remoteDoc) {
+		summary = append(summary, "mode mismatch")
+	}
+	if isRegHTML {
+		savedHash := ShortHash(BodySHA256(strField(saved, "remote_base")))
+		if remoteBody == RemoteBody(strField(saved, "remote_base")) {
+			_, _ = fmt.Fprintf(stdout, "remote sha256: %s (matches remote)\n", savedHash)
+		} else {
+			_, _ = fmt.Fprintf(stdout, "remote sha256: %s (remote is %s)\n", savedHash, ShortHash(BodySHA256(string(remoteBody))))
+		}
+	} else if IsHTML(remoteDoc) {
+		_, _ = fmt.Fprintf(stdout, "remote sha256: %s\n", ShortHash(BodySHA256(string(remoteBody))))
 	}
 	if locked {
 		summary = append(summary, "locked")
@@ -241,7 +273,7 @@ func Diff(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 
 	var other, local, fromFile string
 	if baseOnly {
-		if saved == nil {
+		if !HasBase(saved) {
 			return errors.New("base unavailable; cannot show --base diff")
 		}
 		other = strField(saved, "local_base")
@@ -257,6 +289,91 @@ func Diff(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 		}
 		uploads, err := remote.Uploads(ctx, remoteDoc)
 		if err != nil {
+			return err
+		}
+		docFormat := DocFormat(doc.Meta)
+		if IsHTML(remoteDoc) || docFormat == "html" || IsRegisteredHTML(saved) {
+			rawRemote := strField(remoteDoc, "body")
+			ignore := ignoreLayers(cfg)
+			revertToMD := docFormat == "markdown"
+			var localPlan *plan.LocalResult
+			if revertToMD {
+				localPlan, err = plan.LocalCandidates(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+			} else {
+				localPlan, err = plan.LocalCandidatesHTML(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+			}
+			if err != nil {
+				return err
+			}
+			linkURLs, _, err := resolveDocumentLinks(localPlan.DocRefs(), "", stderr)
+			if err != nil {
+				return err
+			}
+			approved, err := plan.ApproveFromLocalSources(localPlan, filepath.Dir(docPath), ignore, remoteSourcesForPlan(remoteDoc, saved, RemoteBody(rawRemote)), savedStringList(saved, "remote_paths"), stderr)
+			if err != nil {
+				return err
+			}
+			urls := make(map[string]string, len(approved.Files)+len(linkURLs))
+			for _, ap := range approved.Files {
+				if matched, ok := MatchingUpload(ap.Path(), uploads); ok {
+					urls[ap.Path()] = transclude.DownloadURL(remote.BaseURL, matched)
+				} else {
+					urls[ap.Path()] = "UPLOAD_PENDING:" + filepath.Base(ap.Path())
+				}
+			}
+			for k, v := range linkURLs {
+				urls[k] = v
+			}
+			outgoing := transclude.ReplaceSpans(string(doc.Body), approved.Refs, urls)
+			var diffText string
+			if revertToMD {
+				fromText := normalizeRemoteDiff(rawRemote)
+				if IsHTML(remoteDoc) {
+					fromText = render.CanonHTML(rawRemote)
+				}
+				toText := normalizeRemoteDiff(outgoing)
+				ud := difflib.UnifiedDiff{
+					A:        splitLinesKeepEnds(fromText),
+					B:        splitLinesKeepEnds(toText),
+					FromFile: "remote",
+					ToFile:   "local",
+					Context:  3,
+				}
+				diffText, err = difflib.GetUnifiedDiffString(ud)
+				if err != nil {
+					return err
+				}
+			} else {
+				renderedLocal, err := render.MarkdownToHTML(outgoing)
+				if err != nil {
+					return err
+				}
+				if IsHTML(remoteDoc) {
+					diffText, err = CanonHTMLDiff("remote", rawRemote, "local", renderedLocal)
+					if err != nil {
+						return err
+					}
+					if diffText == "" && rawRemote != renderedLocal && stderr != nil {
+						_, _ = fmt.Fprintln(stderr, "note: raw HTML differs although canonical HTML is identical")
+					}
+				} else {
+					ud := difflib.UnifiedDiff{
+						A:        splitLinesKeepEnds(normalizeRemoteDiff(rawRemote)),
+						B:        splitLinesKeepEnds(render.CanonHTML(renderedLocal)),
+						FromFile: "remote",
+						ToFile:   "local",
+						Context:  3,
+					}
+					diffText, err = difflib.GetUnifiedDiffString(ud)
+					if err != nil {
+						return err
+					}
+				}
+			}
+			if stderr != nil {
+				_, _ = fmt.Fprintf(stderr, "remote sha256: %s\n", ShortHash(BodySHA256(rawRemote)))
+			}
+			_, err = io.WriteString(stdout, diffText)
 			return err
 		}
 		relinked := transclude.Relink(strField(remoteDoc, "body"), savedDocLinks(saved))

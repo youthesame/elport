@@ -34,14 +34,15 @@ type writeFakeAPI struct {
 	categories map[string][]map[string]any
 	statuses   map[string][]map[string]any
 
-	calls        []string
-	created      [][2]string
-	patches      []map[string]any
-	uploaded     []string
-	addedTags    []string
-	addedLinks   [][4]string
-	nextID       int
-	nextUploadID int
+	calls             []string
+	created           [][2]string
+	patches           []map[string]any
+	uploaded          []string
+	addedTags         []string
+	addedLinks        [][4]string
+	nextID            int
+	nextUploadID      int
+	createContentType int
 
 	patchTransform func(payload map[string]any) map[string]any
 	onGet          func(entity string, eid int)
@@ -98,11 +99,15 @@ func (f *writeFakeAPI) Create(_ context.Context, entity, title string) (map[stri
 	f.created = append(f.created, [2]string{entity, title})
 	id := f.nextID
 	f.nextID++
+	ct := f.createContentType
+	if ct == 0 {
+		ct = 2
+	}
 	f.entities[fmt.Sprintf("%s/%d", entity, id)] = map[string]any{
 		"id":           json.Number(fmt.Sprintf("%d", id)),
 		"title":        title,
 		"body":         "",
-		"content_type": 2,
+		"content_type": ct,
 		"userid":       json.Number("1"),
 		"team":         json.Number("7"),
 	}
@@ -181,7 +186,7 @@ func (f *writeFakeAPI) Upload(_ context.Context, entity string, eid int, approve
 	if f.onUpload != nil {
 		f.onUpload(entity, eid, name)
 	}
-	// Simulate eLabFTW returning only {"id": uid} so completeUploads must fetch metadata.
+
 	return map[string]any{"id": json.Number(fmt.Sprintf("%d", uid))}, nil
 }
 
@@ -272,7 +277,7 @@ func TestPushCreateUploadReuseAndSameFormBase(t *testing.T) {
 	}
 
 	api := newWriteFakeAPI()
-	// Server normalizes body differently from sent bytes to verify remote_base comes from PATCH response.
+
 	api.patchTransform = func(doc map[string]any) map[string]any {
 		doc["body"] = doc["body"].(string) + "\n<!-- server normalized -->"
 		doc["content_type"] = 2
@@ -294,7 +299,6 @@ func TestPushCreateUploadReuseAndSameFormBase(t *testing.T) {
 		t.Fatalf("addedTags = %v, want [alpha]", api.addedTags)
 	}
 
-	// Front matter should now have id=42, entity=experiments, profile=test while body stays untouched.
 	doc, err := sync.ReadDocument(docPath, testConfig())
 	if err != nil {
 		t.Fatal(err)
@@ -317,7 +321,6 @@ func TestPushCreateUploadReuseAndSameFormBase(t *testing.T) {
 		t.Fatalf("local_base mismatch: %q", saved["local_base"])
 	}
 
-	// Second push with unchanged body and identical attachment should reuse upload and skip PATCH.
 	api.patches = nil
 	api.uploaded = nil
 	out.Reset()
@@ -369,7 +372,6 @@ func TestPushResumesAfterInterruptedCreate(t *testing.T) {
 				t.Fatalf("expected pending_create=true, got %v", saved)
 			}
 
-			// Plain retry without --force must succeed and not create a duplicate entity.
 			out.Reset()
 			errBuf.Reset()
 			if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
@@ -446,7 +448,7 @@ func TestPushPermissionsWideningAndNarrowingOrder(t *testing.T) {
 	}
 
 	var out, errBuf bytes.Buffer
-	// Without --yes and without TTY, widening write->account must fail before any PATCH or upload.
+
 	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err == nil || !strings.Contains(err.Error(), "permission widening requires confirmation") {
 		t.Fatalf("expected widening confirmation error, got: %v", err)
 	}
@@ -454,7 +456,6 @@ func TestPushPermissionsWideningAndNarrowingOrder(t *testing.T) {
 		t.Fatalf("expected no writes before confirmation, patches=%d uploaded=%d", len(api.patches), len(api.uploaded))
 	}
 
-	// With --yes, narrowing (read->owner) must PATCH BEFORE upload, and individual grants must warn.
 	api.calls = nil
 	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{AssumeYes: true, WorkDir: dir}, &out, &errBuf); err != nil {
 		t.Fatalf("Push with --yes failed: %v", err)
@@ -497,7 +498,7 @@ func TestPushDocumentLinksAndRemoteLinkedExclusion(t *testing.T) {
 	if err := os.WriteFile(docPath, []byte("---\nid: 13\nentity: experiments\nprofile: test\n---\n\n[o](other.md) [s](secret.csv)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Remote body already contained a bare path to secret.csv (written by someone else).
+
 	if err := state.Save("https://e.example", "experiments", "13", map[string]any{
 		"remote_base": "[s](secret.csv)",
 		"local_base":  "old",
@@ -512,7 +513,7 @@ func TestPushDocumentLinksAndRemoteLinkedExclusion(t *testing.T) {
 	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
-	// secret.csv must NOT be uploaded; other.md must be rewritten to database.php URL and linked once.
+
 	if len(api.uploaded) != 0 {
 		t.Fatalf("remote-linked file was uploaded: %v", api.uploaded)
 	}
@@ -564,7 +565,6 @@ func TestPullConflictAndGitMergeFlow(t *testing.T) {
 		t.Fatalf("missing .remote.md sidecar: %v", err)
 	}
 
-	// Verify CRLF in a sidecar is normalized cleanly before git merge-file.
 	rawRemote, _ := os.ReadFile(sync.SidecarPath(docPath))
 	if err := os.WriteFile(sync.SidecarPath(docPath), bytes.ReplaceAll(rawRemote, []byte("\n"), []byte("\r\n")), 0o644); err != nil {
 		t.Fatal(err)
@@ -593,7 +593,6 @@ func TestPullConflictAndGitMergeFlow(t *testing.T) {
 		t.Fatalf("mergedBody = %q", mergedBody)
 	}
 
-	// Promoted base allows regular push without --force.
 	out.Reset()
 	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
 		t.Fatalf("regular push after merge failed: %v", err)
@@ -639,7 +638,7 @@ func TestPullMetadataMergeAndNoBaseConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Local title edit preserved, Web category taken, tags unioned.
+
 	if doc.Meta.Values["title"] != "Local Edit" {
 		t.Fatalf("local title edit lost: %v", doc.Meta.Values["title"])
 	}
@@ -650,7 +649,6 @@ func TestPullMetadataMergeAndNoBaseConflict(t *testing.T) {
 		t.Fatalf("local dirty body changed: %q", doc.Body)
 	}
 
-	// No-base conflict on a different document writes .remote.md without overwriting local doc.
 	doc2 := filepath.Join(dir, "other.md")
 	if err := os.WriteFile(doc2, []byte("---\nid: 10\nentity: experiments\nprofile: test\n---\n\nmy local notes\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -709,8 +707,7 @@ func TestMergeResolvedWithoutGitAndRefusesAttachmentConflict(t *testing.T) {
 }
 
 func TestPushPendingCreateForcePatchFailurePreservesRemotePathsAndConflict(t *testing.T) {
-	// Interrupted create -> conflict recording secret.csv in pending_remote -> Web removes link
-	// -> push --force fails at PATCH -> next plain push must still conflict AND secret.csv must remain blocked.
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	docPath := filepath.Join(dir, "report.md")
@@ -732,7 +729,7 @@ func TestPushPendingCreateForcePatchFailurePreservesRemotePathsAndConflict(t *te
 	}
 
 	api := newWriteFakeAPI()
-	// Web side already removed the link from remote body.
+
 	api.entities["experiments/21"] = map[string]any{"body": "clean remote\n", "content_type": 2, "userid": 1, "team": 7}
 	api.failPatchOnce = true
 
@@ -744,7 +741,6 @@ func TestPushPendingCreateForcePatchFailurePreservesRemotePathsAndConflict(t *te
 		t.Fatalf("remote-linked secret.csv must not be uploaded during failed force push: %v", api.uploaded)
 	}
 
-	// Next plain push must NOT skip conflict detection (pending_remote must survive failed PATCH).
 	api.patches = nil
 	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err == nil || !strings.Contains(err.Error(), "remote changed") {
 		t.Fatalf("expected conflict on plain push after failed force PATCH, got: %v", err)
@@ -753,7 +749,6 @@ func TestPushPendingCreateForcePatchFailurePreservesRemotePathsAndConflict(t *te
 		t.Fatalf("plain push must not PATCH on unresolved conflict")
 	}
 
-	// Even a subsequent --force push must still remember secret.csv in remote_paths and NOT upload it.
 	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); err != nil {
 		t.Fatalf("second force push failed: %v", err)
 	}

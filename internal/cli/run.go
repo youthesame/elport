@@ -728,13 +728,14 @@ func runDocOne(ctx context.Context, cmd *Command, docPath string, stdin io.Reade
 	case "push":
 		wd, _ := env.workDir()
 		s, err := sync.Push(ctx, docPath, c, data, sync.PushOptions{
-			Profile:   cmd.Profile,
-			DryRun:    cmd.DryRun,
-			Force:     cmd.Force,
-			AssumeYes: cmd.Yes,
-			Stdin:     stdin,
-			CanPrompt: !batch && env.canPrompt(stdin, stdout),
-			WorkDir:   wd,
+			Profile:       cmd.Profile,
+			DryRun:        cmd.DryRun,
+			Force:         cmd.Force,
+			AssumeYes:     cmd.Yes,
+			ConfirmRemote: cmd.ConfirmRemote,
+			Stdin:         stdin,
+			CanPrompt:     !batch && env.canPrompt(stdin, stdout),
+			WorkDir:       wd,
 		}, stdout, stderr)
 		return s, true, err
 	case "pull":
@@ -767,6 +768,10 @@ func runDocCommand(ctx context.Context, cmd *Command, stdin io.Reader, stdout, s
 	}
 	if cmd.Force {
 		_, _ = fmt.Fprintln(stderr, "--force works on one document at a time")
+		return ExitError
+	}
+	if cmd.ConfirmRemote != "" {
+		_, _ = fmt.Fprintln(stderr, "--confirm-remote works on one document at a time")
 		return ExitError
 	}
 	docs, skipped := expandDocPaths(cmd.Docs)

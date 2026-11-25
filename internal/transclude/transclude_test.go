@@ -221,8 +221,7 @@ func TestTranscludeGoldenReadableHTML(t *testing.T) {
 }
 
 func TestPlanDotfileSymlinkAndDocumentLinks(t *testing.T) {
-	// Files under hidden paths (as written or via symlink) must never be planned,
-	// while a document living inside a hidden parent can still reference siblings.
+
 	root := t.TempDir()
 	docDir := filepath.Join(root, ".hidden-workspace", "exp1")
 	if err := os.MkdirAll(docDir, 0o755); err != nil {
@@ -275,8 +274,7 @@ func TestPlanDotfileSymlinkAndDocumentLinks(t *testing.T) {
 }
 
 func TestNestedBracketsNoDoubleExtractAndReplaceNoPanic(t *testing.T) {
-	// Nested brackets like [see [data](data.csv)] must extract the link once so
-	// ReplaceSpans never slices backward and panics.
+
 	dir := t.TempDir()
 	dataFile := filepath.Join(dir, "data.csv")
 	if err := os.WriteFile(dataFile, []byte("a,b\n"), 0o644); err != nil {
@@ -297,8 +295,7 @@ func TestNestedBracketsNoDoubleExtractAndReplaceNoPanic(t *testing.T) {
 }
 
 func TestAbsoluteHiddenSegmentAndSymlinkDotDotResolution(t *testing.T) {
-	// Absolute references containing /.private/../ must still be rejected as hidden,
-	// and symlink/../file must resolve the symlink before applying "..".
+
 	root := t.TempDir()
 	work := filepath.Join(root, "work")
 	otherSub := filepath.Join(root, "other", "sub")
@@ -362,8 +359,7 @@ func TestQueryEmptyFirstParamNameUploadsOrderSafeNameWinDriveAndReadableHTML(t *
 }
 
 func TestExtractNeverMatchesInsideCodeFenceRapid(t *testing.T) {
-	// Masking invariant: arbitrary Markdown links inside a fenced block must
-	// never produce extracted references.
+
 	rapid.Check(t, func(t *rapid.T) {
 		inner := rapid.StringMatching(`[A-Za-z0-9_./ -]{1,20}`).Draw(t, "path")
 		md := "```\n![x](" + inner + ")\n<img src=\"" + inner + "\">\n```\n"
@@ -420,4 +416,76 @@ func FuzzReadableHTML(f *testing.F) {
 	f.Fuzz(func(_ *testing.T, text string) {
 		_ = transclude.ReadableHTML(text)
 	})
+}
+
+func TestBareHTMLPathsIgnoresMarkdownBackticksAndAvoidsDoubleUnescape(t *testing.T) {
+
+	htmlDoc := "<p>`<img src=\"secret.csv\">` and ```\n<a href=\"other.csv#top\">x</a>\n```</p>" +
+		"<!-- <img src=\"comment.png\"> -->" +
+		"<pre><code>&lt;img src=\"escaped.png\"&gt;</code></pre>" +
+		"<img src=\"a&amp;b.png\">" +
+		"<img src=\"double&amp;amp;b.png\">" +
+		"<img src=\"app/download.php?f=a/b&amp;name=c.png&amp;storage=1\">" +
+		"<a href=\"https://example.com\">ext</a>" +
+		"<a href=\"#anchor\">local</a>"
+
+	got := transclude.BareHTMLPaths(htmlDoc)
+	want := []string{"secret.csv", "other.csv#top", "a&b.png", "double&amp;b.png"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("BareHTMLPaths = %#v, want %#v", got, want)
+	}
+
+	mdGot := transclude.BarePathsForMode("`<img src=\"secret.csv\">`", 2)
+	if len(mdGot) != 0 {
+		t.Errorf("Markdown BarePathsForMode should mask inline code, got %#v", mdGot)
+	}
+	htmlGot := transclude.BarePathsForMode("`<img src=\"secret.csv\">`", 1)
+	if !slices.Equal(htmlGot, []string{"secret.csv"}) {
+		t.Errorf("HTML BarePathsForMode = %#v, want [secret.csv]", htmlGot)
+	}
+}
+
+func TestScanMathAndPlanHTMLMasksMathReferences(t *testing.T) {
+
+	dir := t.TempDir()
+	for _, name := range []string{"t", "fig.png"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	md := "Formula $x_{[1]}(t)$ and \\(y_{[2]}(t)\\) and price \\$100 to \\$200, plus ![ok](fig.png)\n\n" +
+		"$$\nz_{[3]}(t)\n$$\n\n" +
+		"`$not_math$`\n"
+
+	spans, escaped := transclude.ScanMath(md)
+	if len(spans) != 3 {
+		t.Fatalf("ScanMath spans = %+v, want 3", spans)
+	}
+	if spans[0].Display || spans[1].Display || !spans[2].Display {
+		t.Errorf("unexpected Display flags: %+v", spans)
+	}
+	if len(escaped) != 2 {
+		t.Errorf("expected 2 escaped dollars, got %v", escaped)
+	}
+
+	refs, err := transclude.PlanHTML(md, dir, nil, nil)
+	if err != nil {
+		t.Fatalf("PlanHTML: %v", err)
+	}
+	if len(refs) != 1 || filepath.Base(refs[0].File) != "fig.png" {
+		t.Fatalf("PlanHTML refs = %+v, want only fig.png (math [1](t) masked)", refs)
+	}
+
+	dollarFile := filepath.Join(dir, "plot$2025$.png")
+	if err := os.WriteFile(dollarFile, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refsDollar, err := transclude.PlanHTML("![photo](plot$2025$.png)\n", dir, nil, nil)
+	if err != nil {
+		t.Fatalf("PlanHTML dollar dest: %v", err)
+	}
+	if len(refsDollar) != 1 || filepath.Base(refsDollar[0].File) != "plot$2025$.png" {
+		t.Fatalf("PlanHTML dollar dest refs = %+v, want plot$2025$.png", refsDollar)
+	}
 }

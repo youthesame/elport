@@ -15,18 +15,20 @@ import (
 	"github.com/youthesame/elport/internal/config"
 	"github.com/youthesame/elport/internal/frontmatter"
 	"github.com/youthesame/elport/internal/plan"
+	"github.com/youthesame/elport/internal/render"
 	"github.com/youthesame/elport/internal/state"
 	"github.com/youthesame/elport/internal/transclude"
 )
 
 type PushOptions struct {
-	Profile   string
-	DryRun    bool
-	Force     bool
-	AssumeYes bool
-	Stdin     io.Reader
-	CanPrompt bool
-	WorkDir   string
+	Profile       string
+	DryRun        bool
+	Force         bool
+	AssumeYes     bool
+	ConfirmRemote string
+	Stdin         io.Reader
+	CanPrompt     bool
+	WorkDir       string
 }
 
 type docLinkTarget struct {
@@ -311,6 +313,16 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 	if err != nil {
 		return "", err
 	}
+	confirmHex := ""
+	if opts.ConfirmRemote != "" {
+		confirmHex, err = ValidateConfirmHash(opts.ConfirmRemote)
+		if err != nil {
+			return "", err
+		}
+	}
+	docFormat := DocFormat(doc.Meta)
+	wantHTML := docFormat == "html"
+	explicitMD := docFormat == "markdown"
 	if !opts.Force {
 		if checkUnresolvedMergeMarkers(string(doc.Body)) {
 			return "", fmt.Errorf("unresolved merge markers in %s; resolve them or use --force", docPath)
@@ -336,7 +348,12 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 	}
 
 	ignore := ignoreLayers(cfg)
-	localPlan, err := plan.LocalCandidates(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(meta), stderr)
+	var localPlan *plan.LocalResult
+	if wantHTML {
+		localPlan, err = plan.LocalCandidatesHTML(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(meta), stderr)
+	} else {
+		localPlan, err = plan.LocalCandidates(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(meta), stderr)
+	}
 	if err != nil {
 		return "", err
 	}
@@ -347,7 +364,18 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 
 	var remote *Remote
 	var saved map[string]any
+	var unlockState func()
 	if doc.HasID {
+		var lerr error
+		unlockState, lerr = state.Lock(baseURL, doc.Entity, strconv.Itoa(doc.ID))
+		if lerr != nil {
+			return "", lerr
+		}
+		defer func() {
+			if unlockState != nil {
+				unlockState()
+			}
+		}()
 		remote = &Remote{API: api, Entity: doc.Entity, ID: doc.ID, BaseURL: baseURL}
 		saved, err = state.Load(baseURL, doc.Entity, strconv.Itoa(doc.ID))
 		if err != nil {
@@ -404,11 +432,129 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 		hasStatus = true
 	}
 
-	if err := RefuseHTML(remoteDoc, doc.Entity, doc.ID); err != nil {
-		return "", err
-	}
+	remoteBody := RemoteBody(strField(remoteDoc, "body"))
+	savedRemoteBase := RemoteBody(strField(saved, "remote_base"))
+	curCT := remoteContentType(remoteDoc)
+	hasBase := HasBase(saved)
+	isRegHTML := IsRegisteredHTML(saved)
+	pp, hasPP := PendingPublish(saved)
 	if truthyField(remoteDoc, "locked") {
 		return "", fmt.Errorf("%s/%d is locked; unlock it in the Web UI to push (--force does not override a lock)", doc.Entity, doc.ID)
+	}
+	pendingUnchanged := hasPP && remote != nil && string(remoteBody) == pp.PreBody && curCT == pp.PreCT
+	resuming := hasBase && truthyField(saved, "pending_create") && truthyField(saved, "body_sent") && !hasKey(saved, "pending_remote") && !wantHTML && !isRegHTML && !hasPP
+
+	targetCT := 2
+	needsPending := false
+	htmlFlow := false
+	adopting := false
+
+	formatMatchesPending := (wantHTML && pp.TargetCT == 1) || (explicitMD && pp.TargetCT == 2)
+	if hasPP && !pendingUnchanged {
+		if sameValidUserID(pp.User, identity["userid"]) && ConfirmMatches(confirmHex, string(remoteBody)) && formatMatchesPending {
+			targetCT = pp.TargetCT
+			htmlFlow = true
+			if targetCT == 2 {
+				needsPending = IsHTML(remoteDoc)
+			} else {
+				needsPending = !IsHTML(remoteDoc) || !isRegHTML
+			}
+		} else {
+			if !opts.DryRun && IsHTML(remoteDoc) {
+				writeHTMLConflictDiff(string(savedRemoteBase), string(remoteBody), stderr)
+			}
+			if !sameValidUserID(pp.User, identity["userid"]) {
+				return "", fmt.Errorf("an earlier publish on %s/%d by another user is unresolved; inspect with 'elport diff' and recover with the same account", doc.Entity, doc.ID)
+			}
+			wantFmt := "html"
+			if pp.TargetCT == 2 {
+				wantFmt = "markdown"
+			}
+			return "", fmt.Errorf("an earlier publish on %s/%d was interrupted and the remote changed; keep 'format: %s', inspect with 'elport diff', and re-run with --confirm-remote %s", doc.Entity, doc.ID, wantFmt, ShortHash(BodySHA256(string(remoteBody))))
+		}
+	} else if isRegHTML && remote != nil && !IsHTML(remoteDoc) {
+		if wantHTML && ConfirmMatches(confirmHex, string(remoteBody)) {
+			targetCT = 1
+			needsPending = true
+			htmlFlow = true
+		} else if explicitMD && ConfirmMatches(confirmHex, string(remoteBody)) {
+			targetCT = 2
+			htmlFlow = true
+		} else {
+			return "", fmt.Errorf("%s/%d is published in html format, but the server is now in markdown mode; inspect with 'elport diff' and re-run with --confirm-remote %s (keep 'format: html' or set 'format: markdown' explicitly)", doc.Entity, doc.ID, ShortHash(BodySHA256(string(remoteBody))))
+		}
+	} else if wantHTML {
+		targetCT = 1
+		htmlFlow = true
+		emptyFresh := !doc.HasID || (remote != nil && strings.TrimSpace(string(remoteBody)) == "" && !(hasBase && strField(saved, "remote_base") != "") && !isRegHTML)
+		if emptyFresh {
+			needsPending = true
+		} else if remote != nil && !IsHTML(remoteDoc) {
+			if !isConfirmedMdBase(saved) {
+				return "", fmt.Errorf("base unavailable on this machine; run 'elport pull' first before migrating %s/%d to html format", doc.Entity, doc.ID)
+			}
+			if remoteBody != savedRemoteBase {
+				return "", fmt.Errorf("remote changed since last sync; run 'elport pull' (and 'elport merge' if needed) before migrating %s/%d to html format", doc.Entity, doc.ID)
+			}
+			needsPending = true
+		} else if isRegHTML {
+			if remoteBody != savedRemoteBase && !ConfirmMatches(confirmHex, string(remoteBody)) {
+				if !opts.DryRun {
+					writeHTMLConflictDiff(string(savedRemoteBase), string(remoteBody), stderr)
+				}
+				return "", fmt.Errorf("remote HTML changed (edited in the Web UI?); inspect with 'elport diff', port changes locally, and re-run with --confirm-remote %s (--force does not override HTML conflicts)", ShortHash(BodySHA256(string(remoteBody))))
+			}
+		} else {
+			_, hasRemoteUID := validUserID(remoteDoc["userid"])
+			_, hasMeUID := validUserID(identity["userid"])
+			if sameValidUserID(remoteDoc["userid"], identity["userid"]) && ConfirmMatches(confirmHex, string(remoteBody)) {
+				adopting = true
+			} else if !hasRemoteUID || !hasMeUID {
+				opt := ""
+				if doc.Entity == "items" {
+					opt = " --entity items"
+				}
+				return "", HtmlEntityError{
+					Msg: fmt.Sprintf("%s/%d is an unregistered HTML entity and ownership could not be verified; elport only reads those: elport view %d%s -o DIR", doc.Entity, doc.ID, doc.ID, opt),
+				}
+			} else if !sameValidUserID(remoteDoc["userid"], identity["userid"]) {
+				opt := ""
+				if doc.Entity == "items" {
+					opt = " --entity items"
+				}
+				return "", HtmlEntityError{
+					Msg: fmt.Sprintf("%s/%d is an unregistered HTML entity owned by another user; elport only reads those: elport view %d%s -o DIR", doc.Entity, doc.ID, doc.ID, opt),
+				}
+			} else {
+				return "", HtmlEntityError{
+					Msg: fmt.Sprintf("%s/%d is an unregistered HTML entity on this machine; inspect with 'elport diff' and re-run with --confirm-remote %s to adopt (--force does not override HTML entities)", doc.Entity, doc.ID, ShortHash(BodySHA256(string(remoteBody)))),
+				}
+			}
+		}
+	} else if remote != nil && IsHTML(remoteDoc) {
+		if isRegHTML {
+			if explicitMD {
+				if remoteBody != savedRemoteBase && !ConfirmMatches(confirmHex, string(remoteBody)) {
+					if !opts.DryRun {
+						writeHTMLConflictDiff(string(savedRemoteBase), string(remoteBody), stderr)
+					}
+					return "", fmt.Errorf("remote HTML changed (edited in the Web UI?); inspect with 'elport diff', port changes locally, and re-run with --confirm-remote %s (--force does not override HTML conflicts)", ShortHash(BodySHA256(string(remoteBody))))
+				}
+				targetCT = 2
+				needsPending = true
+				htmlFlow = true
+			} else {
+				return "", HtmlEntityError{
+					Msg: fmt.Sprintf("%s/%d is published in html format; restore 'format: html' in front matter, or set 'format: markdown' explicitly to revert", doc.Entity, doc.ID),
+				}
+			}
+		} else if err := RefuseHTML(remoteDoc, doc.Entity, doc.ID); err != nil {
+			return "", err
+		}
+	}
+
+	if htmlFlow && remote != nil && confirmHex != "" && !ConfirmMatches(confirmHex, string(remoteBody)) {
+		return "", fmt.Errorf("--confirm-remote does not match current remote body (remote sha256: %s); inspect with 'elport diff'", ShortHash(BodySHA256(string(remoteBody))))
 	}
 
 	permChanges := PermissionChanges(edited, remoteDoc, identity, doc.HasID)
@@ -426,30 +572,27 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 		}
 	}
 
-	if doc.HasID && saved == nil && !opts.Force {
-		return "", errors.New("base unavailable on this machine; run elport pull first. --force overwrites the remote without comparing")
-	}
-
-	resuming := saved != nil && truthyField(saved, "pending_create") && truthyField(saved, "body_sent") && !hasKey(saved, "pending_remote")
-	remoteBody := RemoteBody(strField(remoteDoc, "body"))
-	savedRemoteBase := RemoteBody(strField(saved, "remote_base"))
-
-	if remote != nil && saved != nil && !resuming && remoteBody != savedRemoteBase && !opts.Force {
-		msg := "remote changed (edited in the Web UI?); run elport pull, then elport merge. --force discards the remote edit"
-		if opts.DryRun {
-			return "", errors.New(msg)
+	if !htmlFlow {
+		if doc.HasID && !hasBase && !opts.Force {
+			return "", errors.New("base unavailable on this machine; run elport pull first. --force overwrites the remote without comparing")
 		}
-		uploads, err := remote.Uploads(ctx, remoteDoc)
-		if err != nil {
-			return "", err
+		if remote != nil && hasBase && !resuming && remoteBody != savedRemoteBase && !opts.Force {
+			msg := "remote changed (edited in the Web UI?); run elport pull, then elport merge. --force discards the remote edit"
+			if opts.DryRun {
+				return "", errors.New(msg)
+			}
+			uploads, err := remote.Uploads(ctx, remoteDoc)
+			if err != nil {
+				return "", err
+			}
+			return "", raiseConflict(ctx, docPath, remoteBody, saved, uploads, remote, msg, stderr)
 		}
-		return "", raiseConflict(ctx, docPath, remoteBody, saved, uploads, remote, msg, stderr)
-	}
-	if opts.Force && remote != nil && saved != nil && !resuming && remoteBody != savedRemoteBase && !opts.DryRun && stderr != nil {
-		_, _ = fmt.Fprintln(stderr, "warning: --force is discarding a remote change (the Web-side edit will be lost)")
-	}
-	if resuming && !opts.DryRun && remoteBody != "" && stderr != nil {
-		_, _ = fmt.Fprintln(stderr, "warning: resuming an interrupted creation; the remote body is being overwritten")
+		if opts.Force && remote != nil && hasBase && !resuming && remoteBody != savedRemoteBase && !opts.DryRun && stderr != nil {
+			_, _ = fmt.Fprintln(stderr, "warning: --force is discarding a remote change (the Web-side edit will be lost)")
+		}
+		if resuming && !opts.DryRun && remoteBody != "" && stderr != nil {
+			_, _ = fmt.Fprintln(stderr, "warning: resuming an interrupted creation; the remote body is being overwritten")
+		}
 	}
 	if !opts.DryRun {
 		if err := confirmPermissionWidening(ctx, permChanges, opts, stdout); err != nil {
@@ -460,11 +603,12 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 		}
 	}
 
-	approved, err := plan.ApproveFromLocal(
+	remoteSources := remoteSourcesForPlan(remoteDoc, saved, remoteBody)
+	approved, err := plan.ApproveFromLocalSources(
 		localPlan,
 		filepath.Dir(docPath),
 		ignore,
-		[]string{string(remoteBody), strField(saved, "remote_base"), strField(saved, "pending_remote")},
+		remoteSources,
 		savedStringList(saved, "remote_paths"),
 		stderr,
 	)
@@ -473,7 +617,7 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 	}
 
 	var uploads []transclude.Upload
-	if remote != nil && len(approved.Files) > 0 {
+	if remote != nil && (len(approved.Files) > 0 || strings.Contains(string(remoteBody), "app/download.php?")) {
 		uploads, err = remote.Uploads(ctx, remoteDoc)
 		if err != nil {
 			return "", err
@@ -540,7 +684,20 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 				_, _ = fmt.Fprintf(stdout, "%s -> %s%s\n", ref.Path, linkURLs[ref.Doc], ref.Fragment)
 			}
 		}
-		WarnRawHTMLOnV6(ctx, api, string(doc.Body), stderr)
+		if confirmHex != "" && doc.HasID {
+			curLabel := "markdown"
+			if curCT == 1 {
+				curLabel = "html"
+			}
+			tgtLabel := "markdown"
+			if targetCT == 1 {
+				tgtLabel = "html"
+			}
+			_, _ = fmt.Fprintf(stdout, "confirmed: %s %s/%d (%s → %s)\n", strings.TrimRight(baseURL, "/"), doc.Entity, doc.ID, curLabel, tgtLabel)
+		}
+		if targetCT != 1 {
+			WarnRawHTMLOnV6(ctx, api, string(doc.Body), stderr)
+		}
 		return "dry run", nil
 	}
 
@@ -563,18 +720,41 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 		if err != nil {
 			return "", err
 		}
+		unlockNew, lerr := state.Lock(baseURL, doc.Entity, strconv.Itoa(eid))
+		if lerr != nil {
+			return "", lerr
+		}
+		defer unlockNew()
 		meta.Set("id", eid)
 		meta.Set("entity", doc.Entity)
 		meta.Set("profile", resolvedProfile)
 		if err := AtomicWriteDoc(docPath, frontmatter.Render(meta, string(doc.Body))); err != nil {
 			return "", err
 		}
-		if err := MarkCreated(baseURL, doc.Entity, eid, false); err != nil {
-			return "", err
+		remote = &Remote{API: api, Entity: doc.Entity, ID: eid, BaseURL: baseURL}
+		if targetCT == 1 {
+			createdDoc, gerr := remote.Get(ctx)
+			if gerr != nil {
+				return "", gerr
+			}
+			remoteDoc = createdDoc
+			remoteBody = RemoteBody(strField(createdDoc, "body"))
+			curCT = remoteContentType(createdDoc)
+			if truthyField(createdDoc, "locked") {
+				return "", fmt.Errorf("%s/%d is locked; unlock it in the Web UI to push (--force does not override a lock)", doc.Entity, eid)
+			}
+			if strings.TrimSpace(string(remoteBody)) != "" {
+				return "", fmt.Errorf("%s/%d was modified immediately after creation; inspect with 'elport diff'", doc.Entity, eid)
+			}
+		} else {
+			if err := MarkCreated(baseURL, doc.Entity, eid, false); err != nil {
+				return "", err
+			}
+			pendingCreate = true
 		}
-		pendingCreate = true
+	} else {
+		remote = &Remote{API: api, Entity: doc.Entity, ID: eid, BaseURL: baseURL}
 	}
-	remote = &Remote{API: api, Entity: doc.Entity, ID: eid, BaseURL: baseURL}
 
 	narrowing := map[string]any{}
 	for _, ch := range permChanges {
@@ -614,10 +794,17 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 	}
 	docLinks := writtenLinks(approved.Refs, string(doc.Body), urls)
 
-	sent := transclude.ReplaceSpans(string(doc.Body), approved.Refs, urls)
+	outgoing := transclude.ReplaceSpans(string(doc.Body), approved.Refs, urls)
+	sent := outgoing
+	if targetCT == 1 {
+		sent, err = render.MarkdownToHTML(outgoing)
+		if err != nil {
+			return "", err
+		}
+	}
 	payload := map[string]any{
 		"body":         sent,
-		"content_type": 2,
+		"content_type": targetCT,
 	}
 	if title := strField(edited, "title"); title != "" {
 		payload["title"] = title
@@ -646,43 +833,98 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 			break
 		}
 	}
-	unchanged := saved != nil &&
+	selectedURLs := selectedAttachmentURLs(approved, urls)
+	attachmentsMatch := targetCT != 1 || stringSlicesEqual(selectedURLs, savedStringList(saved, "attachment_urls"))
+	unchanged := hasBase &&
 		!pendingCreate &&
+		!hasPP &&
+		!needsPending &&
+		!adopting &&
+		savedBaseContentType(saved) == targetCT &&
 		doc.Body == LocalBody(strField(saved, "local_base")) &&
 		remoteBody == savedRemoteBase &&
 		docLinksEqual(docLinks, savedDocLinks(saved)) &&
 		len(newUploads) == 0 &&
+		attachmentsMatch &&
 		len(transclude.UnmatchedDownloadURLs(string(remoteBody), uploads, baseURL)) == 0 &&
 		payloadMatchesRemote
 
-	if doc.HasID && !unchanged && (len(approved.Files) > 0 || moved) {
+	if !unchanged && (htmlFlow || (doc.HasID && (len(approved.Files) > 0 || moved))) {
 		latest, err := remote.Get(ctx)
 		if err != nil {
 			return "", err
 		}
-		if err := RefuseHTML(latest, doc.Entity, eid); err != nil {
-			return "", err
-		}
+		detail := htmlPushFailureDetail(newUploads, len(narrowing) > 0)
 		if truthyField(latest, "locked") {
-			return "", fmt.Errorf("%s/%d is locked; unlock it in the Web UI to push (--force does not override a lock)", doc.Entity, eid)
+			return "", fmt.Errorf("%s/%d is locked; unlock it in the Web UI to push (--force does not override a lock)%s", doc.Entity, eid, detail)
 		}
-		if saved != nil && !opts.Force {
-			reference := savedRemoteBase
-			if resuming {
-				reference = remoteBody
+		latestBody := RemoteBody(strField(latest, "body"))
+		if htmlFlow {
+			if adopting && !sameValidUserID(latest["userid"], identity["userid"]) {
+				return "", fmt.Errorf("remote ownership changed before body update: %w%s", HtmlEntityError{
+					Msg: fmt.Sprintf("%s/%d is no longer owned by the authenticated user", doc.Entity, eid),
+				}, detail)
 			}
-			latestBody := RemoteBody(strField(latest, "body"))
-			if latestBody != reference {
-				latestUploads, err := remote.Uploads(ctx, latest)
-				if err != nil {
-					return "", err
+			if remoteContentType(latest) != curCT {
+				return "", fmt.Errorf("remote mode changed before body update%s", detail)
+			}
+			if latestBody != remoteBody || (confirmHex != "" && !ConfirmMatches(confirmHex, string(latestBody))) {
+				if IsHTML(latest) {
+					writeHTMLConflictDiff(string(savedRemoteBase), string(latestBody), stderr)
 				}
-				return "", raiseConflict(ctx, docPath, latestBody, saved, latestUploads, remote, "remote changed after uploads; body was not updated and uploads remain", stderr)
+				if isRegHTML || (hasPP && sameValidUserID(pp.User, identity["userid"])) || adopting {
+					return "", fmt.Errorf("remote changed before body update; re-run with --confirm-remote %s%s", ShortHash(BodySHA256(string(latestBody))), detail)
+				}
+				if IsHTML(latest) && strings.TrimSpace(string(latestBody)) != "" {
+					return "", fmt.Errorf("remote changed before body update: %w%s", RefuseHTML(latest, doc.Entity, eid), detail)
+				}
+				return "", fmt.Errorf("remote changed before body update; inspect with 'elport diff'%s", detail)
+			}
+		} else {
+			if err := RefuseHTML(latest, doc.Entity, eid); err != nil {
+				return "", err
+			}
+			if hasBase && !opts.Force {
+				reference := savedRemoteBase
+				if resuming {
+					reference = remoteBody
+				}
+				if latestBody != reference {
+					latestUploads, err := remote.Uploads(ctx, latest)
+					if err != nil {
+						return "", err
+					}
+					return "", raiseConflict(ctx, docPath, latestBody, saved, latestUploads, remote, "remote changed after uploads; body was not updated and uploads remain", stderr)
+				}
 			}
 		}
 	}
 
-	if pendingCreate {
+	if htmlFlow && !unchanged {
+		rememberedPre := rememberRemotePathsForSources(saved, remoteSources...)
+		hasNewRemotePaths := !stringSlicesEqual(rememberedPre, savedStringList(saved, "remote_paths"))
+		if needsPending || hasPP || hasNewRemotePaths {
+			provisional := map[string]any{}
+			for k, v := range saved {
+				provisional[k] = v
+			}
+			delete(provisional, "pending_create")
+			delete(provisional, "body_sent")
+			if needsPending && !hasPP {
+				var ppUser any
+				if uid, ok := validUserID(identity["userid"]); ok {
+					ppUser = uid
+				}
+				provisional["pending_publish"] = pendingPublishMap(targetCT, ppUser, string(remoteBody), curCT)
+			}
+			if len(rememberedPre) > 0 {
+				provisional["remote_paths"] = rememberedPre
+			}
+			if err := state.Save(baseURL, doc.Entity, strconv.Itoa(eid), provisional); err != nil {
+				return "", err
+			}
+		}
+	} else if pendingCreate && !htmlFlow {
 		provisional := map[string]any{
 			"remote_base":    "",
 			"local_base":     "",
@@ -693,7 +935,7 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 		if hasKey(saved, "pending_remote") {
 			provisional["pending_remote"] = strField(saved, "pending_remote")
 		}
-		if rememberedPre := rememberRemotePaths(saved, strField(saved, "remote_base"), strField(saved, "pending_remote"), string(remoteBody)); len(rememberedPre) > 0 {
+		if rememberedPre := rememberRemotePathsForSources(saved, remoteSources...); len(rememberedPre) > 0 {
 			provisional["remote_paths"] = rememberedPre
 		}
 		if err := state.Save(baseURL, doc.Entity, strconv.Itoa(eid), provisional); err != nil {
@@ -707,16 +949,27 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 			return "", err
 		}
 	}
-	if ct, ok := intField(stored, "content_type"); !ok || ct != 2 {
+	if ct, ok := intField(stored, "content_type"); !ok || ct != targetCT {
+		if targetCT == 1 {
+			return "", errors.New("the server did not store this entity in html mode (content_type != 1)")
+		}
 		return "", errors.New("the server kept this entity out of markdown mode (eLabFTW 5.3.11 to 5.5.2 ignore content_type); upgrade eLabFTW")
+	}
+	storedBody, hasStoredBody := ExtractPatchBody(stored)
+	if !unchanged && !hasStoredBody {
+		return "", errors.New("server PATCH response did not include a valid body field")
+	}
+	if unchanged && !hasStoredBody {
+		storedBody = strField(stored, "body")
 	}
 
 	registered := savedLinks(saved)
 	record := map[string]any{
-		"remote_base": strField(stored, "body"),
-		"local_base":  string(doc.Body),
-		"meta_base":   metaBase,
-		"path":        transclude.ResolveNonStrict(docPath),
+		"remote_base":  storedBody,
+		"local_base":   string(doc.Body),
+		"meta_base":    metaBase,
+		"content_type": targetCT,
+		"path":         transclude.ResolveNonStrict(docPath),
 	}
 	if len(docLinks) > 0 {
 		record["doc_links"] = docLinks
@@ -724,14 +977,20 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 	if len(registered) > 0 {
 		record["links"] = registered
 	}
-	remembered := rememberRemotePaths(saved, strField(saved, "remote_base"), strField(saved, "pending_remote"), string(remoteBody))
+	if targetCT == 1 && len(selectedURLs) > 0 {
+		record["attachment_urls"] = selectedURLs
+	}
+	remembered := rememberRemotePathsForSources(saved, remoteSources...)
 	if len(remembered) > 0 {
 		record["remote_paths"] = remembered
 	}
 	if err := state.Save(baseURL, doc.Entity, strconv.Itoa(eid), record); err != nil {
 		return "", err
 	}
-	if !unchanged {
+	if targetCT == 1 && !isRegHTML && stderr != nil {
+		_, _ = fmt.Fprintln(stderr, "note: published in html format (one-way); Web UI body edits will block push until ported to your local document, so ask collaborators to use comments")
+	}
+	if !unchanged && targetCT != 1 {
 		WarnRawHTMLOnV6(ctx, api, string(doc.Body), stderr)
 	}
 
@@ -788,14 +1047,25 @@ func Push(ctx context.Context, docPath string, api API, cfg *config.Data, opts P
 	if title == "" {
 		title = PathStem(filepath.Base(docPath))
 	}
-	bodyChanged := saved == nil || doc.Body != LocalBody(strField(saved, "local_base"))
+	bodyChanged := !hasBase || savedBaseContentType(saved) != targetCT || doc.Body != LocalBody(strField(saved, "local_base")) || remoteBody != savedRemoteBase || curCT != targetCT
 	reusedCount := len(approved.Files) - len(newUploads)
 	newCount := len(newUploads)
+	modeLabel := "markdown"
+	if targetCT == 1 {
+		modeLabel = "html"
+	}
 	_, _ = fmt.Fprintf(stdout, "pushed %s/%d: %s\n", doc.Entity, eid, title)
+	if confirmHex != "" {
+		curLabel := "markdown"
+		if curCT == 1 {
+			curLabel = "html"
+		}
+		_, _ = fmt.Fprintf(stdout, "  confirmed: %s %s/%d (%s → %s)\n", strings.TrimRight(baseURL, "/"), doc.Entity, eid, curLabel, modeLabel)
+	}
 	if bodyChanged {
-		_, _ = fmt.Fprintln(stdout, "  body updated (markdown)")
+		_, _ = fmt.Fprintf(stdout, "  body updated (%s)\n", modeLabel)
 	} else {
-		_, _ = fmt.Fprintln(stdout, "  body unchanged (markdown)")
+		_, _ = fmt.Fprintf(stdout, "  body unchanged (%s)\n", modeLabel)
 	}
 	named := ""
 	if newCount > 0 {

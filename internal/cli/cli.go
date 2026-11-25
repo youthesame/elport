@@ -18,6 +18,7 @@ var Version = ""
 
 var (
 	entities = []string{"experiments", "items"}
+	formats  = []string{"markdown", "html"}
 	scopes   = []string{"self", "team", "all"}
 	orders   = []string{"cat", "comment", "customid", "date", "id", "lastchange", "rating", "status", "title", "user"}
 	sorts    = []string{"asc", "desc"}
@@ -30,35 +31,37 @@ const (
 )
 
 type Command struct {
-	Name        string
-	Profile     string
-	Entity      string
-	Docs        []string
-	Doc         string
-	Text        string
-	ID          string
-	Title       string
-	Output      string
-	Topic       string
-	Action      string
-	ProfileName string
-	Scope       string
-	Query       string
-	Tags        []string
-	Order       string
-	Sort        string
-	Limit       int
-	All         bool
-	HasAll      bool
-	AllRoot     string
-	Offset      int
-	JSON        bool
-	Team        bool
-	DryRun      bool
-	Force       bool
-	Yes         bool
-	Base        bool
-	Resolved    bool
+	Name          string
+	Profile       string
+	Entity        string
+	Docs          []string
+	Doc           string
+	Text          string
+	ID            string
+	Title         string
+	Output        string
+	Topic         string
+	Action        string
+	ProfileName   string
+	Scope         string
+	Query         string
+	Tags          []string
+	Order         string
+	Sort          string
+	Limit         int
+	All           bool
+	HasAll        bool
+	AllRoot       string
+	Offset        int
+	JSON          bool
+	Team          bool
+	DryRun        bool
+	Force         bool
+	Yes           bool
+	ConfirmRemote string
+	Format        string
+	Base          bool
+	Resolved      bool
 }
 
 type usageError struct {
@@ -252,6 +255,7 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 		fs.BoolVarP(&cmd.DryRun, "dry-run", "n", false, "show what would change without uploading")
 		fs.BoolVarP(&cmd.Force, "force", "f", false, "overwrite even if the remote has diverged")
 		fs.BoolVarP(&cmd.Yes, "yes", "y", false, "skip confirmations (access widening, large uploads)")
+		fs.StringVar(&cmd.ConfirmRemote, "confirm-remote", "", "confirm overwriting a reviewed remote HTML body by SHA-256 prefix (12+ hex chars)")
 	case "pull", "fetch", "status":
 		addTargetFlags(fs, cmd)
 	case "comments", "comment":
@@ -264,6 +268,7 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 		fs.BoolVar(&cmd.Resolved, "resolved", false, "mark a hand-merged conflict as resolved")
 	case "new":
 		addChoiceFlag(fs, &cmd.Entity, "entity", "experiments", "entity type to create (default: experiments)", entities)
+		addChoiceFlag(fs, &cmd.Format, "format", "", "publish format: markdown or html (default: markdown)", formats)
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 		fs.StringVarP(&cmd.Output, "output", "o", "report.md", "local document to create (default: report.md)")
 	case "list":

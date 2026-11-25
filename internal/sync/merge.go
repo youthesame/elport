@@ -193,6 +193,11 @@ func promotePendingRemote(baseURL, entity string, eid int, hasID bool, remoteSou
 	if !hasID || baseURL == "" {
 		return nil
 	}
+	unlockState, err := state.Lock(baseURL, entity, strconv.Itoa(eid))
+	if err != nil {
+		return err
+	}
+	defer unlockState()
 	saved, err := state.Load(baseURL, entity, strconv.Itoa(eid))
 	if err != nil || saved == nil {
 		return err
@@ -206,6 +211,7 @@ func promotePendingRemote(baseURL, entity string, eid int, hasID bool, remoteSou
 	}
 	updated["remote_base"] = strField(saved, "pending_remote")
 	updated["local_base"] = remoteSource
+	updated["content_type"] = 2
 	delete(updated, "pending_remote")
 	delete(updated, "pending_create")
 	delete(updated, "body_sent")
@@ -262,6 +268,16 @@ func removeSidecars(docPath, basePath, remotePath string) error {
 }
 
 func Merge(ctx context.Context, docPath string, cfg *config.Data, profile string, resolved bool, stdout io.Writer) error {
+	doc, docErr := ReadDocument(docPath, cfg)
+	if docErr == nil && doc.HasID {
+		if _, baseURL, _, berr := config.BaseTarget(cfg, profile, metaProfile(doc.Meta)); berr == nil {
+			if saved, serr := state.Load(baseURL, doc.Entity, strconv.Itoa(doc.ID)); serr == nil && saved != nil {
+				if _, hasPP := PendingPublish(saved); IsRegisteredHTML(saved) || hasPP {
+					return fmt.Errorf("%s/%d is published in html format; merge is not used for HTML documents (inspect changes with 'elport diff' and re-run 'elport push --confirm-remote <hash>')", doc.Entity, doc.ID)
+				}
+			}
+		}
+	}
 	basePath := BaseSidecarPath(docPath)
 	remotePath := SidecarPath(docPath)
 	_, baseErr := os.Stat(basePath)
@@ -269,12 +285,12 @@ func Merge(ctx context.Context, docPath string, cfg *config.Data, profile string
 	if baseErr != nil || remoteErr != nil {
 		return fmt.Errorf("no conflict to merge; run push/pull first (expected %s and %s)", basePath, remotePath)
 	}
-	doc, err := ReadDocument(docPath, cfg)
-	if err != nil {
-		return err
+	if docErr != nil {
+		return docErr
 	}
 	baseURL := ""
 	if doc.HasID {
+		var err error
 		_, baseURL, _, err = config.BaseTarget(cfg, profile, metaProfile(doc.Meta))
 		if err != nil {
 			return err

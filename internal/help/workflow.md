@@ -33,10 +33,28 @@ elport push
 
 elport keeps no history of its own. To keep one, `git init` your documents folder.
 
+## One-way HTML publish (`format: html`)
+
+With `format: html`, `elport push` renders the approved outgoing Markdown to HTML (`content_type: 1`) and never
+pulls HTML back into Markdown.
+
+- **Migrate or revert**: Add `format: html` to an existing synced Markdown document (with no unpulled remote edits)
+  and run `elport push` to switch it to HTML (`2→1`). Set `format: markdown` explicitly and `elport push` to revert a
+  locally registered HTML document back to Markdown (`1→2`); omitting `format:` on an HTML entity is refused.
+- **Web UI edits & second machines**: If someone edits the entity in the Web UI, `push` (even with `--force`) stops
+  and prints a canonical HTML diff and the remote body's short SHA-256. Port any changes into your local Markdown
+  document, verify with `elport diff`, and re-run `elport push --confirm-remote <hash>`. On a second machine without
+  local state, the entity owner can adopt an existing HTML entity the same way (`elport diff`, then
+  `elport push --confirm-remote <hash>`).
+- **Metadata-only `pull`**: On a locally registered HTML document, `elport pull` updates only front matter
+  (`title`, `category`, `status`, `read`, `write`, and the union of local and remote `tags`) without touching local
+  body bytes or downloading attachments.
+
 ## pull and fetch
 
-- pull brings down the body and metadata, and downloads the files the body shows. An attachment added in the Web
-  UI comes down by its base name into the document directory.
+- pull brings down the body and metadata (or metadata only, with `tags` unioned, on a locally registered HTML
+  document), and downloads the files the body shows. An attachment added in the Web UI comes down by its base name
+  into the document directory.
 - fetch downloads every attachment, shown in the body or not, and never touches the body or the base. A local file
   that differs stays, and the remote copy lands beside it as `<name>.remote`.
 - Neither writes a hidden (dot-prefixed) attachment.

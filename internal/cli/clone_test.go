@@ -136,7 +136,6 @@ func TestCLINewCloneAllAndPushPullMergeFlow(t *testing.T) {
 		ClientOpts: []client.Option{client.WithRootCAs(srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs)},
 	}
 
-	// 1. elport new creates remote entity + local document + state.
 	newDir := t.TempDir()
 	newDoc := filepath.Join(newDir, "report.md")
 	var out, errBuf bytes.Buffer
@@ -156,7 +155,6 @@ func TestCLINewCloneAllAndPushPullMergeFlow(t *testing.T) {
 		t.Fatalf("expected id=50 in new doc, got %+v err=%v", meta, err)
 	}
 
-	// 2. elport new persists created id + resumable pending_create state if follow-up GET fails.
 	failNextGet = true
 	newDoc2 := filepath.Join(newDir, "second.md")
 	out.Reset()
@@ -170,7 +168,6 @@ func TestCLINewCloneAllAndPushPullMergeFlow(t *testing.T) {
 		t.Fatalf("expected resumable pending_create state for 51, got %v err=%v", saved51, err)
 	}
 
-	// 3. elport clone --all clones Markdown entity and snapshots HTML entity read-only.
 	backupDir := t.TempDir()
 	out.Reset()
 	errBuf.Reset()
@@ -191,7 +188,6 @@ func TestCLINewCloneAllAndPushPullMergeFlow(t *testing.T) {
 		t.Fatalf("html snapshot must not contain elport front matter: %q", htmlBytes)
 	}
 
-	// 4. Single clone refuses an entity that already has a working copy, without writing output.
 	dupDoc := filepath.Join(t.TempDir(), "dup.md")
 	out.Reset()
 	errBuf.Reset()
@@ -203,7 +199,6 @@ func TestCLINewCloneAllAndPushPullMergeFlow(t *testing.T) {
 		t.Fatalf("dup doc should not exist")
 	}
 
-	// 5. Context cancellation (SIGINT) during clone cleans up stub file.
 	cancelCtx, cancel := context.WithCancel(context.Background())
 	cancel()
 	cancelledDoc := filepath.Join(t.TempDir(), "cancelled.md")
@@ -223,8 +218,7 @@ func strconvItoa(n int) string {
 }
 
 func TestCloneAllDoesNotDeleteConcurrentProcessDirectory(t *testing.T) {
-	// If another process creates the destination directory after clone --all scans
-	// existing folders, exclusive os.Mkdir fails without removing the other process's work.
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -241,7 +235,7 @@ func TestCloneAllDoesNotDeleteConcurrentProcessDirectory(t *testing.T) {
 				_ = json.NewEncoder(w).Encode([]map[string]any{})
 				return
 			}
-			// Simulate concurrent process creating the target directory after ReadDir.
+
 			_ = os.MkdirAll(otherDir, 0o755)
 			_ = os.WriteFile(otherDoc, []byte("precious concurrent work"), 0o644)
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 10, "title": "Race Note"}})

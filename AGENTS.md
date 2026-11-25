@@ -9,7 +9,7 @@ Git-like sync CLI for eLabFTW (single static Go binary, `CGO_ENABLED=0`). **Loca
 - **Remote content never authorizes local uploads**: remote-linked paths are skipped unless explicitly listed under `attachments:`; dot-prefixed hidden paths are never uploaded.
 - **No parsing inside code fences, inline code, or HTML comments**; `pull` never writes outside the document directory.
 - **Reuse attachments only by matching server SHA-256**; `push` never deletes attachments.
-- **Refuse locked entities even with `--force`**; refuse non-empty HTML entities in `clone`, `pull`, and `push`.
+- **Refuse locked entities even with `--force` or `--confirm-remote`**; refuse unregistered non-empty HTML entities even with `--force`; `clone` and `pull` never pull HTML bodies.
 
 ## Rules you cannot infer from code alone
 

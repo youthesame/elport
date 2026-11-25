@@ -48,8 +48,7 @@ type transcludeFixture struct {
 }
 
 func TestGoldenFixturesLoadCleanly(t *testing.T) {
-	// Verify all exported Python oracle fixtures exist and unmarshal cleanly
-	// into typed Go structures before M2 wires them to the Go implementations.
+
 	fmBytes, err := os.ReadFile(filepath.Join("..", "..", "testdata", "golden", "frontmatter.json"))
 	if err != nil {
 		t.Fatalf("read frontmatter.json: %v", err)

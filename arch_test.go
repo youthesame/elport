@@ -71,16 +71,74 @@ var forbiddenImportsByPkg = map[string][]string{
 		modulePrefix + "internal/sync",
 		modulePrefix + "internal/browse",
 		modulePrefix + "internal/cli",
+		modulePrefix + "internal/render",
+	},
+	"internal/render": {
+		"os", "net/http", "os/exec",
+		modulePrefix + "internal/config",
+		modulePrefix + "internal/client",
+		modulePrefix + "internal/state",
+		modulePrefix + "internal/sync",
+		modulePrefix + "internal/plan",
+		modulePrefix + "internal/browse",
+		modulePrefix + "internal/cli",
+		modulePrefix + "internal/fsx",
 	},
 }
 
-func allowedProdComment(text string) bool {
-	for _, prefix := range []string{"//go:", "//line ", "//export ", "// Deprecated:"} {
+func allowedCommentDirective(text string) bool {
+	for _, prefix := range []string{"//go:build ", "//go:embed "} {
 		if strings.HasPrefix(text, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+func checkQuintSource(relPath, src string) []string {
+	rel := filepath.ToSlash(relPath)
+	var violations []string
+	line := 1
+	inStr := false
+	for i := 0; i < len(src); i++ {
+		ch := src[i]
+		if ch == '\n' {
+			line++
+			continue
+		}
+		if inStr {
+			if ch == '"' {
+				inStr = false
+			}
+			continue
+		}
+		if ch == '"' {
+			inStr = true
+			continue
+		}
+		if ch == '/' && i+1 < len(src) && src[i+1] == '/' {
+			violations = append(violations, fmt.Sprintf("%s:%d: comments are forbidden in Quint files", rel, line))
+			for i < len(src) && src[i] != '\n' {
+				i++
+			}
+			if i < len(src) && src[i] == '\n' {
+				line++
+			}
+			continue
+		}
+		if ch == '/' && i+1 < len(src) && src[i+1] == '*' {
+			violations = append(violations, fmt.Sprintf("%s:%d: comments are forbidden in Quint files", rel, line))
+			i += 2
+			for i+1 < len(src) && !(src[i] == '*' && src[i+1] == '/') {
+				if src[i] == '\n' {
+					line++
+				}
+				i++
+			}
+			i++
+		}
+	}
+	return violations
 }
 
 func pkgMatches(pkgDir, root string) bool {
@@ -129,13 +187,10 @@ func checkGoSource(relPath string, src any) []string {
 		violations = append(violations, fmt.Sprintf("%s:%d: %s", rel, p.Line, fmt.Sprintf(format, args...)))
 	}
 
-	// Comments are banned in production code (only compiler/tool directives allowed)
-	// and historical ADR/DESIGN citations are banned in all Go files so tests state
-	// their rationale directly instead of pointing to retired docs.
 	for _, group := range file.Comments {
 		for _, c := range group.List {
-			if !isTest && !allowedProdComment(c.Text) {
-				add(c.Pos(), "comments are forbidden in production code; move rationale to tests or encode in types")
+			if !allowedCommentDirective(c.Text) {
+				add(c.Pos(), "comments are forbidden in Go files; encode invariants in code or tests")
 			}
 			if rel != "arch_test.go" && bannedDocRefPattern.MatchString(c.Text) {
 				add(c.Pos(), "do not cite ADR numbers or DESIGN.md in Go files")
@@ -282,10 +337,17 @@ func TestArchitectureInvariants(t *testing.T) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(rel, ".go") {
+		if strings.HasSuffix(rel, ".go") {
+			allViolations = append(allViolations, checkGoSource(rel, nil)...)
 			return nil
 		}
-		allViolations = append(allViolations, checkGoSource(rel, nil)...)
+		if strings.HasSuffix(rel, ".qnt") {
+			raw, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return rerr
+			}
+			allViolations = append(allViolations, checkQuintSource(rel, string(raw))...)
+		}
 		return nil
 	})
 	if err != nil {
@@ -307,7 +369,25 @@ func TestArchRulesCatchViolations(t *testing.T) {
 			name:      "production comment rejected",
 			relPath:   "internal/cli/sample.go",
 			src:       "package cli\n// hack workaround\nfunc f() {}\n",
-			wantMatch: "comments are forbidden in production code",
+			wantMatch: "comments are forbidden in Go files",
+		},
+		{
+			name:      "test file comment rejected",
+			relPath:   "internal/sync/sample_test.go",
+			src:       "package sync_test\n// explanation\nfunc f() {}\n",
+			wantMatch: "comments are forbidden in Go files",
+		},
+		{
+			name:      "go prefix prose comment rejected",
+			relPath:   "internal/cli/sample.go",
+			src:       "package cli\n//go: not a directive\nfunc f() {}\n",
+			wantMatch: "comments are forbidden in Go files",
+		},
+		{
+			name:      "deprecated doc comment rejected",
+			relPath:   "internal/cli/sample.go",
+			src:       "package cli\n// Deprecated: old\nfunc f() {}\n",
+			wantMatch: "comments are forbidden in Go files",
 		},
 		{
 			name:      "ADR citation in test rejected",
@@ -393,6 +473,12 @@ func TestArchRulesCatchViolations(t *testing.T) {
 			src:       "package client\nimport \"net/http\"\nvar _ = http.DefaultClient\n",
 			wantMatch: "net/http.DefaultClient is forbidden",
 		},
+		{
+			name:      "os import in render rejected",
+			relPath:   "internal/render/bad.go",
+			src:       "package render\nimport \"os\"\nvar _ = os.ReadFile\n",
+			wantMatch: `must not import "os"`,
+		},
 	}
 
 	for _, tc := range cases {
@@ -421,9 +507,9 @@ func TestArchRulesAllowValidCode(t *testing.T) {
 			src:     "package help\nimport _ \"embed\"\n//go:embed agents.md\nvar x string\n",
 		},
 		{
-			name:    "comments allowed in test files",
-			relPath: "internal/sync/s_test.go",
-			src:     "package sync_test\n// Explain why Windows symlinks need Lstat.\nfunc f() {}\n",
+			name:    "go:build directive allowed",
+			relPath: "internal/state/lock_unix.go",
+			src:     "//go:build unix\n\npackage state\n",
 		},
 		{
 			name:    "os.Exit allowed in cmd/elport/main.go",
@@ -443,6 +529,27 @@ func TestArchRulesAllowValidCode(t *testing.T) {
 				t.Fatalf("unexpected violations: %v", got)
 			}
 		})
+	}
+}
+
+func TestArchQuintCommentRules(t *testing.T) {
+	if got := checkQuintSource("spec/quint/bad.qnt", "module m {\n  // note\n}\n"); len(got) != 1 || !strings.Contains(got[0], "comments are forbidden in Quint files") {
+		t.Fatalf("expected line comment violation, got %v", got)
+	}
+	if got := checkQuintSource("spec/quint/bad.qnt", "module m {\n  /* block */\n}\n"); len(got) != 1 || !strings.Contains(got[0], "comments are forbidden in Quint files") {
+		t.Fatalf("expected block comment violation, got %v", got)
+	}
+	if got := checkQuintSource("spec/quint/bad.qnt", "module m {\n  pure val s = \"line1\nline2\" // trailing\n}\n"); len(got) != 1 || !strings.Contains(got[0], "comments are forbidden in Quint files") {
+		t.Fatalf("expected comment after multiline string to be rejected, got %v", got)
+	}
+	if got := checkQuintSource("spec/quint/bad.qnt", "module m {\n  pure val s = \"trailing\\\\\" // hidden\n}\n"); len(got) != 1 || !strings.Contains(got[0], "comments are forbidden in Quint files") {
+		t.Fatalf("expected comment after backslash-ending string to be rejected, got %v", got)
+	}
+	if got := checkQuintSource("spec/quint/bad.qnt", "module m {\n  pure val s = \"line1\n\\\" // hidden\n}\n"); len(got) != 1 || !strings.Contains(got[0], "comments are forbidden in Quint files") {
+		t.Fatalf("expected comment after single-backslash-ending multiline string to be rejected, got %v", got)
+	}
+	if got := checkQuintSource("spec/quint/ok.qnt", "module m {\n  pure val u = \"https://e.example/*not-comment*/\"\n  pure val ml = \"line1\n// inside multiline string\nline3\"\n}\n"); len(got) != 0 {
+		t.Fatalf("unexpected violations for string literals: %v", got)
 	}
 }
 
@@ -506,8 +613,7 @@ func receiverTypeName(expr ast.Expr) string {
 }
 
 func TestArchAgentsSymbolLinksExist(t *testing.T) {
-	// Every Go symbol referenced in AGENTS.md must exist in production code so
-	// invariant documentation cannot silently drift from the implementation.
+
 	raw, err := os.ReadFile("AGENTS.md")
 	if err != nil {
 		t.Fatalf("read AGENTS.md: %v", err)

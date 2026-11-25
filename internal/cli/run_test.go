@@ -273,7 +273,6 @@ func TestRunViewCommentsStatusDiffAndFetchEndToEnd(t *testing.T) {
 		t.Fatalf("batch fetch did not save a.csv: (%q, %v)", string(got), err)
 	}
 
-	// diff --base must work without stored credentials (only base_url and local state).
 	_ = cli.RunWithEnv(context.Background(), []string{"logout", "lab"}, nil, &out, &errBuf, env)
 	_ = os.WriteFile(filepath.Join(home, ".config", "elport", "config.toml"), []byte("default_profile = \"lab\"\n[profiles.lab]\nbase_url = \""+srv.URL+"\"\n"), 0o600)
 	_ = os.MkdirAll(filepath.Join(home, ".config", "elport", "state"), 0o700)

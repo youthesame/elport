@@ -94,8 +94,21 @@ func (l *LocalResult) DocRefs() []transclude.Reference {
 	return out
 }
 
-func LocalCandidates(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries []string, warn io.Writer) (*LocalResult, error) {
-	refs, err := transclude.Plan(body, docDir, ignore, warn)
+type RemoteSource struct {
+	Body        string
+	ContentType int
+}
+
+func localCandidatesWith(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries []string, warn io.Writer, htmlPublish bool) (*LocalResult, error) {
+	var (
+		refs []transclude.Reference
+		err  error
+	)
+	if htmlPublish {
+		refs, err = transclude.PlanHTML(body, docDir, ignore, warn)
+	} else {
+		refs, err = transclude.Plan(body, docDir, ignore, warn)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -133,6 +146,14 @@ func LocalCandidates(body, docDir string, ignore []transclude.IgnoreLayer, liste
 	}, nil
 }
 
+func LocalCandidates(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries []string, warn io.Writer) (*LocalResult, error) {
+	return localCandidatesWith(body, docDir, ignore, listedEntries, warn, false)
+}
+
+func LocalCandidatesHTML(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries []string, warn io.Writer) (*LocalResult, error) {
+	return localCandidatesWith(body, docDir, ignore, listedEntries, warn, true)
+}
+
 func sameDiskFile(path string, targetStats []os.FileInfo) bool {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -155,6 +176,14 @@ func Approve(body, docDir string, ignore []transclude.IgnoreLayer, listedEntries
 }
 
 func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.IgnoreLayer, remoteBodies []string, remotePaths []string, warn io.Writer) (*Result, error) {
+	sources := make([]RemoteSource, len(remoteBodies))
+	for i, rb := range remoteBodies {
+		sources[i] = RemoteSource{Body: rb, ContentType: 2}
+	}
+	return ApproveFromLocalSources(local, docDir, ignore, sources, remotePaths, warn)
+}
+
+func ApproveFromLocalSources(local *LocalResult, docDir string, ignore []transclude.IgnoreLayer, remoteSources []RemoteSource, remotePaths []string, warn io.Writer) (*Result, error) {
 	if local == nil || !local.validated {
 		return nil, errors.New("unvalidated local plan cannot mint approved upload paths")
 	}
@@ -163,8 +192,8 @@ func ApproveFromLocal(local *LocalResult, docDir string, ignore []transclude.Ign
 
 	allRemotePaths := make([]string, 0, len(remotePaths))
 	allRemotePaths = append(allRemotePaths, remotePaths...)
-	for _, rb := range remoteBodies {
-		allRemotePaths = append(allRemotePaths, transclude.BarePaths(rb)...)
+	for _, rs := range remoteSources {
+		allRemotePaths = append(allRemotePaths, transclude.BarePathsForMode(rs.Body, rs.ContentType)...)
 	}
 	linked := transclude.ResolveLocalPaths(allRemotePaths, docDir, ignore)
 	linkedStats := make([]os.FileInfo, 0, len(linked))

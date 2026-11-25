@@ -95,23 +95,36 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
   keeps them. Upstream closed the report ([#7583](https://github.com/elabftw/elabftw/issues/7583)) by disabling the
   editor switch on a non-empty entry ([#7708](https://github.com/elabftw/elabftw/pull/7708), a template change on
   master, in neither 6.0.9 nor 6.1.0-alpha2), not by rendering the HTML.
-- **The API can switch `content_type` on a non-empty entity** (measured demo 6.0.9, 2026-11-09). `PATCH`
+- **The API can switch `content_type` on a non-empty entity** (measured demo 6.0.9, 2026-11-09 & 2026-11-25). `PATCH`
   `{"content_type": 2}` then `1` on an HTML body took effect both times and left `body` unchanged. While it was 2,
-  `body_html` was empty, so the Web UI showed no body at all. Back at 1 it showed again.
+  `body_html` was empty, so the Web UI showed no body at all. Back at 1 it showed again. A simultaneous
+  `PATCH {"body": ..., "content_type": 1}` (2→1) or `PATCH {"body": ..., "content_type": 2}` (1→2) also succeeds
+  (200) in one request, updates both `body` and `body_html` immediately, and matches an immediate `GET` byte-for-byte.
 - **MathJax is enabled in both md/html modes** (inline `$`, block `$$`, AMS extensions.
   [issue #892](https://github.com/elabftw/elabftw/issues/892)). Measured (5.6.12): `$\eta = 1 - e^{-kt}$` passes
-  through intact and is rendered client-side.
+  through intact and is rendered client-side. Measured (demo 6.0.9, 2026-11-25, `/assets/main.bundle.js`): MathJax
+  4.1.3 runs with `tex: {inlineMath: [["$","$"],["\\(","\\)"]], displayMath: [["$$","$$"],["\\[","\\]"]],
+  processEscapes: true, tags: "ams", packages: ["base","ams","autoload"]}`, `ignoreHtmlClass: "mathjax-ignore"`,
+  and default `skipHtmlTags` (`script`, `noscript`, `style`, `textarea`, `pre`, `code`, `math`, `select`, `option`,
+  `mjx-container`).
 - **6.x Markdown mode does not protect inline `$...$` math or HTML tags** (measured demo 6.0.9, 2026-11-23).
   `Tools::md2html()` runs `League\CommonMark` with Core + GFM + `DisplayMathExtension` and `'html_input' => 'strip'`.
   Block `$$...$$` (`aligned`, `bmatrix`) survives, while inline `$a*b*c$` becomes `$a<em>b</em>c$` and `$\{x\}$`
   loses its backslashes (`${x}$`). `<sub>`, `<sup>`, `<br>` inside table cells, and `<details>` are stripped from
   `body_html` (an unseparated `<details>` block can swallow following lines as an HTML block).
 - **6.x HTML mode (`content_type: 1`) preserves figures, TeX math, and code blocks, and converges on re-PATCH**
-  (measured demo 6.0.9, 2026-11-23). Through `Filter::body()`, `<figure>`, `<img width="80%">`,
-  `<img style="width:50%;">`, `<img width="300">`, `<figcaption>`, inline `$a < b$` (escaped to `&lt;`), block
-  `$$...$$`, and `<pre class="language-python"><code>` all survive; `<thead>`/`<tbody>` are dropped and `img alt`
-  is overwritten with the URL basename. Re-PATCHing the stored HTML body returns the exact same bytes (no trailing
-  newline growth). Saving in TinyMCE preserves all of those elements (collapsing newlines inside `<p>` to spaces,
+  (measured demo 6.0.9, 2026-11-23 & 2026-11-25). Through `Filter::body()`, `<figure>`, `<img width="80%">`,
+  `<img style="width:50%;">`, `<img width="300">`, `<figcaption>`, `<s>`, `<sub>`, `<sup>`, `<details><summary>`,
+  table `colspan`/`rowspan`/`<br>`/`style="text-align:right;"`, `<a href="#...">`, inline `$a*b*c$`/`$\{x\}$`/`$a < b$`
+  (escaped to `&lt;`)/escaped `\$100`, block `$$...$$`, and `<pre class="language-python"><code>` all survive;
+  `body_html` equals `body`, and re-PATCHing the stored HTML body returns the exact same bytes (no trailing newline
+  growth). Dropped by `Filter::body()` in `content_type: 1`: `<thead>`/`<tbody>`, `<input type="checkbox">` (tasklist
+  checkboxes), `<del>` (use `<s>` instead), `id` attributes on headings/`<sup>`/`<li>`, `<section>` wrappers,
+  table `align` attributes, and HTML comments (`<!-- ... -->`, unlike `content_type: 2`); `img alt` is overwritten
+  with the URL basename. Dangerous HTML and URLs (`<script>`, `<iframe>`, `<svg>`, `onerror`/`onclick`,
+  `javascript:`/`data:`/`vbscript:` hrefs, `style="background:url(javascript:...)"`) are stripped. A freshly `POST`ed
+  entity has `body: null`, whereas `PATCH {"body": "", "content_type": 1}` stores and returns `body: ""` (string).
+  Saving in TinyMCE preserves all of those elements (collapsing newlines inside `<p>` to spaces,
   reformatting HTML whitespace across the body, and rewriting a drag-resized `width="80%"` to pixel
   `width`/`height` attributes while keeping `<figure>` and `<figcaption>` intact).
 
@@ -239,7 +252,8 @@ Normalization details (measured 2026-08-07/08, demo 5.6.12, `content_type:2`):
 - Entity pages (measured 6.0.8, 2026-10-17, unauthenticated route check): experiments are
   `experiments.php?mode=view&id=`, items are **`database.php`**`?mode=view&id=` (`items.php` is 404).
 - **Trap: the lock does not stop the owner's API writes.** A body `PATCH` on an entity the same user locked →
-  **200**, body changed, with a changelog entry. A lock-aware client must refuse on its own.
+  **200**, body changed, with a changelog entry (confirmed in both `content_type: 2` and `content_type: 1`, demo
+  6.0.9, 2026-11-25). A lock-aware client must refuse on its own.
 
 ## Permissions (canread / canwrite; measured 5.6.12, 2026-08-11)
 
