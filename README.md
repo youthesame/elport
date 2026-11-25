@@ -2,7 +2,7 @@
 
 [English](https://github.com/youthesame/elport/blob/main/README.md) | [日本語](https://github.com/youthesame/elport/blob/main/README_JA.md)
 
-Write lab documents locally in Markdown (with inline HTML like `<figure>` on eLabFTW 5.x). Then `push`/`pull` them,
+Write lab documents locally in Markdown (with inline HTML like `<figure>` on eLabFTW 5.x, or via opt-in `format: html` on 6.x). Then `push`/`pull` them,
 along with every figure and data file the body references, to eLabFTW entities. **Local is the source of truth.**
 
 ## Install
@@ -25,11 +25,25 @@ curl -fsSL https://raw.githubusercontent.com/youthesame/elport/main/install.sh |
 irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/install.ps1 | iex
 ```
 
-<details><summary>Other ways (Nix, Go, GitHub Releases)</summary>
+<details><summary>Other ways (Nix, Go)</summary>
 
-- Nix (requires `nix-command` and `flakes`): `nix profile install github:youthesame/elport` (or `nix run github:youthesame/elport -- --help`)
-- Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@latest`
-- [GitHub Releases](https://github.com/youthesame/elport/releases) (on macOS, browser downloads are quarantined; prefer Homebrew or `install.sh`)
+**Nix** (requires `nix-command` and `flakes`):
+
+```sh
+nix profile install github:youthesame/elport
+```
+
+Or run without installing:
+
+```sh
+nix run github:youthesame/elport -- --help
+```
+
+**Go 1.26+:**
+
+```sh
+go install github.com/youthesame/elport/cmd/elport@latest
+```
 
 </details>
 
@@ -51,8 +65,9 @@ One local file maps to one eLabFTW entity: Markdown with a YAML front matter blo
 
 On `push`, elport uploads every real local file the body references, in any notation and anywhere on disk
 (`../data/raw.csv` and absolute paths work; hidden files never go up), and swaps each path for its real eLabFTW
-URL. The body goes up as raw Markdown, so `$...$` renders as-is; inline HTML such as `<figure>` renders on eLabFTW
-5.x, whereas eLabFTW 6.x strips raw HTML from rendered Markdown (use `![alt](fig.png)` on 6.x). To link another
+URL. By default the body goes up as raw Markdown, so `$...$` renders as-is; inline HTML such as `<figure>` renders on
+eLabFTW 5.x, whereas eLabFTW 6.x strips raw HTML from rendered Markdown (use `![alt](fig.png)`, or opt into one-way
+HTML publish with `format: html` / `elport new --format html`). To link another
 entity instead of uploading, write its eLabFTW URL or its local document's path. Code fences, inline code, and HTML
 comments are never parsed.
 
@@ -129,8 +144,9 @@ narrow it; `--all` pages through every result. `-q` also takes the Web UI's sear
 does: `elport list --scope team --order comment` puts the team's latest comments first.
 `comments` prints to the terminal only, never into the body.
 
-An entity written in the Web UI's rich text editor stores HTML. elport only reads it: `clone`, `pull`, and `push`
-refuse it, and `view -o` is the way to read it with its figures.
+An entity written in the Web UI's rich text editor stores HTML. elport never pulls HTML bodies and refuses unregistered
+HTML entities on `clone`, `pull`, and `push` (`view -o` reads them with their figures). To publish a local Markdown
+document as HTML on eLabFTW 6.x, opt in with `format: html` (`elport help documents`).
 
 ### Setup
 
@@ -218,6 +234,7 @@ pattern is anchored at its own directory.
 | `internal/sync` | `push`, `pull`, `merge`, `fetch`, `status`, `diff`, `view`, `comments` |
 | `internal/plan` | Upload approval boundary (`ApprovedUploadPath`) |
 | `internal/transclude` | Hand-written reference scanner and path ↔ URL rewriting |
+| `internal/render` | Markdown-to-HTML rendering (`format: html`) and HTML canonicalization |
 | `internal/frontmatter` | YAML 1.1-compatible front matter parsing and rendering |
 | `internal/client` | HTTPS eLabFTW REST v2 client with idle timeouts and origin guards |
 | `internal/browse` | `list` and `activity` heatmap |
