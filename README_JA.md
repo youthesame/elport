@@ -2,8 +2,7 @@
 
 [English](README.md) | [日本語](README_JA.md)
 
-ローカル環境でお気に入りのエディタを使い、Markdown で実験ドキュメントを記述できます（eLabFTW 5.x では `<figure>`
-などのインライン HTML も利用できます）。本文と、そこで参照されているすべての図やデータファイルをまとめて eLabFTW のエンティティへ
+ローカル環境でお気に入りのエディタを使い、Markdown で実験ドキュメントを記述できます（`<figure>` などのインライン HTML も、eLabFTW 5.x ではそのまま、6.x ではオプトインの `format: html` で利用できます）。本文と、そこで参照されているすべての図やデータファイルをまとめて eLabFTW のエンティティへ
 `push` / `pull` して同期します。**同期の基準は常にローカルです。**
 
 ## インストール
@@ -26,11 +25,25 @@ curl -fsSL https://raw.githubusercontent.com/youthesame/elport/main/install.sh |
 irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/install.ps1 | iex
 ```
 
-<details><summary>その他の方法（Nix / Go / GitHub Releases）</summary>
+<details><summary>その他の方法（Nix / Go）</summary>
 
-- Nix（`nix-command` と `flakes` が有効な環境）: `nix profile install github:youthesame/elport`（または `nix run github:youthesame/elport -- --help`）
-- Go 1.26+: `go install github.com/youthesame/elport/cmd/elport@latest`
-- [GitHub Releases](https://github.com/youthesame/elport/releases)（macOS ではブラウザからのダウンロードに quarantine が付くため、Homebrew または `install.sh` を推奨します）
+**Nix**（`nix-command` と `flakes` が有効な環境）:
+
+```sh
+nix profile install github:youthesame/elport
+```
+
+インストールせずに試す場合:
+
+```sh
+nix run github:youthesame/elport -- --help
+```
+
+**Go 1.26+:**
+
+```sh
+go install github.com/youthesame/elport/cmd/elport@latest
+```
 
 </details>
 
@@ -51,9 +64,9 @@ irm -UseBasicParsing https://raw.githubusercontent.com/youthesame/elport/main/in
 
 `push` を実行すると、elport は記法（Markdown 画像記法、HTML タグ、通常リンクなど）を問わず、
 本文内で参照されている実在のローカルファイルを場所を問わず（`../data/raw.csv` や絶対パスも可。隠しファイルは除外）すべてアップロードし、各パスを正規の eLabFTW URL へと自動置換します。
-本文は生の Markdown として送信されるため、数式（`$...$`）はそのままレンダリングされます。`<figure>` などのインライン HTML は
+デフォルトでは本文が生の Markdown として送信されるため、数式（`$...$`）はそのままレンダリングされます。`<figure>` などのインライン HTML は
 eLabFTW 5.x では描画されますが、eLabFTW 6.x では Markdown 本文中の生 HTML が表示時に除外されるため、6.x では標準の
-`![alt](fig.png)` を使用してください。
+`![alt](fig.png)` を使うか、`format: html`（`elport new --format html`）で一方向の HTML 公開をオプトインしてください。
 別のエンティティにリンクしたい場合は、その eLabFTW URL かローカルのドキュメントのパスを書くだけです。コードブロック、インラインコード、HTML
 コメントの内部は一切解析・置換されません。
 
@@ -128,8 +141,9 @@ Raw data: [raw.csv](data/raw.csv)
 はデフォルトで自分のエンティティのみ（`--scope self`）を 50 件ずつ返し、`-q <term>`、`--tag <tag>`、`--limit`、`--offset`、`--json`
 で絞り込めます。`--all` を付けると全件をページ送りで取得します。`comments` はターミナルに出力するだけで、本文ファイルには書き込みません。
 
-Web UI のリッチテキストエディタで書いたエンティティは本文が HTML で保存されます。elport はこれを読むだけです。`clone`、`pull`、
-`push` は拒否するので、図も含めて読むときは `view -o` を使ってください。
+Web UI のリッチテキストエディタで書いたエンティティは本文が HTML で保存されます。elport は HTML 本文を pull せず、未登録の
+HTML エンティティに対する `clone`・`pull`・`push` は拒否します（図も含めて読むときは `view -o` を使ってください）。eLabFTW 6.x で
+ローカルの Markdown ドキュメントを HTML として公開したい場合は、`format: html` をオプトインします（`elport help documents`）。
 
 ### セットアップ
 
@@ -216,6 +230,7 @@ elport は次の 3 つを順に確認し、最初に見つかったものを使�
 | `internal/sync` | `push` / `pull` / `merge` / `fetch` / `status` / `diff` / `view` / `comments` |
 | `internal/plan` | アップロード承認境界（`ApprovedUploadPath`） |
 | `internal/transclude` | 手書き参照スキャナとパス ↔ URL 相互変換 |
+| `internal/render` | `format: html` 用の Markdown → HTML 変換と HTML 正規化 |
 | `internal/frontmatter` | YAML 1.1 互換フロントマターのパースと出力 |
 | `internal/client` | HTTPS eLabFTW REST v2 クライアント（無通信タイムアウト・同一オリジン保護） |
 | `internal/browse` | `list`・`activity` ヒートマップ |
