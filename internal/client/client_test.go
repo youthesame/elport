@@ -41,7 +41,7 @@ func TestClientRequiresHTTPS(t *testing.T) {
 }
 
 func TestClientRedirectBlocksCrossOriginAndHTTPDowngrade(t *testing.T) {
-	// Never forward Authorization across HTTPS origin/port boundaries or to plain HTTP.
+
 	var evilHit atomic.Bool
 	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		evilHit.Store(true)
@@ -99,8 +99,7 @@ func TestClientRedirectBlocksCrossOriginAndHTTPDowngrade(t *testing.T) {
 }
 
 func TestClientIdleTimeoutAllowsTrickleAndAbortsStall(t *testing.T) {
-	// Active transfers that keep sending bytes must outlive the per-read idle
-	// timeout, while stalled downloads must abort instead of hanging forever.
+
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, _ := w.(http.Flusher)
 		switch r.URL.Path {
@@ -160,7 +159,7 @@ func TestClientEndpointsCachingErrorsAndJSONContentType(t *testing.T) {
 			w.Header().Set("Location", "/api/v2/experiments/99")
 			w.WriteHeader(http.StatusCreated)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/experiments/99/items_links/5":
-			// eLabFTW returns 400 without application/json Content-Type even for empty body.
+
 			linkContentType = r.Header.Get("Content-Type")
 			w.WriteHeader(http.StatusCreated)
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/404":
@@ -245,8 +244,7 @@ func TestClientCreateJSONNullBodyWithLocationDoesNotPanic(t *testing.T) {
 }
 
 func TestClientIDNAHostRedirectRejectedAndStalledRedirectBodyTimesOut(t *testing.T) {
-	// IDNA homograph İ.example (xn--i-9bb.example) must not match i.example,
-	// and a stalled redirect response body must abort via the conn idle deadline.
+
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		flusher, _ := w.(http.Flusher)
 		switch r.URL.Path {
@@ -298,7 +296,6 @@ func TestClientHonorsSSLCertFileEnv(t *testing.T) {
 		t.Fatalf("Info via SSL_CERT_FILE = %v, err=%v", info, err)
 	}
 
-	// REQUESTS_CA_BUNDLE fallback keeps Python-configured environments working.
 	t.Setenv("SSL_CERT_FILE", "")
 	t.Setenv("REQUESTS_CA_BUNDLE", caPath)
 	c2, err := client.New(srv.URL, config.NewAPIKey("1-key"), true)

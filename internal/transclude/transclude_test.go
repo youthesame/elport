@@ -221,8 +221,7 @@ func TestTranscludeGoldenReadableHTML(t *testing.T) {
 }
 
 func TestPlanDotfileSymlinkAndDocumentLinks(t *testing.T) {
-	// Files under hidden paths (as written or via symlink) must never be planned,
-	// while a document living inside a hidden parent can still reference siblings.
+
 	root := t.TempDir()
 	docDir := filepath.Join(root, ".hidden-workspace", "exp1")
 	if err := os.MkdirAll(docDir, 0o755); err != nil {
@@ -275,8 +274,7 @@ func TestPlanDotfileSymlinkAndDocumentLinks(t *testing.T) {
 }
 
 func TestNestedBracketsNoDoubleExtractAndReplaceNoPanic(t *testing.T) {
-	// Nested brackets like [see [data](data.csv)] must extract the link once so
-	// ReplaceSpans never slices backward and panics.
+
 	dir := t.TempDir()
 	dataFile := filepath.Join(dir, "data.csv")
 	if err := os.WriteFile(dataFile, []byte("a,b\n"), 0o644); err != nil {
@@ -297,8 +295,7 @@ func TestNestedBracketsNoDoubleExtractAndReplaceNoPanic(t *testing.T) {
 }
 
 func TestAbsoluteHiddenSegmentAndSymlinkDotDotResolution(t *testing.T) {
-	// Absolute references containing /.private/../ must still be rejected as hidden,
-	// and symlink/../file must resolve the symlink before applying "..".
+
 	root := t.TempDir()
 	work := filepath.Join(root, "work")
 	otherSub := filepath.Join(root, "other", "sub")
@@ -362,8 +359,7 @@ func TestQueryEmptyFirstParamNameUploadsOrderSafeNameWinDriveAndReadableHTML(t *
 }
 
 func TestExtractNeverMatchesInsideCodeFenceRapid(t *testing.T) {
-	// Masking invariant: arbitrary Markdown links inside a fenced block must
-	// never produce extracted references.
+
 	rapid.Check(t, func(t *rapid.T) {
 		inner := rapid.StringMatching(`[A-Za-z0-9_./ -]{1,20}`).Draw(t, "path")
 		md := "```\n![x](" + inner + ")\n<img src=\"" + inner + "\">\n```\n"
@@ -423,9 +419,7 @@ func FuzzReadableHTML(f *testing.F) {
 }
 
 func TestBareHTMLPathsIgnoresMarkdownBackticksAndAvoidsDoubleUnescape(t *testing.T) {
-	// In HTML mode, literal backticks and fenced lines must NOT mask <img src> or <a href>,
-	// while HTML comments, escaped text in <code>, query URLs, and scheme URLs are excluded,
-	// and entity unescaping happens exactly once.
+
 	htmlDoc := "<p>`<img src=\"secret.csv\">` and ```\n<a href=\"other.csv#top\">x</a>\n```</p>" +
 		"<!-- <img src=\"comment.png\"> -->" +
 		"<pre><code>&lt;img src=\"escaped.png\"&gt;</code></pre>" +
@@ -440,7 +434,7 @@ func TestBareHTMLPathsIgnoresMarkdownBackticksAndAvoidsDoubleUnescape(t *testing
 	if !slices.Equal(got, want) {
 		t.Fatalf("BareHTMLPaths = %#v, want %#v", got, want)
 	}
-	// Contrast: Markdown BarePaths masks the backtick-wrapped HTML tag.
+
 	mdGot := transclude.BarePathsForMode("`<img src=\"secret.csv\">`", 2)
 	if len(mdGot) != 0 {
 		t.Errorf("Markdown BarePathsForMode should mask inline code, got %#v", mdGot)
@@ -452,8 +446,7 @@ func TestBareHTMLPathsIgnoresMarkdownBackticksAndAvoidsDoubleUnescape(t *testing
 }
 
 func TestScanMathAndPlanHTMLMasksMathReferences(t *testing.T) {
-	// PlanHTML masks TeX math delimiters so $x_{[1]}(t)$ does not plan local file "t",
-	// while preserving real references outside math and skipping math inside code spans/fences.
+
 	dir := t.TempDir()
 	for _, name := range []string{"t", "fig.png"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o644); err != nil {
@@ -484,8 +477,6 @@ func TestScanMathAndPlanHTMLMasksMathReferences(t *testing.T) {
 		t.Fatalf("PlanHTML refs = %+v, want only fig.png (math [1](t) masked)", refs)
 	}
 
-	// Dollar signs inside reference destinations (e.g., plot$2025$.png) must NOT be
-	// masked as math, so PlanHTML still plans and uploads the local file.
 	dollarFile := filepath.Join(dir, "plot$2025$.png")
 	if err := os.WriteFile(dollarFile, []byte("png"), 0o644); err != nil {
 		t.Fatal(err)

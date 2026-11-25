@@ -14,8 +14,7 @@ import (
 )
 
 func TestKeyMatchesPythonSHA256Format(t *testing.T) {
-	// Key must match sha256("{base_url_without_trailing_slash}|{entity}|{id}")
-	// with no filename suffix so Go reads Python-created state files directly.
+
 	wantSum := sha256.Sum256([]byte("https://elab.example.test|experiments|42"))
 	want := hex.EncodeToString(wantSum[:])
 
@@ -28,8 +27,7 @@ func TestKeyMatchesPythonSHA256Format(t *testing.T) {
 }
 
 func TestLoadSavePreservesUnknownFieldsAndEmptyPendingRemote(t *testing.T) {
-	// Unknown keys (for rollback or future protocol fields) and the distinction
-	// between an absent "pending_remote" and "pending_remote": "" must survive round-trips.
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -101,8 +99,7 @@ func TestLoadSavePreservesUnknownFieldsAndEmptyPendingRemote(t *testing.T) {
 }
 
 func TestStatePreservesLarge64BitIntegerAndResets0600Perm(t *testing.T) {
-	// Unknown integer fields above 2^53 must survive Load -> Save without float64
-	// rounding, and Save must always restore 0600 permissions.
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

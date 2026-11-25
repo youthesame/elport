@@ -173,8 +173,7 @@ func TestFrontmatterGoldenParseServerID(t *testing.T) {
 }
 
 func TestFrontmatterRenderParseRoundTripRapid(t *testing.T) {
-	// Include quotes, consecutive newlines, leading spaces after newlines, and
-	// control characters so Render -> Parse round-trip holds losslessly.
+
 	rapid.Check(t, func(t *rapid.T) {
 		id := rapid.IntRange(1, 100000).Draw(t, "id")
 		title := rapid.StringMatching(`[A-Za-z0-9 _:#'"\n\t\x00日本語]{1,30}`).Draw(t, "title")
@@ -201,8 +200,7 @@ func TestFrontmatterRenderParseRoundTripRapid(t *testing.T) {
 }
 
 func TestFrontmatterYAML11EdgeCasesAndUTF8Validation(t *testing.T) {
-	// YAML 1.1 treats 08 as a string (not octal), rejects !!binary in attachments,
-	// treats top-level !!set as non-mapping, and matches Python key equality (true == 1).
+
 	if _, _, err := frontmatter.Parse("---\nid: 08\n---\nBody\n"); err == nil {
 		t.Error("expected id: 08 to be rejected as string, not int")
 	}
@@ -237,8 +235,6 @@ func TestFrontmatterYAML11EdgeCasesAndUTF8Validation(t *testing.T) {
 		t.Error("DocumentMeta must reject files with invalid UTF-8 bytes in body")
 	}
 
-	// Underscore-containing YAML 1.1 floats (e.g. "0E0_", "1_0.5") must be quoted on
-	// Render so yaml.v3 does not decode them as !!float on Parse.
 	for _, profile := range []string{"0E0_", "1_0.5"} {
 		meta := frontmatter.NewMeta()
 		meta.Set("id", 1)
@@ -255,7 +251,7 @@ func TestFrontmatterYAML11EdgeCasesAndUTF8Validation(t *testing.T) {
 }
 
 func TestFrontmatterFormatKey(t *testing.T) {
-	// Valid format values round-trip cleanly.
+
 	for _, val := range []string{"markdown", "html"} {
 		doc := "---\nid: 7\nformat: " + val + "\n---\nBody\n"
 		meta, body, err := frontmatter.Parse(doc)
@@ -277,11 +273,47 @@ func TestFrontmatterFormatKey(t *testing.T) {
 			t.Errorf("reparsed format = %#v, want %q", reparsed.Values["format"], val)
 		}
 	}
-	// Invalid values, wrong case, null, and non-strings are rejected.
+
 	for _, bad := range []string{"HTML", "md", "1", "true", "null", "[html]"} {
 		doc := "---\nformat: " + bad + "\n---\nBody\n"
 		if _, _, err := frontmatter.Parse(doc); err == nil {
 			t.Errorf("expected format: %s to be rejected", bad)
 		}
+	}
+}
+
+func TestFrontmatterRawBodyPreservesCRLF(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{
+			name: "crlf frontmatter and body with blank separator",
+			in:   "---\r\nid: 42\r\nformat: html\r\n---\r\n\r\nLine 1\r\nLine 2\r\n",
+			want: "Line 1\r\nLine 2\r\n",
+		},
+		{
+			name: "utf8 bom with crlf body and no blank separator",
+			in:   "\ufeff---\r\nid: 42\r\n---\r\nLine 1\r\nLine 2",
+			want: "Line 1\r\nLine 2",
+		},
+		{
+			name: "extra blank line preserved",
+			in:   "---\r\nid: 42\r\n---\r\n\r\n\r\nBody\r\n",
+			want: "\r\nBody\r\n",
+		},
+		{
+			name: "no frontmatter returns original",
+			in:   "Plain\r\nBody\r\n",
+			want: "Plain\r\nBody\r\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := frontmatter.RawBody(tc.in); got != tc.want {
+				t.Errorf("RawBody(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
 	}
 }

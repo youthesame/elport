@@ -1,23 +1,8 @@
-// -*- mode: Bluespec; -*-
-// Formal protocol model for elport's Markdown synchronization and opt-in
-// one-way HTML publish state machine.
-// Models two-form bases (local_base vs server-normalized remote_base),
-// interrupted creation & lost PATCH responses (pending_create and pending_publish),
-// legacy Stage 1 bases, Web UI edits (including deletion to empty), locks,
-// format: markdown|html (including 2->1 migration, explicit 1->2 revert,
-// omitted-format refusal even on empty registered HTML, and external mode
-// switches), second-machine owner-verified --confirm-remote adoption,
-// pre-PATCH re-GET conflict detection & post-re-GET non-atomic PATCH race window,
-// metadata-only pull for registered HTML, conflict sidecar no-clobber & merge
-// promotion, format-aware remote-linked path protection, and monotonic attachment
-// retention (never deleting uploads).
 module elport_sync {
   pure val NORMAL_TEXTS = Set("v1", "v2", "v3")
   pure val LINK_SECRET = "link_secret"
   pure val ALL_TEXTS = NORMAL_TEXTS.union(Set(LINK_SECRET, ""))
 
-  // Models an HTML <img src="secret.csv"> wrapped in literal backticks:
-  // masked as inline code in Markdown (CT_MD), extracted as a path in HTML (CT_HTML).
   pure val BACKTICK_HTML_SECRET = "bt_html_secret"
 
   pure val FORMAT_OMITTED = ""
@@ -33,7 +18,6 @@ module elport_sync {
   pure val USER_COLLAB = "collab"
   pure val ALL_USERS = Set(USER_OWNER, USER_COLLAB)
 
-  // Server normalization is non-identity so same-form comparison is essential.
   pure def serverNorm(localText: str): str =
     if (localText == "v1") "v1|norm"
     else if (localText == "v2") "v2|norm"
@@ -55,8 +39,6 @@ module elport_sync {
     else if (remoteText == "link_secret|norm") "link_secret"
     else ""
 
-  // Format-aware remote-linked path extraction:
-  // HTML bodies use an HTML tokenizer without Markdown backtick/fence masking.
   pure def hasBareSecretPathForMode(body: str, ct: int): bool =
     body == LINK_SECRET
       or body == "link_secret|norm"
@@ -66,7 +48,6 @@ module elport_sync {
   pure def hasLocalBareSecretPath(body: str): bool =
     body == LINK_SECRET
 
-  // Local working copy state
   var localBody: str
   var localFormat: str
   var hasId: bool
@@ -78,7 +59,6 @@ module elport_sync {
   var sidecarBase: str
   var sidecarListedSecret: bool
 
-  // Persisted sync base state (~/.config/elport/state/<hash>)
   var hasBase: bool
   var localBase: str
   var remoteBase: str
@@ -95,7 +75,6 @@ module elport_sync {
   var pendingPublishPreBody: str
   var pendingPublishPreCT: int
 
-  // Remote eLabFTW server state
   var remoteExists: bool
   var remoteBody: str
   var remoteLocked: bool
@@ -104,7 +83,6 @@ module elport_sync {
   var remoteMetaRev: int
   var secretUploaded: bool
 
-  // Ghost / trace observation variables for invariants and Go replay
   var lastAction: str
   var lastArg: str
   var lastOutcome: str
@@ -138,7 +116,6 @@ module elport_sync {
   pure def savedBaseCT(pSavedCT: int): int =
     if (pSavedCT == CT_NONE) CT_MD else pSavedCT
 
-  // Legacy Stage 1 state files persisted confirmed Markdown bases without a content_type field.
   pure def isConfirmedMdBase(pHasBase: bool, pSavedCT: int, pPendingCreate: bool): bool =
     pHasBase and not(pPendingCreate) and (pSavedCT == CT_MD or pSavedCT == CT_NONE)
 
@@ -167,8 +144,6 @@ module elport_sync {
       or hasBareSecretPathForMode(pPendingRemote, CT_MD)
       or (pHasPendingPublish and hasBareSecretPathForMode(pPendingPreBody, pPendingPreCT))
 
-  // Existing conflict sidecars may only be re-written idempotently when both
-  // their bodies and front matter (attachments listing) match exactly.
   pure def sidecarWouldClobber(
     pSidecarsExist: bool,
     pSidecarRemote: str,
@@ -184,13 +159,6 @@ module elport_sync {
         or pSidecarListed != wantListed
     )
 
-  // Single shared pre-flight evaluator used across pushWith, pushPublishInterrupted,
-  // pushPrePatchReGetBlocked, and pushPostReGetRace so eligibility cannot drift.
-  // Returns:
-  //   "ok_html" / "ok_html_adopt" / "ok_md_revert" (HTML / mode-transition push allowed)
-  //   "markdown_normal" (defer to Stage 1 Markdown Guard 5)
-  //   "refused_locked" / "refused_pending_publish" / "refused_mode_mismatch"
-  //   / "refused_no_base" / "conflict_html" / "refused_html"
   pure def evalPushDecision(
     pLocalFormat: str,
     pHasId: bool,
@@ -228,50 +196,47 @@ module elport_sync {
       (wantHtml and pPendingTargetCT == CT_HTML)
         or (explicitMd and pPendingTargetCT == CT_MD)
 
-    // Guard 0: locked entities are always refused regardless of flags.
     if (pRemoteExists and pRemoteLocked)
       "refused_locked"
-    // Guard 1: unresolved pending_publish is resolved BEFORE normal mode branching
-    // and recovery is strictly bound to pendingPublishTargetCT.
+
     else if (pHasPendingPublish and not(pendingUnchanged))
       if (pCurrentUser == pPendingUser and confirmMatches and formatMatchesPending)
         (if (wantHtml) "ok_html" else "ok_md_revert")
       else
         "refused_pending_publish"
-    // Guard 2: external mode-change guard (registered HTML switched externally to Markdown).
+
     else if (isRegHtml and pRemoteExists and not(pRemoteIsHtml))
       if (wantHtml and confirmMatches) "ok_html"
       else if (explicitMd and confirmMatches) "ok_md_revert"
       else "refused_mode_mismatch"
-    // Guard 3: local format: html branch.
+
     else if (wantHtml)
       if ((not(pHasId) and not(pRemoteExists))
           or (pRemoteExists and pRemoteBody == "" and not(pHasBase and pRemoteBase != "") and not(isRegHtml)))
         "ok_html"
       else if (pRemoteExists and not(pRemoteIsHtml))
-        // 2->1 migration requires confirmed Markdown base (including legacy Stage 1 base) matching remote.
+
         if (not(isConfMd)) "refused_no_base"
         else if (pRemoteBody != pRemoteBase) "conflict_html"
         else "ok_html"
       else if (isRegHtml)
-        // Registered HTML re-push (including deletion to "" when remoteBase != "").
+
         if (pRemoteBody == pRemoteBase or confirmMatches) "ok_html"
         else "conflict_html"
       else
-        // Unregistered HTML (second machine or colleague Web UI entity):
-        // --force is refused; adoption requires owner match AND --confirm-remote match.
+
         if (isOwner and confirmMatches) "ok_html_adopt"
         else "refused_html"
-    // Guard 4: local format is markdown or omitted while remote is HTML (or registered HTML).
+
     else if (pRemoteExists and pRemoteIsHtml and (pRemoteBody != "" or isRegHtml))
       if (explicitMd and isRegHtml)
-        // Explicit 1->2 revert allowed when remote matches base or --confirm-remote matches.
+
         if (pRemoteBody == pRemoteBase or confirmMatches) "ok_md_revert"
         else "conflict_html"
       else
-        // Omitted format on any registered HTML (even empty), or any non-HTML format on unregistered HTML.
+
         "refused_html"
-    // Guard 5: standard Stage 1 Markdown push.
+
     else
       "markdown_normal"
   }
@@ -279,9 +244,6 @@ module elport_sync {
   pure def isHtmlModeAllowedDecision(dec: str): bool =
     dec == "ok_html" or dec == "ok_html_adopt" or dec == "ok_md_revert"
 
-  // pending_publish is recorded ONLY for first HTML publishes and actual mode
-  // switches (2->1 migration, 1->2 revert), never for second-machine adoption,
-  // ordinary registered 1->1 re-pushes, or confirmed Markdown-to-Markdown writes.
   pure def needsPendingPublish(
     dec: str,
     pHasBase: bool,
@@ -514,8 +476,6 @@ module elport_sync {
     recordGhost(if (listed) "list_secret" else "unlist_secret", "", "ok"),
   }
 
-  // Models a legacy Stage 1 (v0.2.0) state file that recorded local_base/remote_base
-  // after verifying content_type == 2, without persisting a content_type key.
   action stripLegacyContentType: bool = all {
     hasBase,
     not(pendingCreate),
@@ -541,7 +501,6 @@ module elport_sync {
     recordGhost("legacy_stage1_state", "", "ok"),
   }
 
-  // Models opening the same Git/synced document on a second machine (no local state).
   action switchToSecondMachine(user: str): bool = all {
     hasId,
     remoteExists,
@@ -706,12 +665,6 @@ module elport_sync {
     }
   }
 
-  // Models interrupted HTML / mode-switching PATCHes across all eligible
-  // transitions (first HTML publish, 2->1 migration, 1->2 revert, second-machine
-  // adoption, and registered 1->1 re-push). Writes pending_publish ONLY when
-  // needsPendingPublish holds (first HTML publish or actual 2<->1 mode switch);
-  // adoption and registered 1->1 re-pushes leave pending_publish unset so retries
-  // re-run normal ownership/base checks against the updated remote body.
   action pushPublishInterrupted(
     hasConfirm: bool,
     confirmBody: str,
@@ -756,8 +709,7 @@ module elport_sync {
       listedSecret' = listedSecret,
       unchangedLocalMeta,
       unchangedSidecars,
-      // Preserve last confirmed base untouched; persist remote-linked paths
-      // whenever state is written or already exists.
+
       hasBase' = hasBase,
       localBase' = localBase,
       remoteBase' = remoteBase,
@@ -869,7 +821,7 @@ module elport_sync {
       unchangedState,
       recordGhostFull(actName, arg, dec, hasConfirm, confirmBody, false),
     }
-    // Guard 5: standard Markdown push (unchanged Stage 1 semantics).
+
     else if (hasId and not(hasBase) and not(force)) all {
       unchangedState,
       recordGhostFull(actName, arg, "refused_no_base", hasConfirm, confirmBody, false),
@@ -908,9 +860,6 @@ module elport_sync {
   action push(force: bool): bool =
     pushWith(force, false, "")
 
-  // Models concurrent Web edit, content_type change (even with identical body
-  // bytes), lock, or ownership change (for adoption only) arriving after uploads
-  // and caught by pre-PATCH re-GET. Reuses evalPushDecision for pre-flight.
   action pushPrePatchReGetBlocked(
     hasConfirm: bool,
     confirmBody: str,
@@ -973,9 +922,6 @@ module elport_sync {
     }
   }
 
-  // Explicitly models the irreducible non-atomic race window after the final
-  // pre-PATCH GET succeeds and before the server processes PATCH: eLabFTW API
-  // lacks conditional If-Match and accepts owner PATCH on locked entities.
   action pushPostReGetRace(
     hasConfirm: bool,
     confirmBody: str,
@@ -1087,12 +1033,11 @@ module elport_sync {
         unchangedState,
         recordGhost("pull", "", "refused_pending_publish"),
       } else if (isRegHtml and not(remoteIsHtml)) all {
-        // Registered HTML switched externally to Markdown: block pull so HTML text
-        // is never written back into the local Markdown document.
+
         unchangedState,
         recordGhost("pull", "", "refused_mode_mismatch"),
       } else if (isRegHtml and remoteIsHtml) all {
-        // Registered HTML: metadata-only pull preserves localBody and body bases.
+
         localBody' = localBody,
         localFormat' = localFormat,
         hasId' = hasId,
@@ -1117,7 +1062,7 @@ module elport_sync {
         unchangedState,
         recordGhost("pull", "", "refused_html"),
       } else if (not(hasBase) and localBody != "" and localBody != serverReverse(remoteBody)) all {
-        // Matches pull.go noBaseConflict: never overwrite non-empty local body without a base.
+
         unchangedState,
         recordGhost("pull", "", "no_base_conflict"),
       } else if (hasBase and localBody != localBase and remoteBody == remoteBase) all {
@@ -1285,8 +1230,6 @@ module elport_sync {
     mergeResolved,
   }
 
-  // --- Safety Invariants ---
-
   pure def isCliPushAction(act: str): bool =
     act == "push"
       or act == "push_force"
@@ -1295,19 +1238,10 @@ module elport_sync {
       or act == "push_publish_fail_before_patch"
       or act == "push_pre_patch_reget_blocked"
 
-  // Whenever no irreducible post-re-GET race occurred, the CLI never overwrites
-  // a locked entity, even with --force or --confirm-remote.
   val invNoPushToLocked =
     (prevRemoteLocked and isCliPushAction(lastAction) and not(postReGetRaceOccurred))
       implies (remoteBody == prevRemoteBody and remoteIsHtml == prevRemoteIsHtml and lastOutcome != "pushed")
 
-  // Any CLI write to a non-empty HTML entity (outside post-re-GET race) requires:
-  // unlocked, explicit format (never omitted), and one of the four authorized paths:
-  // (1) registered HTML matching base with no changed pending_publish,
-  // (2) registered HTML with matching --confirm-remote,
-  // (3) unregistered HTML adoption by owner with format: html and matching --confirm-remote,
-  // (4) pending_publish recovery by the same user with matching --confirm-remote AND
-  //     format matching pendingPublishTargetCT.
   val invNoUnauthorizedHtmlWrite =
     (prevRemoteIsHtml
       and prevRemoteBody != ""
@@ -1334,7 +1268,6 @@ module elport_sync {
           )
       )
 
-  // Unregistered non-empty HTML entities are always refused by normal push and --force.
   val invUnregisteredHtmlRefusesForce =
     (prevRemoteIsHtml
       and prevRemoteBody != ""
@@ -1344,7 +1277,6 @@ module elport_sync {
       and (lastAction == "push" or lastAction == "push_force"))
       implies (remoteBody == prevRemoteBody and remoteIsHtml == prevRemoteIsHtml and lastOutcome == "refused_html")
 
-  // Non-owners can never adopt an unregistered non-empty HTML entity, even with --confirm-remote.
   val invCollabNeverAdoptsUnregisteredHtml =
     (prevRemoteIsHtml
       and prevRemoteBody != ""
@@ -1355,8 +1287,6 @@ module elport_sync {
       and isCliPushAction(lastAction))
       implies (remoteBody == prevRemoteBody and remoteIsHtml == prevRemoteIsHtml and lastOutcome == "refused_html")
 
-  // Omitted format: never overwrites a non-empty HTML entity OR any registered HTML
-  // entity (including an empty one), even with --force or --confirm-remote.
   val invOmittedFormatNeverOverwritesHtml =
     (((prevRemoteIsHtml and prevRemoteBody != "") or (prevHasBase and prevSavedContentType == CT_HTML))
       and prevLocalFormat == FORMAT_OMITTED
@@ -1364,9 +1294,6 @@ module elport_sync {
       and not(postReGetRaceOccurred))
       implies (remoteBody == prevRemoteBody and remoteIsHtml == prevRemoteIsHtml and lastOutcome != "pushed")
 
-  // An externally emptied HTML entity whose saved base was non-empty is treated
-  // as a deletion conflict, not as an empty new creation (refused even with
-  // --force in HTML mode, and refused by normal push in Markdown mode).
   val invDeletedRemoteHtmlNotTreatedAsNew =
     (prevRemoteIsHtml
       and prevRemoteBody == ""
@@ -1378,8 +1305,6 @@ module elport_sync {
       ))
       implies (remoteBody == prevRemoteBody and remoteIsHtml == prevRemoteIsHtml and lastOutcome != "pushed")
 
-  // pull never mutates localBody when remote is non-empty HTML or saved state is
-  // registered HTML, and never alters body base or savedContentType on registered HTML.
   val invHtmlPullNeverMutatesLocalBody =
     (lastAction == "pull" and ((prevRemoteIsHtml and prevRemoteBody != "") or prevSavedContentType == CT_HTML))
       implies (localBody == prevLocalBody)
@@ -1402,9 +1327,6 @@ module elport_sync {
     (prevSidecarsExist and lastAction != "merge_resolved" and lastAction != "switch_machine")
       implies (sidecarsExist and sidecarRemote == prevSidecarRemote and sidecarBase == prevSidecarBase)
 
-  // Non-empty HTML entities, registered HTML state, and format: html pushes never
-  // create Markdown conflict sidecars (.remote.md / .base.md). (A Markdown entity
-  // whose remote is Markdown or empty may still use Markdown conflict sidecars.)
   val invHtmlNeverCreatesMarkdownSidecars =
     (prevSavedContentType == CT_HTML
       or (prevRemoteIsHtml and prevRemoteBody != "")
@@ -1426,8 +1348,6 @@ module elport_sync {
     invNoSidecarClobber,
     invHtmlNeverCreatesMarkdownSidecars,
   }
-
-  // --- Reproducible Trace Runs (Stage 1 Markdown) ---
 
   run traceCreateResumeConflictMergeTest =
     init
@@ -1476,12 +1396,10 @@ module elport_sync {
       .then(localEdit("v3"))
       .then(push(false))
       .then(webEdit("v3|norm"))
-      // Existing sidecar holds v2|norm; new remote is v3|norm so sidecar overwrite must be refused.
+
       .then(push(false))
       .then(mergeResolved)
       .then(push(false))
-
-  // --- Reproducible Trace Runs (Stage 2 HTML Publish) ---
 
   run traceHtmlNewRepushAndWebConflictTest =
     init
@@ -1498,8 +1416,7 @@ module elport_sync {
       .expect(allSafetyInvariants and lastOutcome == "conflict_html" and remoteBody == "web_html_1")
       .then(pushWith(false, true, "web_html_1"))
       .expect(allSafetyInvariants and lastOutcome == "pushed" and remoteBody == "v2|html")
-      // Registered 1->1 HTML re-push loses response without setting pending_publish;
-      // retry refuses blind --force and recovers via --confirm-remote on the new body.
+
       .then(localEdit("v3"))
       .then(pushPublishInterrupted(false, "", true))
       .expect(allSafetyInvariants and not(hasPendingPublish) and remoteBody == "v3|html" and remoteBase == "v2|html")
@@ -1516,7 +1433,7 @@ module elport_sync {
       .then(setLocalFormat(FORMAT_HTML))
       .then(push(false))
       .expect(allSafetyInvariants and lastOutcome == "pushed" and remoteIsHtml and savedContentType == CT_HTML and remoteBody == "v1|html")
-      // Empty registered HTML entity still refuses omitted format:.
+
       .then(localEdit(""))
       .then(push(false))
       .expect(allSafetyInvariants and lastOutcome == "pushed" and remoteIsHtml and remoteBody == "" and savedContentType == CT_HTML)
@@ -1533,8 +1450,7 @@ module elport_sync {
 
   run traceHtmlPendingPublishRecoveryTest =
     init
-      // Case 1: First HTML publish loses response; switching format to markdown
-      // must NOT recover as a Markdown write (bound to pendingPublishTargetCT).
+
       .then(setLocalFormat(FORMAT_HTML))
       .then(pushPublishInterrupted(false, "", true))
       .expect(allSafetyInvariants and hasPendingPublish and pendingPublishTargetCT == CT_HTML and remoteIsHtml and remoteBody == "v1|html")
@@ -1544,9 +1460,7 @@ module elport_sync {
       .then(setLocalFormat(FORMAT_HTML))
       .then(pushWith(false, true, "v1|html"))
       .expect(allSafetyInvariants and lastOutcome == "pushed" and not(hasPendingPublish) and savedContentType == CT_HTML)
-      // Case 2: Confirmed 1->2 revert after Web UI edit loses response;
-      // pre-PATCH HTML remote-linked path (bt_html_secret) MUST remain remembered
-      // across the lost response so retry cannot upload secret without attachments:.
+
       .then(webEdit(BACKTICK_HTML_SECRET))
       .then(setLocalFormat(FORMAT_MARKDOWN))
       .then(pushPublishInterrupted(true, BACKTICK_HTML_SECRET, true))
@@ -1570,12 +1484,10 @@ module elport_sync {
       .then(switchToSecondMachine(USER_OWNER))
       .then(push(true))
       .expect(allSafetyInvariants and lastOutcome == "refused_html")
-      // Adoption passes pre-flight as owner, then ownership changes before re-GET -> refused.
+
       .then(pushPrePatchReGetBlocked(true, "v1|html", "v1|html", true, false, USER_COLLAB))
       .expect(allSafetyInvariants and lastOutcome == "refused_html" and remoteOwner == USER_COLLAB and not(hasBase) and not(hasPendingPublish))
-      // Adoption PATCH removes a pre-PATCH HTML remote-linked path (bt_html_secret)
-      // and loses its response (no pending_publish, no base), yet persists
-      // rememberedSecret so a later owner retry with link_secret cannot upload it.
+
       .then(webSetOwner(USER_OWNER))
       .then(webEdit(BACKTICK_HTML_SECRET))
       .then(localEdit("v2"))
@@ -1588,7 +1500,7 @@ module elport_sync {
       .then(localEdit(LINK_SECRET))
       .then(pushWith(false, true, "v2|html"))
       .expect(allSafetyInvariants and lastOutcome == "pushed" and hasBase and savedContentType == CT_HTML and remoteBase == "link_secret|html" and not(secretUploaded) and rememberedSecret)
-      // Registered HTML push catches content_type switch with identical body bytes at re-GET.
+
       .then(pushPrePatchReGetBlocked(false, "", "link_secret|html", false, false, USER_OWNER))
       .expect(allSafetyInvariants and lastOutcome == "refused_mode_mismatch" and not(remoteIsHtml))
 
@@ -1601,7 +1513,7 @@ module elport_sync {
       .expect(allSafetyInvariants and lastOutcome == "refused_mode_mismatch" and localBody == "v1" and savedContentType == CT_HTML)
       .then(push(false))
       .expect(allSafetyInvariants and lastOutcome == "refused_mode_mismatch")
-      // Confirmed Markdown write after external 1->2 switch is MD->MD (no pending_publish).
+
       .then(setLocalFormat(FORMAT_MARKDOWN))
       .then(pushPublishInterrupted(true, "v1|html", false))
       .expect(allSafetyInvariants and not(hasPendingPublish) and not(remoteIsHtml))
@@ -1620,8 +1532,7 @@ module elport_sync {
       .then(webEditMeta)
       .then(pull)
       .expect(allSafetyInvariants and lastOutcome == "pulled_meta" and localMetaRev == 1 and metaBaseRev == 1 and localBody == "v1" and remoteBase == "v1|html")
-      // HTML remote with <img src="secret.csv"> inside literal backticks MUST still
-      // block unauthorized secret upload (HTML tokenizer ignores Markdown backticks).
+
       .then(webEdit(BACKTICK_HTML_SECRET))
       .then(localEdit("link_secret"))
       .then(pushWith(false, true, BACKTICK_HTML_SECRET))

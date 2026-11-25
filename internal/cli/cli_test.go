@@ -155,9 +155,7 @@ func TestParseFlagAndPositionalCompatibility(t *testing.T) {
 	})
 
 	t.Run("interspersed flag between positionals intentionally allowed by pflag", func(t *testing.T) {
-		// Unlike Python argparse (which exits 2 when a flag splits nargs="*"),
-		// pflag permits standard GNU-style interspersed flags. Recorded here so
-		// this deliberate syntax widening is explicit rather than accidental.
+
 		var out bytes.Buffer
 		cmd, code, err := cli.Parse([]string{"push", "a.md", "--force", "b.md"}, &out)
 		if err != nil || code != cli.ExitOK {
@@ -180,8 +178,7 @@ func TestParseFlagAndPositionalCompatibility(t *testing.T) {
 	})
 
 	t.Run("list decimal integers match Python int() including leading zeros and negative runtime check", func(t *testing.T) {
-		// Python argparse uses base-10 int(): "010" is 10, "08" is 8, and out-of-range
-		// values like --limit 0 / --offset -1 parse cleanly so browse rejects them with exit 1.
+
 		var out bytes.Buffer
 		cmd, code, err := cli.Parse([]string{"list", "--limit", "010", "--offset", "08"}, &out)
 		if err != nil || code != cli.ExitOK {

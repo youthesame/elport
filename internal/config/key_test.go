@@ -10,8 +10,7 @@ import (
 )
 
 func TestAPIKeyRedactsInAllFmtVerbsAndUnexportedFields(t *testing.T) {
-	// Secrets must never appear in formatted logs, even when embedded in an
-	// unexported struct field where fmt bypasses custom Format/String methods.
+
 	const raw = "super-secret-api-key-12345"
 	key := config.NewAPIKey(raw)
 

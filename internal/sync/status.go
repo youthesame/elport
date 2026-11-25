@@ -65,11 +65,12 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 		return "", err
 	}
 
+	hasBase := HasBase(saved)
 	var summary []string
 	if docFormat != "" {
 		_, _ = fmt.Fprintf(stdout, "format: %s\n", docFormat)
 	}
-	if saved == nil {
+	if !hasBase {
 		_, _ = fmt.Fprintln(stdout, "local: base unavailable (comparison unavailable)")
 		summary = append(summary, "no base")
 	} else if doc.Body == LocalBody(strField(saved, "local_base")) {
@@ -190,16 +191,24 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 		}
 	}
 
-	if saved == nil {
+	_, hasPP := PendingPublish(saved)
+	if !hasBase {
 		_, _ = fmt.Fprintln(stdout, "remote: base unavailable (comparison unavailable)")
 	} else if remoteBody == RemoteBody(strField(saved, "remote_base")) {
 		_, _ = fmt.Fprintln(stdout, "remote: unchanged")
-	} else if isRegHTML {
+	} else if isRegHTML || IsHTML(remoteDoc) || hasPP {
 		_, _ = fmt.Fprintln(stdout, `remote: changed (use "elport diff")`)
 		summary = append(summary, "remote changed")
 	} else {
 		_, _ = fmt.Fprintln(stdout, `remote: changed (use "elport pull")`)
 		summary = append(summary, "remote changed")
+	}
+	if hasPP {
+		_, _ = fmt.Fprintln(stdout, `publish: interrupted (inspect with "elport diff" and re-run "elport push")`)
+		summary = append(summary, "interrupted publish")
+	}
+	if isRegHTML && !IsHTML(remoteDoc) {
+		summary = append(summary, "mode mismatch")
 	}
 	if isRegHTML {
 		savedHash := ShortHash(BodySHA256(strField(saved, "remote_base")))
@@ -208,6 +217,8 @@ func Status(ctx context.Context, docPath string, api API, cfg *config.Data, prof
 		} else {
 			_, _ = fmt.Fprintf(stdout, "remote sha256: %s (remote is %s)\n", savedHash, ShortHash(BodySHA256(string(remoteBody))))
 		}
+	} else if IsHTML(remoteDoc) {
+		_, _ = fmt.Fprintf(stdout, "remote sha256: %s\n", ShortHash(BodySHA256(string(remoteBody))))
 	}
 	if locked {
 		summary = append(summary, "locked")
@@ -262,7 +273,7 @@ func Diff(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 
 	var other, local, fromFile string
 	if baseOnly {
-		if saved == nil {
+		if !HasBase(saved) {
 			return errors.New("base unavailable; cannot show --base diff")
 		}
 		other = strField(saved, "local_base")
@@ -284,7 +295,13 @@ func Diff(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 		if IsHTML(remoteDoc) || docFormat == "html" || IsRegisteredHTML(saved) {
 			rawRemote := strField(remoteDoc, "body")
 			ignore := ignoreLayers(cfg)
-			localPlan, err := plan.LocalCandidatesHTML(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+			revertToMD := docFormat == "markdown"
+			var localPlan *plan.LocalResult
+			if revertToMD {
+				localPlan, err = plan.LocalCandidates(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+			} else {
+				localPlan, err = plan.LocalCandidatesHTML(string(doc.Body), filepath.Dir(docPath), ignore, metaAttachments(doc.Meta), stderr)
+			}
 			if err != nil {
 				return err
 			}
@@ -308,16 +325,50 @@ func Diff(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 				urls[k] = v
 			}
 			outgoing := transclude.ReplaceSpans(string(doc.Body), approved.Refs, urls)
-			renderedLocal, err := render.MarkdownToHTML(outgoing)
-			if err != nil {
-				return err
-			}
-			diffText, err := CanonHTMLDiff("remote", rawRemote, "local", renderedLocal)
-			if err != nil {
-				return err
-			}
-			if diffText == "" && rawRemote != renderedLocal && stderr != nil {
-				_, _ = fmt.Fprintln(stderr, "note: raw HTML differs although canonical HTML is identical")
+			var diffText string
+			if revertToMD {
+				fromText := normalizeRemoteDiff(rawRemote)
+				if IsHTML(remoteDoc) {
+					fromText = render.CanonHTML(rawRemote)
+				}
+				toText := normalizeRemoteDiff(outgoing)
+				ud := difflib.UnifiedDiff{
+					A:        splitLinesKeepEnds(fromText),
+					B:        splitLinesKeepEnds(toText),
+					FromFile: "remote",
+					ToFile:   "local",
+					Context:  3,
+				}
+				diffText, err = difflib.GetUnifiedDiffString(ud)
+				if err != nil {
+					return err
+				}
+			} else {
+				renderedLocal, err := render.MarkdownToHTML(outgoing)
+				if err != nil {
+					return err
+				}
+				if IsHTML(remoteDoc) {
+					diffText, err = CanonHTMLDiff("remote", rawRemote, "local", renderedLocal)
+					if err != nil {
+						return err
+					}
+					if diffText == "" && rawRemote != renderedLocal && stderr != nil {
+						_, _ = fmt.Fprintln(stderr, "note: raw HTML differs although canonical HTML is identical")
+					}
+				} else {
+					ud := difflib.UnifiedDiff{
+						A:        splitLinesKeepEnds(normalizeRemoteDiff(rawRemote)),
+						B:        splitLinesKeepEnds(render.CanonHTML(renderedLocal)),
+						FromFile: "remote",
+						ToFile:   "local",
+						Context:  3,
+					}
+					diffText, err = difflib.GetUnifiedDiffString(ud)
+					if err != nil {
+						return err
+					}
+				}
 			}
 			if stderr != nil {
 				_, _ = fmt.Fprintf(stderr, "remote sha256: %s\n", ShortHash(BodySHA256(rawRemote)))

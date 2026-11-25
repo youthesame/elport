@@ -26,7 +26,8 @@ attachments: [data/raw.csv]   # files to upload without a link in the body
 push sends a key only when you edited it since the last push or pull, so a key you left alone, or removed,
 keeps the remote value. pull writes `title`, `category`, `status`, `read`, and `write` back from the server, but
 keeps a key you edited and have not pushed.
-`tags` merge both ways. `read` and `write` set the base visibility only, so grants made in the Web UI stay.
+`tags` merge as a union of local and remote tags (including during metadata-only `pull` on locally registered HTML
+documents; remove tags in the Web UI). `read` and `write` set the base visibility only, so grants made in the Web UI stay.
 
 push fills in a missing block and strips it from the body it sends. The base and its hashes live in
 `~/.config/elport/state/`, one file per entity, never in the project.

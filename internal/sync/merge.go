@@ -211,6 +211,7 @@ func promotePendingRemote(baseURL, entity string, eid int, hasID bool, remoteSou
 	}
 	updated["remote_base"] = strField(saved, "pending_remote")
 	updated["local_base"] = remoteSource
+	updated["content_type"] = 2
 	delete(updated, "pending_remote")
 	delete(updated, "pending_create")
 	delete(updated, "body_sent")

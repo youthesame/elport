@@ -69,17 +69,56 @@ func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 		if !IsHTML(remoteDoc) {
 			return "", fmt.Errorf("%s/%d is published in html format, but the server is now in markdown mode; inspect with 'elport diff' before syncing", doc.Entity, doc.ID)
 		}
-		return "", HtmlEntityError{
-			Msg: fmt.Sprintf("%s/%d is published in html format (one-way); pull is not used for HTML bodies: inspect changes with 'elport diff' or download attachments with 'elport fetch'", doc.Entity, doc.ID),
+		remoteBody := RemoteBody(strField(remoteDoc, "body"))
+		remoteBodyChanged := remoteBody != RemoteBody(strField(saved, "remote_base"))
+		baseMeta := savedMap(saved, "meta_base")
+		merged, newBase := mergeMeta(doc.Meta, baseMeta, remoteDoc)
+		metaChanged := !metaEqual(merged, doc.Meta)
+		baseChanged := !mapEqual(newBase, baseMeta)
+		if metaChanged {
+			if err := verifyDocUnchanged(docPath, initialRaw); err != nil {
+				return "", err
+			}
+			rawBody := frontmatter.RawBody(string(initialRaw))
+			if err := AtomicWriteDoc(docPath, frontmatter.Render(merged, rawBody)); err != nil {
+				return "", err
+			}
 		}
+		if metaChanged || baseChanged {
+			updated := make(map[string]any, len(saved)+1)
+			for k, v := range saved {
+				updated[k] = v
+			}
+			updated["meta_base"] = newBase
+			if err := state.Save(baseURL, doc.Entity, strconv.Itoa(doc.ID), updated); err != nil {
+				return "", err
+			}
+		}
+		if metaChanged {
+			_, _ = fmt.Fprintf(stdout, "pulled metadata for %s/%d (html; body untouched)\n", doc.Entity, doc.ID)
+			_, _ = fmt.Fprintf(stdout, "  metadata updated in %s\n", filepath.Base(docPath))
+		} else {
+			_, _ = fmt.Fprintf(stdout, "metadata up to date for %s/%d (html; body untouched)\n", doc.Entity, doc.ID)
+		}
+		if remoteBodyChanged && stderr != nil {
+			_, _ = fmt.Fprintf(stderr, "note: remote HTML body also changed; inspect with 'elport diff' (remote sha256: %s)\n", ShortHash(BodySHA256(string(remoteBody))))
+		}
+		if metaChanged {
+			return "pulled metadata (html)", nil
+		}
+		if remoteBodyChanged {
+			return "metadata up to date (remote html changed)", nil
+		}
+		return UpToDate, nil
 	}
 	if err := RefuseHTML(remoteDoc, doc.Entity, doc.ID); err != nil {
 		return "", err
 	}
+	hasBase := HasBase(saved)
 	remoteBody := RemoteBody(strField(remoteDoc, "body"))
-	upToDate := saved != nil && remoteBody == RemoteBody(strField(saved, "remote_base"))
+	upToDate := hasBase && remoteBody == RemoteBody(strField(saved, "remote_base"))
 	baseMeta := savedMap(saved, "meta_base")
-	localDirty := saved != nil && doc.Body != LocalBody(strField(saved, "local_base"))
+	localDirty := hasBase && doc.Body != LocalBody(strField(saved, "local_base"))
 	uploads, err := remote.Uploads(ctx, remoteDoc)
 	if err != nil {
 		return "", err
@@ -122,7 +161,7 @@ func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 	sourceStr, used := transclude.Reverse(relinked, ReversibleUploads(uploads), remote.BaseURL)
 	source := LocalBody(sourceStr)
 
-	noBaseConflict := saved == nil && strings.TrimSpace(string(doc.Body)) != "" && doc.Body != source
+	noBaseConflict := !hasBase && strings.TrimSpace(string(doc.Body)) != "" && doc.Body != source
 	if localDirty {
 		return "", raiseConflict(
 			ctx,
@@ -209,10 +248,11 @@ func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 	}
 
 	record := map[string]any{
-		"remote_base": string(remoteBody),
-		"local_base":  string(source),
-		"meta_base":   newBase,
-		"path":        transclude.ResolveNonStrict(docPath),
+		"remote_base":  string(remoteBody),
+		"local_base":   string(source),
+		"meta_base":    newBase,
+		"content_type": 2,
+		"path":         transclude.ResolveNonStrict(docPath),
 	}
 	for k, v := range carriedState(saved) {
 		record[k] = v

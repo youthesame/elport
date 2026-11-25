@@ -8,14 +8,7 @@ import (
 )
 
 func TestMarkdownToHTMLPreservesMathFiguresTablesAndStrikethrough(t *testing.T) {
-	// Verifies all measured eLabFTW 6.0.9 Filter::body() / MathJax 4.1.3 requirements:
-	// - inline $a*b*c$, $\{x\}$, $a < b$, \(...\), block $$...$$, \[...\] preserved
-	// - escaped \$100 preserved for MathJax processEscapes: true
-	// - strikethrough renders as <s> (not <del>, which Filter::body strips)
-	// - table alignment renders as style="text-align:..." (not align="...")
-	// - tasklist syntax stays literal [x]/[ ] (not <input type="checkbox">)
-	// - raw HTML <figure>/<img width>/<sub>/<sup>/<details> passes through
-	// - code spans and fences are never altered as math
+
 	md := strings.Join([]string{
 		"# Title",
 		"",
@@ -73,8 +66,6 @@ func TestMarkdownToHTMLPreservesMathFiguresTablesAndStrikethrough(t *testing.T) 
 		}
 	}
 
-	// Nested TeX brace groups containing $...$ (e.g. \text{... $a*b*c$ ...}) must stay
-	// intact as a single math span without closing early or turning * into <em>.
 	nested, err := render.MarkdownToHTML(`$\text{an inline $a*b*c$ expression} + x$` + "\n")
 	if err != nil {
 		t.Fatalf("MarkdownToHTML nested braces: %v", err)
@@ -83,7 +74,6 @@ func TestMarkdownToHTMLPreservesMathFiguresTablesAndStrikethrough(t *testing.T) 
 		t.Errorf("nested TeX brace group mangled: %q", nested)
 	}
 
-	// Dollar signs inside link/image destinations must not be treated as TeX math.
 	dollarImg, err := render.MarkdownToHTML("![photo](https://e.example/plot$2025$.png)\n")
 	if err != nil {
 		t.Fatalf("MarkdownToHTML dollar URL: %v", err)
@@ -103,8 +93,7 @@ func TestMarkdownToHTMLPreservesMathFiguresTablesAndStrikethrough(t *testing.T) 
 }
 
 func TestCanonHTMLAbsorbsHarmlessNoiseAndPreservesSemanticChanges(t *testing.T) {
-	// Absorbs TinyMCE whitespace reformatting, thead/tbody wrappers, img[alt] overwrite,
-	// style whitespace/semicolon differences, HTML comments, and attribute ordering.
+
 	a := "<!-- comment --><table>\n<thead>\n<tr><th style=\"text-align: right\">A</th><th colspan=\"2\">B</th></tr>\n</thead>\n<tbody>\n<tr><td rowspan=\"2\">1</td><td>2</td></tr>\n</tbody>\n</table><p>Hello\nworld</p><img width=\"80%\" src=\"app/download.php?f=a\" alt=\"old\">"
 	b := `<table><tr><th style="text-align:right;">A</th><th colspan="2">B</th></tr><tr><td rowspan="2">1</td><td>2</td></tr></table><p>Hello world</p><img alt="download.php" src="app/download.php?f=a" width="80%">`
 
@@ -114,14 +103,12 @@ func TestCanonHTMLAbsorbsHarmlessNoiseAndPreservesSemanticChanges(t *testing.T) 
 		t.Fatalf("expected identical canonical HTML:\n--- A ---\n%s--- B ---\n%s", ca, cb)
 	}
 
-	// Preserves <pre>/<code> whitespace verbatim.
 	pre1 := "<pre class=\"language-python\"><code>def f():\n    return 1\n</code></pre>"
 	pre2 := "<pre class=\"language-python\"><code>def f():\n  return 1\n</code></pre>"
 	if render.CanonHTML(pre1) == render.CanonHTML(pre2) {
 		t.Errorf("CanonHTML must preserve whitespace inside <pre>/<code>")
 	}
 
-	// Preserves semantic changes: width, href, colspan/rowspan, id, inline spacing.
 	if render.CanonHTML(`<img src="x" width="80%">`) == render.CanonHTML(`<img src="x" width="50%">`) {
 		t.Error("width change must remain visible in CanonHTML")
 	}

@@ -27,10 +27,7 @@ func setupHTMLDoc(t *testing.T, dir, content string) string {
 }
 
 func TestHTMLNewPublishRepushAndNoOpAttachmentCheck(t *testing.T) {
-	// Verifies first HTML publish, math-masked reference planning ($x_{[1]}(t)$ does not
-	// upload local file "t"), <s> strikethrough & \$ preservation, 6.x warning suppression,
-	// one-time first-publish stderr note, unchanged PATCH skip, and re-PATCH when a local
-	// file switches to a different already-uploaded server attachment (same filename, new SHA-256).
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	figA := []byte("fig-a-bytes")
@@ -98,7 +95,6 @@ func TestHTMLNewPublishRepushAndNoOpAttachmentCheck(t *testing.T) {
 		t.Fatalf("expected registered HTML state (content_type=1), got %#v (err=%v)", saved, err)
 	}
 
-	// Second push with no changes must skip PATCH (unchanged) and NOT repeat first-publish note.
 	out.Reset()
 	errBuf.Reset()
 	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
@@ -111,8 +107,6 @@ func TestHTMLNewPublishRepushAndNoOpAttachmentCheck(t *testing.T) {
 		t.Errorf("first-publish note should only print once, got %q", errBuf.String())
 	}
 
-	// Pre-register a second upload with the same basename fig.png and hash(figB),
-	// then replace local fig.png with figB: push MUST NOT treat this as unchanged.
 	sumB := sha256.Sum256(figB)
 	api.uploads["experiments/42"] = append(api.uploads["experiments/42"], map[string]any{
 		"id":             json.Number("200"),
@@ -137,9 +131,7 @@ func TestHTMLNewPublishRepushAndNoOpAttachmentCheck(t *testing.T) {
 }
 
 func TestHTMLWebEditConflictDeletionLockAndConfirmRemote(t *testing.T) {
-	// Web UI edits and external deletions to "" on registered HTML must block both
-	// normal push and --force without creating Markdown sidecars, show canonical HTML
-	// diff + short sha256, and succeed only with matching --confirm-remote (and never when locked).
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	docPath := setupHTMLDoc(t, dir, "---\ntitle: T\nformat: html\n---\n\n<img src=\"https://e.example/x\" width=\"80%\">\n")
@@ -151,7 +143,6 @@ func TestHTMLWebEditConflictDeletionLockAndConfirmRemote(t *testing.T) {
 		t.Fatalf("initial push: %v", err)
 	}
 
-	// Simulate Web UI edit changing width to 50%.
 	webBody := `<p><img src="https://e.example/x" width="50%"></p>`
 	api.entities["experiments/42"]["body"] = webBody
 
@@ -167,7 +158,6 @@ func TestHTMLWebEditConflictDeletionLockAndConfirmRemote(t *testing.T) {
 		t.Fatal("HTML conflict must never create .remote.md sidecar")
 	}
 
-	// Too-short or wrong confirm hash is rejected.
 	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: "deadbeef", WorkDir: dir}, &out, &errBuf); err == nil {
 		t.Fatal("expected <12-char --confirm-remote to be rejected")
 	}
@@ -175,7 +165,6 @@ func TestHTMLWebEditConflictDeletionLockAndConfirmRemote(t *testing.T) {
 		t.Fatal("expected mismatched --confirm-remote to be rejected")
 	}
 
-	// Locked entity must refuse even with exact --confirm-remote and --force.
 	api.entities["experiments/42"]["locked"] = 1
 	goodHash := sync.ShortHash(sync.BodySHA256(webBody))
 	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, ConfirmRemote: goodHash, WorkDir: dir}, &out, &errBuf); err == nil || !strings.Contains(err.Error(), "locked") {
@@ -183,7 +172,6 @@ func TestHTMLWebEditConflictDeletionLockAndConfirmRemote(t *testing.T) {
 	}
 	api.entities["experiments/42"]["locked"] = 0
 
-	// Exact --confirm-remote succeeds after unlock and reports body updated.
 	out.Reset()
 	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: goodHash, WorkDir: dir}, &out, &errBuf); err != nil {
 		t.Fatalf("confirmed push failed: %v", err)
@@ -192,7 +180,6 @@ func TestHTMLWebEditConflictDeletionLockAndConfirmRemote(t *testing.T) {
 		t.Errorf("confirmed push overwriting Web UI edit should report body updated, got %q", out.String())
 	}
 
-	// External deletion to empty string "" is a deletion conflict, not fresh creation.
 	api.entities["experiments/42"]["body"] = ""
 	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); err == nil {
 		t.Fatal("expected externally emptied registered HTML to refuse --force")
@@ -204,9 +191,7 @@ func TestHTMLWebEditConflictDeletionLockAndConfirmRemote(t *testing.T) {
 }
 
 func TestHTMLPendingPublishLostResponseRecovery(t *testing.T) {
-	// If the first HTML publish PATCH reaches the server but its response is lost,
-	// pending_publish prevents permanent lockout while requiring same-user + matching
-	// format + exact --confirm-remote, and blocking pull/merge until resolved.
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	docPath := setupHTMLDoc(t, dir, "---\ntitle: Lost\nformat: html\n---\n\nHello HTML\n")
@@ -235,12 +220,10 @@ func TestHTMLPendingPublishLostResponseRecovery(t *testing.T) {
 	remoteBody := api.entities["experiments/42"]["body"].(string)
 	remoteHash := sync.ShortHash(sync.BodySHA256(remoteBody))
 
-	// Blind --force is refused.
 	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); err == nil {
 		t.Fatal("expected --force to be refused on unresolved pending_publish")
 	}
 
-	// Switching format to markdown with --confirm-remote must NOT recover (bound to TargetCT=1).
 	mdContent := strings.Replace(mustRead(t, docPath), "format: html", "format: markdown", 1)
 	if err := os.WriteFile(docPath, []byte(mdContent), 0o644); err != nil {
 		t.Fatal(err)
@@ -249,7 +232,6 @@ func TestHTMLPendingPublishLostResponseRecovery(t *testing.T) {
 		t.Fatal("expected mismatched format: markdown to fail pending_publish recovery")
 	}
 
-	// Restoring format: html and passing exact --confirm-remote recovers cleanly.
 	htmlContent := strings.Replace(mustRead(t, docPath), "format: markdown", "format: html", 1)
 	if err := os.WriteFile(docPath, []byte(htmlContent), 0o644); err != nil {
 		t.Fatal(err)
@@ -264,9 +246,7 @@ func TestHTMLPendingPublishLostResponseRecovery(t *testing.T) {
 }
 
 func TestHTMLPrePatchReGetBlocksConcurrentChangeAndGuardsHold(t *testing.T) {
-	// Tests pre-PATCH re-GET catching concurrent body edit / mode switch with identical
-	// body bytes / lock, omitted-format refusal on registered HTML, external 1->2 switch
-	// guard on pull/push, missing PATCH body rejection, and HTML backtick remote-linked protection.
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "secret.csv"), []byte("topsecret"), 0o644); err != nil {
@@ -280,7 +260,6 @@ func TestHTMLPrePatchReGetBlocksConcurrentChangeAndGuardsHold(t *testing.T) {
 		t.Fatalf("initial push: %v", err)
 	}
 
-	// 1. Pre-PATCH re-GET catches concurrent content_type switch with identical body bytes.
 	cur := copyEntityMap(api.entities["experiments/42"])
 	switched := copyEntityMap(cur)
 	switched["content_type"] = 2
@@ -297,14 +276,12 @@ func TestHTMLPrePatchReGetBlocksConcurrentChangeAndGuardsHold(t *testing.T) {
 		t.Fatal("PATCH must not run after pre-PATCH re-GET detects mode change")
 	}
 
-	// 2. External 1->2 mode switch blocks pull (never writes HTML into local Markdown).
 	api.entities["experiments/42"]["content_type"] = 2
 	if _, err := sync.Pull(context.Background(), docPath, api, cfg, "", &out, &errBuf); err == nil || !strings.Contains(err.Error(), "markdown mode") {
 		t.Fatalf("expected external 1->2 switch to block pull, got %v", err)
 	}
 	api.entities["experiments/42"]["content_type"] = 1
 
-	// 3. Omitted format: on registered HTML is refused even with --force.
 	omitted := strings.Replace(mustRead(t, docPath), "format: html\n", "", 1)
 	if err := os.WriteFile(docPath, []byte(omitted), 0o644); err != nil {
 		t.Fatal(err)
@@ -316,7 +293,6 @@ func TestHTMLPrePatchReGetBlocksConcurrentChangeAndGuardsHold(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// 4. Remote HTML backtick-wrapped <img src="secret.csv"> blocks uploading local secret.csv.
 	btHTML := "<p>`<img src=\"secret.csv\">`</p>"
 	api.entities["experiments/42"]["body"] = btHTML
 	withSecret := strings.Replace(updated, "Updated", "[s](secret.csv)", 1)
@@ -333,7 +309,6 @@ func TestHTMLPrePatchReGetBlocksConcurrentChangeAndGuardsHold(t *testing.T) {
 		}
 	}
 
-	// 5. Missing body key in PATCH response aborts before saving state.
 	api.patchTransform = func(payload map[string]any) map[string]any {
 		return map[string]any{"id": json.Number("42"), "content_type": 1}
 	}
@@ -347,9 +322,7 @@ func TestHTMLPrePatchReGetBlocksConcurrentChangeAndGuardsHold(t *testing.T) {
 }
 
 func TestHTMLStatusDiffAndPullGuidance(t *testing.T) {
-	// Status separates format: html and mode: html (published by elport), prints remote sha256,
-	// steers HTML conflicts to diff (not pull); Diff previews canon_html(remote) vs
-	// canon_html(render(local)) with UPLOAD_PENDING and prints remote sha256 on stderr.
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "newplot.png"), []byte("png"), 0o644); err != nil {
@@ -363,7 +336,6 @@ func TestHTMLStatusDiffAndPullGuidance(t *testing.T) {
 		t.Fatalf("initial push: %v", err)
 	}
 
-	// Simulate Web UI edit + local new image reference.
 	webHTML := "<p>Hello <strong>Web</strong></p>\n"
 	api.entities["experiments/42"]["body"] = webHTML
 	localEdited := strings.Replace(mustRead(t, docPath), "Hello **world**", "Hello **local** ![p](newplot.png)", 1)
@@ -395,9 +367,13 @@ func TestHTMLStatusDiffAndPullGuidance(t *testing.T) {
 		t.Errorf("expected remote sha256 on Diff stderr, got %q", errBuf.String())
 	}
 
-	// Pull on registered HTML gives one-way diff/fetch guidance.
-	if _, err := sync.Pull(context.Background(), docPath, api, cfg, "", &out, &errBuf); err == nil || !strings.Contains(err.Error(), "elport diff") {
-		t.Fatalf("expected pull on registered HTML to point to elport diff, got %v", err)
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Pull(context.Background(), docPath, api, cfg, "", &out, &errBuf); err != nil {
+		t.Fatalf("expected metadata-only pull on registered HTML to succeed, got %v", err)
+	}
+	if !strings.Contains(out.String(), "html; body untouched") || !strings.Contains(errBuf.String(), "elport diff") {
+		t.Fatalf("unexpected metadata-only pull output: out=%q err=%q", out.String(), errBuf.String())
 	}
 }
 
@@ -411,8 +387,7 @@ func mustRead(t *testing.T, p string) string {
 }
 
 func TestHTMLUnregisteredRefusedEvenWithConfirmRemoteInPhase1(t *testing.T) {
-	// Unregistered non-empty HTML entities must remain refused in Phase 1 even with
-	// --force or --confirm-remote.
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	docPath := setupHTMLDoc(t, dir, "---\nid: 42\nentity: experiments\nprofile: test\nformat: html\n---\n\nOverwrite\n")
@@ -440,12 +415,7 @@ func TestHTMLUnregisteredRefusedEvenWithConfirmRemoteInPhase1(t *testing.T) {
 }
 
 func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpDirectURL(t *testing.T) {
-	// Regression tests for:
-	// - S1: ID-less first HTML publish checks pre-PATCH re-GET and records observed pre_content_type
-	// - S2: second lost response during confirmed recovery preserves pending_publish
-	// - S3: lost response on registered HTML push removing a remote-linked path persists remote_paths
-	// - S7: direct download URL with zero local files loads uploads and skips redundant PATCH
-	// - S8: concurrent Push and Pull on the same entity serialize cleanly under -race
+
 	setIsolatedHome(t)
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "fig.png"), []byte("fig"), 0o644); err != nil {
@@ -455,7 +425,6 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 		t.Fatal(err)
 	}
 
-	// S1a: ID-less first HTML publish must block when entity is locked during upload.
 	docPath := setupHTMLDoc(t, dir, "---\ntitle: Race\nformat: html\n---\n\n![f](fig.png)\n")
 	api := newWriteFakeAPI()
 	api.onUpload = func(entity string, eid int, _ string) {
@@ -469,13 +438,10 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 	if len(api.patches) != 0 {
 		t.Fatalf("PATCH must not run when entity locked during upload, got %d patches", len(api.patches))
 	}
-	// S1b: entity created with content_type=2 stayed unchanged while upload aborted;
-	// unlocking and retrying without --confirm-remote must succeed cleanly.
+
 	api.onUpload = nil
 	api.entities["experiments/42"]["locked"] = 0
 
-	// S2: lose response TWICE (initial + first confirmed recovery) -> pending_publish MUST survive
-	// so third attempt with matching --confirm-remote still recovers cleanly.
 	api.failVerifyOnce = true
 	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{WorkDir: dir}, &out, &errBuf); err == nil {
 		t.Fatal("expected first lost-response failure")
@@ -494,8 +460,6 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 		t.Fatalf("third confirmed recovery failed: %v", err)
 	}
 
-	// S3: registered HTML push removing bt_html_secret loses PATCH response ->
-	// remote_paths MUST already be persisted so next push referencing secret.csv still blocks upload.
 	btHTML := "<p>`<img src=\"secret.csv\">`</p>"
 	api.entities["experiments/42"]["body"] = btHTML
 	api.failVerifyOnce = true
@@ -516,7 +480,6 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 		}
 	}
 
-	// S7: direct download URL in body (zero local files) must load uploads and skip redundant PATCH.
 	dlURL := "https://e.example/app/download.php?f=ab%2F100-fig.png&name=fig.png&storage=1"
 	api.uploads["experiments/42"] = []map[string]any{{
 		"id":             json.Number("100"),
@@ -541,10 +504,6 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 		t.Fatalf("expected unchanged push with direct download URL to skip PATCH, got %d new patch(es)", len(api.patches)-patchesBeforeNoOp)
 	}
 
-	// S8: deterministic creation-path concurrency test — an ID-less first HTML Push
-	// locks the new entity before exposing the ID on disk, so a concurrent Pull
-	// started as soon as the ID is written deterministically blocks on the entity
-	// lock and cannot clobber the registered HTML state.
 	concDir := t.TempDir()
 	concDoc := setupHTMLDoc(t, concDir, "---\ntitle: Conc\nformat: html\n---\n\nConcurrent HTML\n")
 	concAPI := newWriteFakeAPI()
@@ -593,18 +552,14 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 	if err := <-pushDone; err != nil {
 		t.Fatalf("concurrent Push failed: %v", err)
 	}
-	if err := <-pullDone; err == nil {
-		t.Fatal("Pull after registered HTML Push should see HTML state and refuse")
+	if err := <-pullDone; err != nil {
+		t.Fatalf("Pull after registered HTML Push should run metadata-only pull cleanly, got %v", err)
 	}
 	concSaved, err := state.Load("https://e.example", "experiments", "88")
 	if err != nil || !sync.IsRegisteredHTML(concSaved) {
 		t.Fatalf("registered HTML state must survive concurrent Pull, got %#v (err=%v)", concSaved, err)
 	}
 
-	// S11 & S12: first HTML push blocked at pre-PATCH re-GET because Web UI filled
-	// the empty entity during upload must NOT leave a pending_publish marker, must
-	// not suggest --confirm-remote when the entity started in HTML mode and only its
-	// body changed, and a later confirmed retry must still refuse unregistered HTML.
 	s11Dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(s11Dir, "fig.png"), []byte("fig"), 0o644); err != nil {
 		t.Fatal(err)
@@ -645,11 +600,10 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 	s11API.onUpload = nil
 	s11Hash := sync.ShortHash(sync.BodySHA256(webFilled))
 	var s11HtmlErr sync.HtmlEntityError
-	if _, err := sync.Push(context.Background(), s11Doc, s11API, cfg, sync.PushOptions{ConfirmRemote: s11Hash, WorkDir: s11Dir}, &s11Out, &s11Err); !errors.As(err, &s11HtmlErr) {
-		t.Fatalf("expected S11 confirmed retry to refuse unregistered Web UI HTML (HtmlEntityError), got %v", err)
+	if _, err := sync.Push(context.Background(), s11Doc, s11API, cfg, sync.PushOptions{ConfirmRemote: s11Hash, WorkDir: s11Dir}, &s11Out, &s11Err); err != nil {
+		t.Fatalf("expected owner retry with exact --confirm-remote to adopt unregistered HTML, got %v", err)
 	}
 
-	// Also verify the ID-less S11 path (POST creates Markdown entity, Web UI edits to HTML during upload).
 	s11bDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(s11bDir, "fig.png"), []byte("fig"), 0o644); err != nil {
 		t.Fatal(err)
@@ -660,6 +614,7 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 	s11bAPI.onUpload = func(entity string, eid int, _ string) {
 		s11bAPI.entities[entity+"/100"]["content_type"] = 1
 		s11bAPI.entities[entity+"/100"]["body"] = webFilled
+		s11bAPI.entities[entity+"/100"]["userid"] = json.Number("99")
 	}
 	if _, err := sync.Push(context.Background(), s11bDoc, s11bAPI, cfg, sync.PushOptions{WorkDir: s11bDir}, &s11Out, &s11Err); err == nil {
 		t.Fatal("expected ID-less S11 first push to abort before PATCH")
@@ -673,6 +628,467 @@ func TestHTMLNewPushPrePatchReGetSecondLostResponseRemotePathPersistenceAndNoOpD
 	}
 	s11bAPI.onUpload = nil
 	if _, err := sync.Push(context.Background(), s11bDoc, s11bAPI, cfg, sync.PushOptions{ConfirmRemote: s11Hash, WorkDir: s11bDir}, &s11Out, &s11Err); !errors.As(err, &s11HtmlErr) {
-		t.Fatalf("expected ID-less S11 confirmed retry to refuse unregistered HTML (HtmlEntityError), got %v", err)
+		t.Fatalf("expected ID-less S11 non-owner confirmed retry to refuse unregistered HTML (HtmlEntityError), got %v", err)
+	}
+}
+
+func TestHTMLPhase2MigrateFromMarkdownAndLegacyBase(t *testing.T) {
+
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	docPath := setupHTMLDoc(t, dir, "---\ntitle: Migrate\n---\n\nHello **world**\n")
+	api := newWriteFakeAPI()
+	cfg := testConfig()
+	var out, errBuf bytes.Buffer
+
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("initial md push: %v", err)
+	}
+
+	saved, err := state.Load("https://e.example", "experiments", "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(saved, "content_type")
+	if err := state.Save("https://e.example", "experiments", "42", saved); err != nil {
+		t.Fatal(err)
+	}
+
+	withHTML := strings.Replace(mustRead(t, docPath), "title: Migrate\n", "title: Migrate\nformat: html\n", 1)
+	if err := os.WriteFile(docPath, []byte(withHTML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	origRemote := api.entities["experiments/42"]["body"].(string)
+	api.entities["experiments/42"]["body"] = "Web edited Markdown\n"
+	hWeb := sync.ShortHash(sync.BodySHA256("Web edited Markdown\n"))
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, ConfirmRemote: hWeb, WorkDir: dir}, &out, &errBuf); err == nil || !strings.Contains(err.Error(), "remote changed") {
+		t.Fatalf("expected conflict refusing 2->1 migration on diverged remote Markdown, got %v", err)
+	}
+	if _, err := os.Stat(sync.SidecarPath(docPath)); err == nil {
+		t.Fatal("2->1 migration conflict must not create .remote.md sidecar")
+	}
+
+	api.entities["experiments/42"]["body"] = origRemote
+	out.Reset()
+	errBuf.Reset()
+	if err := sync.Diff(context.Background(), docPath, api, cfg, "", false, &out, &errBuf); err != nil {
+		t.Fatalf("Diff before 2->1 migration: %v", err)
+	}
+	if !strings.Contains(out.String(), "-Hello **world**") || !strings.Contains(out.String(), "+<p>Hello <strong>world</strong></p>") {
+		t.Errorf("unexpected 2->1 migration diff stdout:\n%s", out.String())
+	}
+	if !strings.Contains(errBuf.String(), "remote sha256: "+sync.ShortHash(sync.BodySHA256(origRemote))) {
+		t.Errorf("missing remote sha256 on 2->1 diff stderr: %q", errBuf.String())
+	}
+
+	api.failVerifyOnce = true
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected lost-response error on 2->1 migration")
+	}
+	savedLost, _ := state.Load("https://e.example", "experiments", "42")
+	pp, ok := sync.PendingPublish(savedLost)
+	if !ok || pp.TargetCT != 1 || pp.PreCT != 2 {
+		t.Fatalf("expected pending_publish target=1 pre=2, got %+v (ok=%v)", pp, ok)
+	}
+	if savedLost["remote_base"] != origRemote {
+		t.Fatalf("expected pre-PATCH Markdown base preserved, got %#v", savedLost["remote_base"])
+	}
+	migratedRemote := api.entities["experiments/42"]["body"].(string)
+	hMig := sync.ShortHash(sync.BodySHA256(migratedRemote))
+
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hMig, WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("2->1 lost-response recovery failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "body updated (html)") || !strings.Contains(errBuf.String(), "published in html format (one-way)") {
+		t.Errorf("unexpected 2->1 output: out=%q err=%q", out.String(), errBuf.String())
+	}
+	savedDone, _ := state.Load("https://e.example", "experiments", "42")
+	if !sync.IsRegisteredHTML(savedDone) {
+		t.Fatalf("expected registered HTML after 2->1 migration, got %#v", savedDone)
+	}
+
+	dir2 := t.TempDir()
+	doc2 := setupHTMLDoc(t, dir2, "---\nid: 55\nentity: experiments\nprofile: test\nformat: html\n---\n\nNo base\n")
+	api.entities["experiments/55"] = map[string]any{"id": json.Number("55"), "body": "Existing MD\n", "content_type": 2, "userid": json.Number("1"), "team": json.Number("7")}
+	if _, err := sync.Push(context.Background(), doc2, api, cfg, sync.PushOptions{Force: true, WorkDir: dir2}, &out, &errBuf); err == nil || !strings.Contains(err.Error(), "base unavailable") {
+		t.Fatalf("expected base unavailable refusal for 2->1 without base, got %v", err)
+	}
+}
+
+func TestHTMLPhase2RevertToMarkdownAndPendingRecovery(t *testing.T) {
+
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "secret.csv"), []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docPath := setupHTMLDoc(t, dir, "---\ntitle: Revert\nformat: html\n---\n\nHello **local**\n")
+	api := newWriteFakeAPI()
+	cfg := testConfig()
+	var out, errBuf bytes.Buffer
+
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("initial html push: %v", err)
+	}
+
+	emptyDoc := strings.Replace(mustRead(t, docPath), "Hello **local**\n", "", 1)
+	if err := os.WriteFile(docPath, []byte(emptyDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("push empty html body with --force: %v", err)
+	}
+	omittedEmpty := strings.Replace(mustRead(t, docPath), "format: html\n", "", 1)
+	if err := os.WriteFile(docPath, []byte(omittedEmpty), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var htmlErr sync.HtmlEntityError
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, ConfirmRemote: sync.ShortHash(sync.BodySHA256("")), WorkDir: dir}, &out, &errBuf); !errors.As(err, &htmlErr) {
+		t.Fatalf("expected HtmlEntityError for omitted format on empty registered HTML, got %v", err)
+	}
+
+	btHTML := "<p>`<img src=\"secret.csv\">`</p>"
+	api.entities["experiments/42"]["body"] = btHTML
+	mdDoc := strings.Replace(mustRead(t, docPath), "title: Revert\n", "title: Revert\nformat: markdown\n", 1) + "Hello **local**\n"
+	if err := os.WriteFile(docPath, []byte(mdDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if err := sync.Diff(context.Background(), docPath, api, cfg, "", false, &out, &errBuf); err != nil {
+		t.Fatalf("Diff on 1->2 revert: %v", err)
+	}
+	if !strings.Contains(out.String(), "+Hello **local**") || strings.Contains(out.String(), "<strong>local</strong>") {
+		t.Errorf("1->2 Diff must show outgoing Markdown, got:\n%s", out.String())
+	}
+	if !strings.Contains(errBuf.String(), "remote sha256: "+sync.ShortHash(sync.BodySHA256(btHTML))) {
+		t.Errorf("1->2 Diff missing remote sha256: %q", errBuf.String())
+	}
+
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected --force refusal on diverged 1->2 revert")
+	}
+
+	api.failVerifyOnce = true
+	hBT := sync.ShortHash(sync.BodySHA256(btHTML))
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hBT, WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected simulated lost response on 1->2 revert")
+	}
+	savedLost, _ := state.Load("https://e.example", "experiments", "42")
+	pp, ok := sync.PendingPublish(savedLost)
+	if !ok || pp.TargetCT != 2 || pp.PreCT != 1 {
+		t.Fatalf("expected pending_publish target=2 pre=1, got %+v (ok=%v)", pp, ok)
+	}
+
+	curRemote := api.entities["experiments/42"]["body"].(string)
+	hCur := sync.ShortHash(sync.BodySHA256(curRemote))
+	htmlAgain := strings.Replace(mustRead(t, docPath), "format: markdown", "format: html", 1)
+	if err := os.WriteFile(docPath, []byte(htmlAgain), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hCur, WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected format: html to be rejected for target=2 pending_publish")
+	}
+
+	withSecret := strings.Replace(mdDoc, "Hello **local**", "[s](secret.csv)", 1)
+	if err := os.WriteFile(docPath, []byte(withSecret), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hCur, WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("1->2 recovery failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "body updated (markdown)") || !strings.Contains(out.String(), "confirmed: https://e.example experiments/42") {
+		t.Errorf("unexpected 1->2 recovery stdout: %q", out.String())
+	}
+	for _, name := range api.uploaded {
+		if name == "secret.csv" {
+			t.Fatal("secret.csv from pre-PATCH HTML remote must remain excluded after 1->2 revert recovery")
+		}
+	}
+	savedMD, _ := state.Load("https://e.example", "experiments", "42")
+	if sync.SavedContentType(savedMD) != 2 {
+		t.Fatalf("expected content_type=2 after 1->2 revert, got %#v", savedMD)
+	}
+
+	api.entities["experiments/42"]["body"] = "Pulled after revert\n"
+	if _, err := sync.Pull(context.Background(), docPath, api, cfg, "", &out, &errBuf); err != nil {
+		t.Fatalf("pull after 1->2 revert failed: %v", err)
+	}
+	if !strings.Contains(mustRead(t, docPath), "Pulled after revert") {
+		t.Fatalf("expected pulled Markdown body after revert, got %q", mustRead(t, docPath))
+	}
+
+	docPath2 := setupHTMLDoc(t, t.TempDir(), "---\ntitle: Ext\nformat: html\n---\n\nBody\n")
+	api2 := newWriteFakeAPI()
+	if _, err := sync.Push(context.Background(), docPath2, api2, cfg, sync.PushOptions{WorkDir: filepath.Dir(docPath2)}, &out, &errBuf); err != nil {
+		t.Fatal(err)
+	}
+	api2.entities["experiments/42"]["content_type"] = 2
+	mdExt := strings.Replace(mustRead(t, docPath2), "format: html", "format: markdown", 1)
+	if err := os.WriteFile(docPath2, []byte(mdExt), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	extBody := api2.entities["experiments/42"]["body"].(string)
+	api2.failPatchOnce = true
+	if _, err := sync.Push(context.Background(), docPath2, api2, cfg, sync.PushOptions{ConfirmRemote: sync.ShortHash(sync.BodySHA256(extBody)), WorkDir: filepath.Dir(docPath2)}, &out, &errBuf); err == nil {
+		t.Fatal("expected simulated patch failure")
+	}
+	savedExt, _ := state.Load("https://e.example", "experiments", "42")
+	if _, hasPP := sync.PendingPublish(savedExt); hasPP {
+		t.Fatalf("confirmed MD->MD write after external 1->2 switch must not set pending_publish: %#v", savedExt)
+	}
+}
+
+func TestHTMLPhase2SecondMachineOwnerAdoptionAndGuards(t *testing.T) {
+
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "secret.csv"), []byte("topsecret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docPath := setupHTMLDoc(t, dir, "---\nid: 70\nentity: experiments\nprofile: test\nformat: html\n---\n\nSecond machine body\n")
+	btHTML := "<p>`<img src=\"secret.csv\">`</p>"
+	hBT := sync.ShortHash(sync.BodySHA256(btHTML))
+
+	api := newWriteFakeAPI()
+	api.entities["experiments/70"] = map[string]any{
+		"id":           json.Number("70"),
+		"title":        "Remote HTML",
+		"body":         btHTML,
+		"content_type": 1,
+		"userid":       json.Number("99"),
+		"team":         json.Number("7"),
+	}
+	cfg := testConfig()
+	var out, errBuf bytes.Buffer
+	var htmlErr sync.HtmlEntityError
+
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, ConfirmRemote: hBT, WorkDir: dir}, &out, &errBuf); !errors.As(err, &htmlErr) {
+		t.Fatalf("expected HtmlEntityError for non-owner adoption, got %v", err)
+	}
+
+	for _, badUID := range []any{nil, 0, -1, "", "0", "abc", true} {
+		api.entities["experiments/70"]["userid"] = badUID
+		api.me["userid"] = badUID
+		if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hBT, WorkDir: dir}, &out, &errBuf); !errors.As(err, &htmlErr) {
+			t.Fatalf("expected HtmlEntityError for invalid userid %#v, got %v", badUID, err)
+		}
+	}
+	api.me["userid"] = json.Number("1")
+	api.entities["experiments/70"]["userid"] = json.Number("1")
+
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{Force: true, WorkDir: dir}, &out, &errBuf); !errors.As(err, &htmlErr) {
+		t.Fatalf("expected HtmlEntityError for owner without --confirm-remote, got %v", err)
+	}
+
+	preDoc := copyEntityMap(api.entities["experiments/70"])
+	regetDoc := copyEntityMap(preDoc)
+	regetDoc["userid"] = json.Number("99")
+	api.getQueue = []map[string]any{preDoc, regetDoc}
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hBT, WorkDir: dir}, &out, &errBuf); !errors.As(err, &htmlErr) {
+		t.Fatalf("expected HtmlEntityError when ownership changed at pre-PATCH re-GET, got %v", err)
+	}
+	if len(api.patches) != 0 {
+		t.Fatalf("expected 0 PATCHes after ownership re-GET refusal, got %d", len(api.patches))
+	}
+
+	api.failVerifyOnce = true
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hBT, WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected lost-response error on adoption PATCH")
+	}
+	savedAfterLost, _ := state.Load("https://e.example", "experiments", "70")
+	if sync.HasBase(savedAfterLost) {
+		t.Fatalf("lost adoption must not record a base: %#v", savedAfterLost)
+	}
+	if _, hasPP := sync.PendingPublish(savedAfterLost); hasPP {
+		t.Fatalf("lost adoption must not record pending_publish: %#v", savedAfterLost)
+	}
+	newBody := api.entities["experiments/70"]["body"].(string)
+	hNew := sync.ShortHash(sync.BodySHA256(newBody))
+
+	api.entities["experiments/70"]["userid"] = json.Number("99")
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hNew, WorkDir: dir}, &out, &errBuf); !errors.As(err, &htmlErr) {
+		t.Fatalf("expected non-owner refusal after lost adoption, got %v", err)
+	}
+
+	api.entities["experiments/70"]["userid"] = json.Number("1")
+	withSecret := strings.Replace(mustRead(t, docPath), "Second machine body", "[s](secret.csv)", 1)
+	if err := os.WriteFile(docPath, []byte(withSecret), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: hNew, WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("owner adoption failed: %v", err)
+	}
+	for _, name := range api.uploaded {
+		if name == "secret.csv" {
+			t.Fatal("secret.csv from pre-adoption remote HTML must not be uploaded")
+		}
+	}
+	if !strings.Contains(out.String(), "confirmed: https://e.example experiments/70 (html → html)") {
+		t.Errorf("adoption output missing instance/entity/mode confirmation: %q", out.String())
+	}
+	savedAdopted, _ := state.Load("https://e.example", "experiments", "70")
+	if !sync.IsRegisteredHTML(savedAdopted) {
+		t.Fatalf("expected registered HTML after adoption, got %#v", savedAdopted)
+	}
+}
+
+func TestHTMLPhase2MetadataOnlyPullPreservesCRLFBodiesAndUnionsTags(t *testing.T) {
+
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	crlfBody := "Line one\r\nLine two with **bold**\r\n"
+	initialDoc := "---\r\nid: 81\r\nentity: experiments\r\nprofile: test\r\nformat: html\r\ntitle: Local Title\r\ncategory: Old Cat\r\ntags:\r\n- local\r\n---\r\n\r\n" + crlfBody
+	docPath := setupHTMLDoc(t, dir, initialDoc)
+	if err := state.Save("https://e.example", "experiments", "81", map[string]any{
+		"remote_base":  "<p>base html</p>",
+		"local_base":   "Line one\nLine two with **bold**\n",
+		"content_type": 1,
+		"meta_base":    map[string]any{"title": "Old Title", "category": "Old Cat"},
+		"remote_paths": []string{"secret.csv"},
+		"path":         docPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	api := newWriteFakeAPI()
+	remoteHTML := "<p>Web edited HTML</p>"
+	api.entities["experiments/81"] = map[string]any{
+		"id":             json.Number("81"),
+		"body":           remoteHTML,
+		"content_type":   1,
+		"title":          "Web Title",
+		"category_title": "Web Cat",
+		"status_title":   "Running",
+		"tags":           "web|shared",
+		"userid":         json.Number("1"),
+		"team":           json.Number("7"),
+	}
+	api.uploads["experiments/81"] = []map[string]any{
+		{"id": json.Number("300"), "real_name": "unused.bin", "long_name": "ab/300-unused.bin", "storage": 1},
+	}
+	cfg := testConfig()
+	var out, errBuf bytes.Buffer
+	res, err := sync.Pull(context.Background(), docPath, api, cfg, "", &out, &errBuf)
+	if err != nil {
+		t.Fatalf("metadata-only pull failed: %v", err)
+	}
+	if res != "pulled metadata (html)" {
+		t.Errorf("pull summary = %q, want %q", res, "pulled metadata (html)")
+	}
+	for _, c := range api.calls {
+		if c == "uploads" {
+			t.Fatalf("metadata-only pull must not fetch uploads, calls=%v", api.calls)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "unused.bin")); err == nil {
+		t.Fatal("metadata-only pull must not download attachments")
+	}
+	rawAfter, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(rawAfter), "\n\n"+crlfBody) {
+		t.Fatalf("metadata-only pull did not preserve exact CRLF body bytes:\ngot=%q", string(rawAfter))
+	}
+	docAfter, err := sync.ReadDocument(docPath, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if docAfter.Meta.Values["title"] != "Local Title" {
+		t.Errorf("local title edit lost: %#v", docAfter.Meta.Values["title"])
+	}
+	if docAfter.Meta.Values["category"] != "Web Cat" || docAfter.Meta.Values["status"] != "Running" {
+		t.Errorf("remote metadata not pulled: %#v", docAfter.Meta.Values)
+	}
+	if docAfter.Meta.Values["format"] != "html" {
+		t.Errorf("format: html lost: %#v", docAfter.Meta.Values["format"])
+	}
+	if !strings.Contains(errBuf.String(), "remote HTML body also changed") || !strings.Contains(errBuf.String(), sync.ShortHash(sync.BodySHA256(remoteHTML))) {
+		t.Errorf("expected remote body changed note with sha256 on stderr, got %q", errBuf.String())
+	}
+	savedAfter, _ := state.Load("https://e.example", "experiments", "81")
+	if savedAfter["remote_base"] != "<p>base html</p>" || sync.SavedContentType(savedAfter) != 1 {
+		t.Fatalf("metadata-only pull must preserve remote_base and content_type: %#v", savedAfter)
+	}
+
+	api.entities["experiments/81"]["category_title"] = "Next Cat"
+	api.onGet = func(_ string, _ int) {
+		_ = os.WriteFile(docPath, []byte(strings.Replace(string(rawAfter), "Line one", "Concurrent edit", 1)), 0o644)
+	}
+	if _, err := sync.Pull(context.Background(), docPath, api, cfg, "", &out, &errBuf); err == nil || !strings.Contains(err.Error(), "local document changed") {
+		t.Fatalf("expected concurrent local edit refusal, got %v", err)
+	}
+	if !strings.Contains(mustRead(t, docPath), "Concurrent edit") {
+		t.Fatal("concurrent local edit was overwritten during metadata-only pull")
+	}
+}
+
+func TestHTMLStaleConfirmRemoteRejectedBeforeSideEffectsAndPendingStatusSteersToDiff(t *testing.T) {
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "newfig.png"), []byte("png-data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docPath := setupHTMLDoc(t, dir, "---\ntitle: S1\nformat: html\nread: team\n---\n\nInitial\n")
+	api := newWriteFakeAPI()
+	cfg := testConfig()
+	var out, errBuf bytes.Buffer
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("initial push: %v", err)
+	}
+	api.entities["experiments/42"]["canread_base"] = 30
+	revertDoc := strings.Replace(mustRead(t, docPath), "format: html", "format: markdown", 1)
+	revertDoc = strings.Replace(revertDoc, "read: team", "read: owner", 1)
+	revertDoc = strings.Replace(revertDoc, "Initial", "![f](newfig.png)", 1)
+	if err := os.WriteFile(docPath, []byte(revertDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patchesBefore := len(api.patches)
+	staleHash := "000000000000"
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{DryRun: true, ConfirmRemote: staleHash, WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected dry-run with stale --confirm-remote on matching-base 1->2 revert to fail")
+	}
+	if strings.Contains(out.String(), "confirmed:") {
+		t.Errorf("dry-run must not report confirmed for stale hash: %q", out.String())
+	}
+	if _, err := sync.Push(context.Background(), docPath, api, cfg, sync.PushOptions{ConfirmRemote: staleHash, WorkDir: dir}, &out, &errBuf); err == nil {
+		t.Fatal("expected stale --confirm-remote on matching-base 1->2 revert to fail preflight")
+	}
+	if len(api.uploaded) != 0 || len(api.patches) != patchesBefore {
+		t.Fatalf("stale --confirm-remote must abort before uploads or permission narrowing: uploaded=%v patches=%d", api.uploaded, len(api.patches)-patchesBefore)
+	}
+
+	dir2 := t.TempDir()
+	doc2 := setupHTMLDoc(t, dir2, "---\ntitle: S4\n---\n\nStart\n")
+	api2 := newWriteFakeAPI()
+	if _, err := sync.Push(context.Background(), doc2, api2, cfg, sync.PushOptions{WorkDir: dir2}, &out, &errBuf); err != nil {
+		t.Fatalf("initial md push: %v", err)
+	}
+	migDoc := strings.Replace(mustRead(t, doc2), "title: S4\n", "title: S4\nformat: html\n", 1)
+	if err := os.WriteFile(doc2, []byte(migDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api2.failVerifyOnce = true
+	if _, err := sync.Push(context.Background(), doc2, api2, cfg, sync.PushOptions{WorkDir: dir2}, &out, &errBuf); err == nil {
+		t.Fatal("expected lost-response error on 2->1 migration")
+	}
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Status(context.Background(), doc2, api2, cfg, "", &out, &errBuf); err != nil {
+		t.Fatalf("Status after lost-response 2->1 migration: %v", err)
+	}
+	if !strings.Contains(out.String(), `remote: changed (use "elport diff")`) || strings.Contains(out.String(), `use "elport pull"`) {
+		t.Fatalf("status after lost-response 2->1 migration must steer to diff, not pull:\n%s", out.String())
 	}
 }

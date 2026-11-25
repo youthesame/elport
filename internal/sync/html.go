@@ -3,10 +3,12 @@ package sync
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pmezard/go-difflib/difflib"
@@ -97,8 +99,55 @@ func remoteContentType(remoteDoc map[string]any) int {
 	return 2
 }
 
+func HasBase(saved map[string]any) bool {
+	return saved != nil && (hasKey(saved, "remote_base") || hasKey(saved, "local_base"))
+}
+
+func isConfirmedMdBase(saved map[string]any) bool {
+	if !HasBase(saved) || truthyField(saved, "pending_create") {
+		return false
+	}
+	ct := SavedContentType(saved)
+	return ct == 2 || ct == 0
+}
+
+func validUserID(v any) (int, bool) {
+	switch x := v.(type) {
+	case int:
+		return x, x > 0
+	case int64:
+		return int(x), x > 0 && int64(int(x)) == x
+	case float64:
+		if math.IsNaN(x) || math.IsInf(x, 0) || math.Trunc(x) != x || x < 1 || x > float64(math.MaxInt) {
+			return 0, false
+		}
+		return int(x), true
+	case json.Number:
+		s := string(x)
+		if !isAllASCIIDigits(s) {
+			return 0, false
+		}
+		n, err := strconv.Atoi(s)
+		return n, err == nil && n > 0
+	case string:
+		if !isAllASCIIDigits(x) {
+			return 0, false
+		}
+		n, err := strconv.Atoi(x)
+		return n, err == nil && n > 0
+	default:
+		return 0, false
+	}
+}
+
+func sameValidUserID(a, b any) bool {
+	ia, oka := validUserID(a)
+	ib, okb := validUserID(b)
+	return oka && okb && ia == ib
+}
+
 func IsRegisteredHTML(saved map[string]any) bool {
-	return saved != nil && SavedContentType(saved) == 1
+	return HasBase(saved) && SavedContentType(saved) == 1
 }
 
 func PendingPublish(saved map[string]any) (pendingPublishState, bool) {
@@ -110,7 +159,7 @@ func PendingPublish(saved map[string]any) (pendingPublishState, bool) {
 		return pendingPublishState{}, false
 	}
 	targetCT, ok := intField(raw, "target_content_type")
-	if !ok || targetCT != 1 {
+	if !ok || (targetCT != 1 && targetCT != 2) {
 		return pendingPublishState{}, false
 	}
 	preCT, _ := intField(raw, "pre_content_type")
@@ -206,5 +255,3 @@ func htmlPushFailureDetail(newUploads []plan.ApprovedUploadPath, narrowed bool) 
 	}
 	return " (" + strings.Join(done, "; ") + ")"
 }
-
-var errPhase2Transition = errors.New("not yet enabled")

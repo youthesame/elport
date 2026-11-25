@@ -846,6 +846,70 @@ func Render(meta Meta, body string) string {
 	return b.String()
 }
 
+func matchDelimiterRawAt(s string, pos int) (int, bool) {
+	if !strings.HasPrefix(s[pos:], "---") {
+		return 0, false
+	}
+	i := pos + 3
+	for i < len(s) && (s[i] == ' ' || s[i] == '\t') {
+		i++
+	}
+	if i == len(s) {
+		return i, true
+	}
+	if s[i] == '\n' {
+		return i + 1, true
+	}
+	if s[i] == '\r' {
+		if i+1 < len(s) && s[i+1] == '\n' {
+			return i + 2, true
+		}
+		return i + 1, true
+	}
+	return 0, false
+}
+
+func findCloserRaw(s string, from int) (int, int, bool) {
+	pos := from
+	for pos <= len(s) {
+		if end, ok := matchDelimiterRawAt(s, pos); ok {
+			return pos, end, true
+		}
+		i := pos
+		for i < len(s) && s[i] != '\n' && s[i] != '\r' {
+			i++
+		}
+		if i == len(s) {
+			break
+		}
+		if s[i] == '\r' && i+1 < len(s) && s[i+1] == '\n' {
+			pos = i + 2
+		} else {
+			pos = i + 1
+		}
+	}
+	return 0, 0, false
+}
+
+func RawBody(text string) string {
+	document := strings.TrimPrefix(text, "\ufeff")
+	openerEnd, ok := matchDelimiterRawAt(document, 0)
+	if !ok {
+		return text
+	}
+	_, closerEnd, ok := findCloserRaw(document, openerEnd)
+	if !ok {
+		return text
+	}
+	body := document[closerEnd:]
+	if strings.HasPrefix(body, "\r\n") {
+		body = body[2:]
+	} else if strings.HasPrefix(body, "\r") || strings.HasPrefix(body, "\n") {
+		body = body[1:]
+	}
+	return body
+}
+
 func KeysEqual(a, b []string) bool {
 	return slices.Equal(a, b)
 }

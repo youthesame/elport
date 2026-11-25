@@ -11,8 +11,7 @@ import (
 )
 
 func TestConfigDirAlwaysUsesDotConfigElport(t *testing.T) {
-	// All OSes (macOS, Linux, Windows) must share <home>/.config/elport so Go
-	// reads Python-created config and state without platform-specific paths.
+
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -55,8 +54,7 @@ func TestAtomicWriteFilePreservesPermissions(t *testing.T) {
 }
 
 func TestRootDirRefusesSymlinkAndEscape(t *testing.T) {
-	// os.Root blocks escaping the root, while Lstat also refuses overwriting an
-	// internal symlink pointing inside the document directory.
+
 	dir := t.TempDir()
 	root, err := fsx.OpenRoot(dir)
 	if err != nil {

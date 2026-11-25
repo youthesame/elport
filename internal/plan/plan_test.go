@@ -13,7 +13,7 @@ import (
 )
 
 func TestZeroApprovedUploadPathIsInvalid(t *testing.T) {
-	// Zero value must never be treated as an approved upload target.
+
 	var p plan.ApprovedUploadPath
 	if p.Valid() {
 		t.Fatal("zero ApprovedUploadPath must not be valid")
@@ -24,8 +24,7 @@ func TestZeroApprovedUploadPathIsInvalid(t *testing.T) {
 }
 
 func TestApproveBlocksRemoteLinkedUnlessListed(t *testing.T) {
-	// A path appearing in a remote body or remembered remote_paths must never
-	// receive an ApprovedUploadPath unless explicitly listed under attachments:.
+
 	dir := t.TempDir()
 	localFile := filepath.Join(dir, "mine.png")
 	remoteLinked := filepath.Join(dir, "planted.csv")
@@ -70,8 +69,7 @@ func TestApproveBlocksRemoteLinkedUnlessListed(t *testing.T) {
 }
 
 func TestApproveFromLocalRejectsUnvalidatedAndCaseInsensitiveRemoteLinked(t *testing.T) {
-	// Zero/unvalidated LocalResult must never mint ApprovedUploadPath, and
-	// differing case (DATA.csv vs ./data.csv#top) on case-insensitive FS must still block.
+
 	var forged plan.LocalResult
 	if _, err := plan.ApproveFromLocal(&forged, t.TempDir(), nil, nil, nil, nil); err == nil {
 		t.Fatal("expected unvalidated LocalResult to be rejected")
@@ -99,8 +97,7 @@ func TestApproveFromLocalRejectsUnvalidatedAndCaseInsensitiveRemoteLinked(t *tes
 }
 
 func TestApprovedUploadPathRejectsPostApprovalSwap(t *testing.T) {
-	// Swapping an approved file with a symlink or a different inode after approval
-	// must fail when opening for upload.
+
 	dir := t.TempDir()
 	target := filepath.Join(dir, "data.csv")
 	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
@@ -112,8 +109,6 @@ func TestApprovedUploadPathRejectsPostApprovalSwap(t *testing.T) {
 	}
 	approved := res.Files[0]
 
-	// Replace atomically with another existing file so the new target has a distinct inode
-	// even on filesystems (ext4/NTFS) that immediately recycle freed inode numbers.
 	other := filepath.Join(dir, "other.csv")
 	if err := os.WriteFile(other, []byte("swapped"), 0o644); err != nil {
 		t.Fatal(err)
@@ -145,8 +140,7 @@ func TestApprovedUploadPathRejectsPostApprovalSwap(t *testing.T) {
 }
 
 func TestApproveFromLocalSourcesBlocksHTMLBacktickRemoteLinkedPath(t *testing.T) {
-	// In HTML mode (content_type: 1), a remote body containing `<img src="planted.csv">`
-	// inside literal backticks MUST still block planted.csv from being approved for upload.
+
 	dir := t.TempDir()
 	for _, name := range []string{"mine.png", "planted.csv", "t"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o644); err != nil {

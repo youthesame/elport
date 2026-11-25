@@ -64,8 +64,7 @@ func setupHome(t *testing.T) string {
 }
 
 func TestKeyringNotFoundDoesNotFallbackToPlaintextTOML(t *testing.T) {
-	// ErrNotFound means the keyring works but has no entry for this profile;
-	// Go must refuse rather than silently reading a stale plaintext api_key.
+
 	home := setupHome(t)
 	cfgDir := filepath.Join(home, ".config", "elport")
 	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
@@ -101,8 +100,7 @@ func TestKeyringNotFoundDoesNotFallbackToPlaintextTOML(t *testing.T) {
 }
 
 func TestLoginLogoutPreservesUnknownTOMLKeys(t *testing.T) {
-	// Unknown user keys in config.toml must survive Login, Logout, and SetDefault
-	// so Python rollback or future Go keys are never dropped.
+
 	_ = setupHome(t)
 	cfgPath, err := config.ConfigPath()
 	if err != nil {
@@ -144,8 +142,7 @@ func TestLoginLogoutPreservesUnknownTOMLKeys(t *testing.T) {
 }
 
 func TestLoadProtectsUserProfileBaseURLFromProjectOverride(t *testing.T) {
-	// A malicious project .elport.toml must not redirect a user's credentialed
-	// profile to another base_url or disable verify_ssl.
+
 	_ = setupHome(t)
 	cfgPath, _ := config.ConfigPath()
 	_ = os.MkdirAll(filepath.Dir(cfgPath), 0o700)
@@ -178,7 +175,7 @@ func TestLoadProtectsUserProfileBaseURLFromProjectOverride(t *testing.T) {
 }
 
 func TestConfigLoginEnforces0600EvenOver0644File(t *testing.T) {
-	// Plaintext fallback must never inherit 0644 permissions from an existing config.toml.
+
 	_ = setupHome(t)
 	cfgPath, _ := config.ConfigPath()
 	_ = os.MkdirAll(filepath.Dir(cfgPath), 0o700)
@@ -201,8 +198,7 @@ func TestConfigLoginEnforces0600EvenOver0644File(t *testing.T) {
 }
 
 func TestResolveRefusesProjectOnlyProfileWithKeyringSecret(t *testing.T) {
-	// A project .elport.toml must not pair an arbitrary base_url with an existing
-	// keyring entry when the profile is absent from user config.toml.
+
 	_ = setupHome(t)
 	proj := t.TempDir()
 	_ = os.WriteFile(filepath.Join(proj, ".elport.toml"), []byte("[profiles.lab]\nbase_url = \"https://evil.example.test\"\n"), 0o644)
@@ -218,8 +214,7 @@ func TestResolveRefusesProjectOnlyProfileWithKeyringSecret(t *testing.T) {
 }
 
 func TestLoadFailsOnUnreadableElportignoreDirectory(t *testing.T) {
-	// Only os.ErrNotExist may be skipped for .elportignore; read errors must fail
-	// so ignore rules are never silently dropped.
+
 	_ = setupHome(t)
 	proj := t.TempDir()
 	if err := os.Mkdir(filepath.Join(proj, ".elportignore"), 0o755); err != nil {

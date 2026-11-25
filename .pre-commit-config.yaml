@@ -19,5 +19,5 @@ repos:
         name: go arch guardrails
         entry: go test -run TestArch .
         language: system
-        types_or: [go, markdown]
+        files: \.(go|md|qnt)$
         pass_filenames: false

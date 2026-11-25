@@ -55,7 +55,6 @@ func TestCLINewFormatHTMLConfirmRemoteBatchAndCloneRegisteredHTML(t *testing.T) 
 		ClientOpts: []client.Option{client.WithRootCAs(srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs)},
 	}
 
-	// 1. elport new --format html writes format: html into frontmatter.
 	docPath := filepath.Join(work, "report.md")
 	var out, errBuf bytes.Buffer
 	code := cli.RunWithEnv(context.Background(), []string{"new", "--format", "html", "-o", docPath, "HTML Report"}, nil, &out, &errBuf, env)
@@ -74,7 +73,6 @@ func TestCLINewFormatHTMLConfirmRemoteBatchAndCloneRegisteredHTML(t *testing.T) 
 		t.Fatalf("format = %#v, want \"html\"", meta.Values["format"])
 	}
 
-	// 2. --confirm-remote is rejected on directory / batch push.
 	out.Reset()
 	errBuf.Reset()
 	code = cli.RunWithEnv(context.Background(), []string{"push", "--confirm-remote", "abcdef012345", work}, nil, &out, &errBuf, env)
@@ -82,8 +80,6 @@ func TestCLINewFormatHTMLConfirmRemoteBatchAndCloneRegisteredHTML(t *testing.T) 
 		t.Fatalf("expected batch --confirm-remote rejection, got code=%d stderr=%q", code, errBuf.String())
 	}
 
-	// 3. elport clone on a locally registered HTML entity points to local source + diff,
-	// rather than suggesting base deletion.
 	if err := state.Save(srv.URL, "experiments", "77", map[string]any{
 		"content_type": 1,
 		"remote_base":  "<p>Hi</p>",
@@ -106,8 +102,6 @@ func TestCLINewFormatHTMLConfirmRemoteBatchAndCloneRegisteredHTML(t *testing.T) 
 		t.Errorf("clone error for registered HTML must not suggest deleting base: %q", errBuf.String())
 	}
 
-	// 4. elport clone on an unresolved pending_publish state also directs to push recovery
-	// instead of suggesting base deletion.
 	if err := state.Save(srv.URL, "experiments", "77", map[string]any{
 		"pending_publish": map[string]any{
 			"target_content_type": 1,
@@ -284,5 +278,139 @@ func TestCLINewFormatHTMLOverlapsFirstPush(t *testing.T) {
 	saved, err := state.Load(srv.URL, "experiments", "78")
 	if err != nil || !elpsync.IsRegisteredHTML(saved) {
 		t.Fatalf("registered HTML state must survive overlapping new --format html, got %#v (err=%v)", saved, err)
+	}
+}
+
+func TestCLIPhase2TransitionsAndMetadataPull(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	var mu gosync.Mutex
+	body := "Initial **md**\n"
+	ct := 2
+	categoryTitle := "Physics"
+	tags := "remote-tag"
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/users/me":
+			_ = json.NewEncoder(w).Encode(map[string]any{"userid": 1, "team": 7})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/teams/7/experiments_categories":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": 3, "title": "Physics"}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/90":
+			mu.Lock()
+			resp := map[string]any{
+				"id":             90,
+				"title":          "Phase 2 CLI",
+				"body":           body,
+				"content_type":   ct,
+				"category_title": categoryTitle,
+				"tags":           tags,
+				"userid":         1,
+				"team":           7,
+				"uploads":        []any{},
+			}
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(resp)
+		case r.Method == http.MethodPatch && r.URL.Path == "/api/v2/experiments/90":
+			var patch map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&patch)
+			mu.Lock()
+			if b, ok := patch["body"].(string); ok {
+				body = b
+			}
+			if c, ok := patch["content_type"].(float64); ok {
+				ct = int(c)
+			}
+			resp := map[string]any{
+				"id":             90,
+				"title":          "Phase 2 CLI",
+				"body":           body,
+				"content_type":   ct,
+				"category_title": categoryTitle,
+				"tags":           tags,
+				"userid":         1,
+				"team":           7,
+				"uploads":        []any{},
+			}
+			mu.Unlock()
+			_ = json.NewEncoder(w).Encode(resp)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	work := t.TempDir()
+	t.Setenv("ELABFTW_BASE_URL", srv.URL)
+	t.Setenv("ELABFTW_API_KEY", "test-key")
+	env := cli.Env{
+		WorkDir:    work,
+		ClientOpts: []client.Option{client.WithRootCAs(srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs)},
+	}
+
+	docPath := filepath.Join(work, "report.md")
+	if err := os.WriteFile(docPath, []byte("---\nid: 90\nentity: experiments\nprofile: env\nformat: html\ntitle: Phase 2 CLI\n---\n\nInitial **md**\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Save(srv.URL, "experiments", "90", map[string]any{
+		"remote_base":  "Initial **md**\n",
+		"local_base":   "Initial **md**\n",
+		"content_type": 2,
+		"meta_base":    map[string]any{"title": "Phase 2 CLI"},
+		"path":         docPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errBuf bytes.Buffer
+	if code := cli.RunWithEnv(context.Background(), []string{"push", docPath}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("2->1 push failed (code=%d): out=%q err=%q", code, out.String(), errBuf.String())
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"pull", docPath}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("metadata-only pull failed (code=%d): out=%q err=%q", code, out.String(), errBuf.String())
+	}
+	raw, _ := os.ReadFile(docPath)
+	meta, localBody, err := frontmatter.Parse(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Values["category"] != "Physics" || localBody != "Initial **md**\n" {
+		t.Fatalf("unexpected doc after metadata pull: meta=%#v body=%q", meta.Values, localBody)
+	}
+
+	home2 := t.TempDir()
+	t.Setenv("HOME", home2)
+	t.Setenv("USERPROFILE", home2)
+
+	mu.Lock()
+	hCur := elpsync.ShortHash(elpsync.BodySHA256(body))
+	mu.Unlock()
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"push", "--confirm-remote", hCur, docPath}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("second-machine adoption failed (code=%d): out=%q err=%q", code, out.String(), errBuf.String())
+	}
+	if !strings.Contains(out.String(), "confirmed: "+srv.URL+" experiments/90 (html → html)") {
+		t.Errorf("adoption output missing confirmation details: %q", out.String())
+	}
+
+	reverted := strings.Replace(string(raw), "format: html", "format: markdown", 1)
+	if err := os.WriteFile(docPath, []byte(reverted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"push", docPath}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("1->2 revert failed (code=%d): out=%q err=%q", code, out.String(), errBuf.String())
+	}
+	if !strings.Contains(out.String(), "body updated (markdown)") {
+		t.Errorf("unexpected 1->2 revert stdout: %q", out.String())
 	}
 }
