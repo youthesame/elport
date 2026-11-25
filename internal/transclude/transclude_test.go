@@ -421,3 +421,80 @@ func FuzzReadableHTML(f *testing.F) {
 		_ = transclude.ReadableHTML(text)
 	})
 }
+
+func TestBareHTMLPathsIgnoresMarkdownBackticksAndAvoidsDoubleUnescape(t *testing.T) {
+	// In HTML mode, literal backticks and fenced lines must NOT mask <img src> or <a href>,
+	// while HTML comments, escaped text in <code>, query URLs, and scheme URLs are excluded,
+	// and entity unescaping happens exactly once.
+	htmlDoc := "<p>`<img src=\"secret.csv\">` and ```\n<a href=\"other.csv#top\">x</a>\n```</p>" +
+		"<!-- <img src=\"comment.png\"> -->" +
+		"<pre><code>&lt;img src=\"escaped.png\"&gt;</code></pre>" +
+		"<img src=\"a&amp;b.png\">" +
+		"<img src=\"double&amp;amp;b.png\">" +
+		"<img src=\"app/download.php?f=a/b&amp;name=c.png&amp;storage=1\">" +
+		"<a href=\"https://example.com\">ext</a>" +
+		"<a href=\"#anchor\">local</a>"
+
+	got := transclude.BareHTMLPaths(htmlDoc)
+	want := []string{"secret.csv", "other.csv#top", "a&b.png", "double&amp;b.png"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("BareHTMLPaths = %#v, want %#v", got, want)
+	}
+	// Contrast: Markdown BarePaths masks the backtick-wrapped HTML tag.
+	mdGot := transclude.BarePathsForMode("`<img src=\"secret.csv\">`", 2)
+	if len(mdGot) != 0 {
+		t.Errorf("Markdown BarePathsForMode should mask inline code, got %#v", mdGot)
+	}
+	htmlGot := transclude.BarePathsForMode("`<img src=\"secret.csv\">`", 1)
+	if !slices.Equal(htmlGot, []string{"secret.csv"}) {
+		t.Errorf("HTML BarePathsForMode = %#v, want [secret.csv]", htmlGot)
+	}
+}
+
+func TestScanMathAndPlanHTMLMasksMathReferences(t *testing.T) {
+	// PlanHTML masks TeX math delimiters so $x_{[1]}(t)$ does not plan local file "t",
+	// while preserving real references outside math and skipping math inside code spans/fences.
+	dir := t.TempDir()
+	for _, name := range []string{"t", "fig.png"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	md := "Formula $x_{[1]}(t)$ and \\(y_{[2]}(t)\\) and price \\$100 to \\$200, plus ![ok](fig.png)\n\n" +
+		"$$\nz_{[3]}(t)\n$$\n\n" +
+		"`$not_math$`\n"
+
+	spans, escaped := transclude.ScanMath(md)
+	if len(spans) != 3 {
+		t.Fatalf("ScanMath spans = %+v, want 3", spans)
+	}
+	if spans[0].Display || spans[1].Display || !spans[2].Display {
+		t.Errorf("unexpected Display flags: %+v", spans)
+	}
+	if len(escaped) != 2 {
+		t.Errorf("expected 2 escaped dollars, got %v", escaped)
+	}
+
+	refs, err := transclude.PlanHTML(md, dir, nil, nil)
+	if err != nil {
+		t.Fatalf("PlanHTML: %v", err)
+	}
+	if len(refs) != 1 || filepath.Base(refs[0].File) != "fig.png" {
+		t.Fatalf("PlanHTML refs = %+v, want only fig.png (math [1](t) masked)", refs)
+	}
+
+	// Dollar signs inside reference destinations (e.g., plot$2025$.png) must NOT be
+	// masked as math, so PlanHTML still plans and uploads the local file.
+	dollarFile := filepath.Join(dir, "plot$2025$.png")
+	if err := os.WriteFile(dollarFile, []byte("png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	refsDollar, err := transclude.PlanHTML("![photo](plot$2025$.png)\n", dir, nil, nil)
+	if err != nil {
+		t.Fatalf("PlanHTML dollar dest: %v", err)
+	}
+	if len(refsDollar) != 1 || filepath.Base(refsDollar[0].File) != "plot$2025$.png" {
+		t.Fatalf("PlanHTML dollar dest refs = %+v, want plot$2025$.png", refsDollar)
+	}
+}

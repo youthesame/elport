@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/youthesame/elport/internal/frontmatter"
+	"github.com/youthesame/elport/internal/plan"
 	"github.com/youthesame/elport/internal/transclude"
 )
 
@@ -254,14 +255,14 @@ func mergeMeta(meta frontmatter.Meta, base map[string]any, remoteDoc map[string]
 	return merged, newBase
 }
 
-func rememberRemotePaths(saved map[string]any, bodies ...string) []string {
+func rememberRemotePathsForSources(saved map[string]any, sources ...plan.RemoteSource) []string {
 	seen := savedStringList(saved, "remote_paths")
 	inSeen := make(map[string]bool, len(seen))
 	for _, v := range seen {
 		inSeen[v] = true
 	}
-	for _, body := range bodies {
-		for _, value := range transclude.BarePaths(body) {
+	for _, src := range sources {
+		for _, value := range transclude.BarePathsForMode(src.Body, src.ContentType) {
 			if !inSeen[value] {
 				inSeen[value] = true
 				seen = append(seen, value)
@@ -269,6 +270,14 @@ func rememberRemotePaths(saved map[string]any, bodies ...string) []string {
 		}
 	}
 	return seen
+}
+
+func rememberRemotePaths(saved map[string]any, bodies ...string) []string {
+	sources := make([]plan.RemoteSource, len(bodies))
+	for i, body := range bodies {
+		sources[i] = plan.RemoteSource{Body: body, ContentType: 2}
+	}
+	return rememberRemotePathsForSources(saved, sources...)
 }
 
 func carriedState(saved map[string]any) map[string]any {

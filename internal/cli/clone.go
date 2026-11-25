@@ -79,6 +79,9 @@ func runNew(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env
 	meta.Set("title", cmd.Title)
 	meta.Set("entity", cmd.Entity)
 	meta.Set("profile", resolvedProfile)
+	if cmd.Format == "html" {
+		meta.Set("format", "html")
+	}
 	if err := sync.WriteNewDocNoClobber(outPath, frontmatter.Render(meta, "")); err != nil {
 		if errors.Is(err, os.ErrExist) {
 			return fmt.Errorf("output already exists: %s\nto create an entity from an existing note, run: elport push %s", outPath, outPath)
@@ -93,6 +96,11 @@ func runNew(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env
 	if err != nil {
 		return err
 	}
+	unlockState, err := state.Lock(c.Root(), cmd.Entity, strconv.Itoa(eid))
+	if err != nil {
+		return err
+	}
+	defer unlockState()
 	meta.Set("id", eid)
 	if err := sync.AtomicWriteDoc(outPath, frontmatter.Render(meta, "")); err != nil {
 		return err
@@ -161,6 +169,9 @@ func cloneTo(
 	}
 	if _, err := os.Stat(basePath); err == nil {
 		saved, _ := state.Load(c.Root(), entity, strconv.Itoa(eid))
+		if _, hasPP := sync.PendingPublish(saved); sync.IsRegisteredHTML(saved) || hasPP {
+			return "", fmt.Errorf("%s/%d is published in html format from %s; edit that document and run 'elport diff' or 'elport push' there", entity, eid, whereSaved(saved))
+		}
 		return "", fmt.Errorf("%s/%d already has a working copy at %s; pull there instead (to start over, delete its base: %s)", entity, eid, whereSaved(saved), basePath)
 	}
 	meta := frontmatter.NewMeta()
@@ -315,7 +326,7 @@ func runCloneAll(ctx context.Context, cmd *Command, stdout, stderr io.Writer, en
 							}
 							return "", serr
 						}
-						return "snapshot (HTML entity, read-only)", nil
+						return "snapshot (HTML entity, read-only; if published via elport, edit its local document)", nil
 					}
 					if _, berr := os.Stat(basePath); errors.Is(berr, os.ErrNotExist) {
 						_ = os.RemoveAll(directory)

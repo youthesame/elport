@@ -143,3 +143,37 @@ func TestApprovedUploadPathRejectsPostApprovalSwap(t *testing.T) {
 		}
 	}
 }
+
+func TestApproveFromLocalSourcesBlocksHTMLBacktickRemoteLinkedPath(t *testing.T) {
+	// In HTML mode (content_type: 1), a remote body containing `<img src="planted.csv">`
+	// inside literal backticks MUST still block planted.csv from being approved for upload.
+	dir := t.TempDir()
+	for _, name := range []string{"mine.png", "planted.csv", "t"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	local, err := plan.LocalCandidatesHTML("Math $x_{[1]}(t)$ ![a](mine.png) [b](planted.csv)\n", dir, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("LocalCandidatesHTML: %v", err)
+	}
+	var warn bytes.Buffer
+	res, err := plan.ApproveFromLocalSources(
+		local,
+		dir,
+		nil,
+		[]plan.RemoteSource{{Body: "<p>`<img src=\"planted.csv\">`</p>", ContentType: 1}},
+		nil,
+		&warn,
+	)
+	if err != nil {
+		t.Fatalf("ApproveFromLocalSources: %v", err)
+	}
+	if len(res.Files) != 1 || filepath.Base(res.Files[0].Path()) != "mine.png" {
+		t.Fatalf("approved files = %+v, want only mine.png", res.Files)
+	}
+	if !strings.Contains(warn.String(), "planted.csv") {
+		t.Errorf("expected remote-linked warning for planted.csv, got %q", warn.String())
+	}
+}

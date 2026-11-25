@@ -90,6 +90,41 @@ func BarePaths(text string) []string {
 	return out
 }
 
+func BareHTMLPaths(htmlText string) []string {
+	z := xnethtml.NewTokenizer(strings.NewReader(htmlText))
+	var out []string
+	for {
+		tt := z.Next()
+		if tt == xnethtml.ErrorToken {
+			break
+		}
+		if tt != xnethtml.StartTagToken && tt != xnethtml.SelfClosingTagToken {
+			continue
+		}
+		_, hasAttr := z.TagName()
+		for hasAttr {
+			var k, v []byte
+			k, v, hasAttr = z.TagAttr()
+			attr := string(k)
+			if attr != "src" && attr != "href" {
+				continue
+			}
+			p := trimSpaceBytes(string(v))
+			if p != "" && !strings.HasPrefix(p, "#") && !strings.Contains(p, "?") && !HasScheme(p) {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
+func BarePathsForMode(body string, contentType int) []string {
+	if contentType == 1 {
+		return BareHTMLPaths(body)
+	}
+	return BarePaths(body)
+}
+
 func hasHiddenPart(parts []string) bool {
 	for _, p := range parts {
 		if strings.HasPrefix(p, ".") && p != "." && p != ".." {
@@ -348,9 +383,8 @@ func filesEqual(a, b string) bool {
 	return bytes.Equal(ba, bb)
 }
 
-func Plan(text, docDir string, ignore []IgnoreLayer, warn io.Writer) ([]Reference, error) {
+func planWithMask(text, m, docDir string, ignore []IgnoreLayer, warn io.Writer) ([]Reference, error) {
 	dirCache := map[string][]string{}
-	m := masked(text)
 	for _, dest := range scanReferenceDefinitions(m) {
 		if cand, _, _ := candidate(docDir, dest, ignore, dirCache); cand != "" && warn != nil {
 			_, _ = fmt.Fprintf(warn, "warning: reference-style link not uploaded (elport rewrites inline links only): %s\n", dest)
@@ -386,6 +420,14 @@ func Plan(text, docDir string, ignore []IgnoreLayer, warn io.Writer) ([]Referenc
 		}
 	}
 	return refs, nil
+}
+
+func Plan(text, docDir string, ignore []IgnoreLayer, warn io.Writer) ([]Reference, error) {
+	return planWithMask(text, masked(text), docDir, ignore, warn)
+}
+
+func PlanHTML(text, docDir string, ignore []IgnoreLayer, warn io.Writer) ([]Reference, error) {
+	return planWithMask(text, maskedWithMath(text), docDir, ignore, warn)
 }
 
 func ListedFiles(entries []string, docDir string, ignore []IgnoreLayer, referenced []string) ([]string, error) {

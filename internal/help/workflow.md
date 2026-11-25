@@ -33,6 +33,13 @@ elport push
 
 elport keeps no history of its own. To keep one, `git init` your documents folder.
 
+## One-way HTML publish (`format: html`)
+
+With `format: html`, `elport push` renders the approved outgoing Markdown to HTML (`content_type: 1`) and never
+pulls HTML back into Markdown. If someone edits the entity in the Web UI, `push` (even with `--force`) stops and
+prints a canonical HTML diff and the remote body's short SHA-256. Port any changes into your local Markdown document,
+verify with `elport diff`, and re-run `elport push --confirm-remote <hash>`.
+
 ## pull and fetch
 
 - pull brings down the body and metadata, and downloads the files the body shows. An attachment added in the Web

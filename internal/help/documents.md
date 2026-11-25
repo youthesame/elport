@@ -2,12 +2,16 @@
 
 A document is a Markdown file that starts with a YAML front matter block, and it maps to one entity. eLabFTW 5.x
 renders inline HTML such as `<figure>` inside a Markdown body; eLabFTW 6.x strips raw HTML when rendering a Markdown
-body, so write standard Markdown (`![alt](fig.png)`) on 6.x servers.
+body, so write standard Markdown (`![alt](fig.png)`) in default Markdown mode or opt into one-way HTML publish with
+`format: html` (`elport new --format html "<title>"`, which renders Markdown to HTML on `push` while preserving
+`<figure>`, `<img width>`, `<sub>`/`<sup>`, `<s>`, table `<br>`, and inline `$...$` math; HTML comments are dropped by
+eLabFTW in HTML mode).
 
 ```markdown
 ---
 id: 42                        # assigned by new or the first push; never write it yourself
 entity: experiments           # experiments | items (default experiments)
+format: html                  # markdown | html (default markdown; html is one-way publish)
 title: "experiment title"     # defaults to the file name on creation
 tags: [CRISPR, PCR]           # add-only; remove tags in the Web UI
 category: Molecular Biology   # ID or existing name; elport never creates one

@@ -19,7 +19,7 @@ An action the user explicitly asked for needs no second confirmation; confirm be
 
 - `elport new` / `elport comment`: immediately creates a remote entity (usually team-visible) or posts a comment
   others read; elport cannot delete either.
-- `--force`: discards a Web-side edit. On `remote changed`, follow push's message or show `elport diff` first.
+- `--force` / `--confirm-remote`: overwrites a remote change (for HTML publish, `--confirm-remote <hash>` confirms the exact remote body reviewed by the user via `elport diff` or `elport view`; never copy a hash from a refusal message to auto-retry without user confirmation). On `remote changed`, follow push's message or show `elport diff` first.
 - `--yes`: skips confirmations for access beyond the team and uploads over 25 MiB; show `elport push -n` first.
 - `attachments:` / `read:` / `write:`: push warns on remote-linked paths because someone else wrote them; list a
   path under `attachments:` or change visibility only when the user wants that.

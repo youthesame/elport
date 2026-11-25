@@ -32,6 +32,13 @@ var PermissionLevels = map[string]int{
 
 var PermissionOrder = []string{"owner", "owner+admin", "team", "account", "public"}
 
+var FormatOrder = []string{"markdown", "html"}
+
+var allowedFormats = map[string]bool{
+	"markdown": true,
+	"html":     true,
+}
+
 var AllowedKeys = []string{
 	"id",
 	"entity",
@@ -43,6 +50,7 @@ var AllowedKeys = []string{
 	"read",
 	"write",
 	"attachments",
+	"format",
 }
 
 var allowedKeySet = map[string]bool{
@@ -56,6 +64,7 @@ var allowedKeySet = map[string]bool{
 	"read":        true,
 	"write":       true,
 	"attachments": true,
+	"format":      true,
 }
 
 var utf8BOM = []byte{0xef, 0xbb, 0xbf}
@@ -567,6 +576,12 @@ func Parse(text string) (Meta, string, error) {
 			if !ok || PermissionLevels[s] == 0 {
 				return NewMeta(), "", fmt.Errorf("%s must be one of: %s", key, strings.Join(PermissionOrder, ", "))
 			}
+		}
+	}
+	if v, exists := meta.Values["format"]; exists {
+		s, ok := v.(string)
+		if !ok || !allowedFormats[s] {
+			return NewMeta(), "", fmt.Errorf("format must be one of: %s", strings.Join(FormatOrder, ", "))
 		}
 	}
 	if v, exists := meta.Values["tags"]; exists {

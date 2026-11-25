@@ -26,7 +26,7 @@
             inherit version;
             src = self;
             subPackages = [ "cmd/elport" ];
-            vendorHash = "sha256-ywUJxo1go6Bbh56mCTuCaUsCStVTwgsOufAbvcwoCd4=";
+            vendorHash = "sha256-UQTsHNSM3lJW0674GC8j7csrI9Ap91VE/wl3QniI9LY=";
             env.CGO_ENABLED = 0;
             ldflags = [
               "-s"

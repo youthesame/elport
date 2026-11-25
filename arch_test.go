@@ -71,6 +71,18 @@ var forbiddenImportsByPkg = map[string][]string{
 		modulePrefix + "internal/sync",
 		modulePrefix + "internal/browse",
 		modulePrefix + "internal/cli",
+		modulePrefix + "internal/render",
+	},
+	"internal/render": {
+		"os", "net/http", "os/exec",
+		modulePrefix + "internal/config",
+		modulePrefix + "internal/client",
+		modulePrefix + "internal/state",
+		modulePrefix + "internal/sync",
+		modulePrefix + "internal/plan",
+		modulePrefix + "internal/browse",
+		modulePrefix + "internal/cli",
+		modulePrefix + "internal/fsx",
 	},
 }
 
@@ -392,6 +404,12 @@ func TestArchRulesCatchViolations(t *testing.T) {
 			relPath:   "internal/client/c.go",
 			src:       "package client\nimport \"net/http\"\nvar _ = http.DefaultClient\n",
 			wantMatch: "net/http.DefaultClient is forbidden",
+		},
+		{
+			name:      "os import in render rejected",
+			relPath:   "internal/render/bad.go",
+			src:       "package render\nimport \"os\"\nvar _ = os.ReadFile\n",
+			wantMatch: `must not import "os"`,
 		},
 	}
 

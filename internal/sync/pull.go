@@ -46,6 +46,11 @@ func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 		return "", err
 	}
 	remote := &Remote{API: api, Entity: doc.Entity, ID: doc.ID, BaseURL: baseURL}
+	unlockState, err := state.Lock(baseURL, doc.Entity, strconv.Itoa(doc.ID))
+	if err != nil {
+		return "", err
+	}
+	defer unlockState()
 	saved, err := state.Load(baseURL, doc.Entity, strconv.Itoa(doc.ID))
 	if err != nil {
 		return "", err
@@ -56,6 +61,17 @@ func Pull(ctx context.Context, docPath string, api API, cfg *config.Data, profil
 	remoteDoc, err := remote.Get(ctx)
 	if err != nil {
 		return "", err
+	}
+	if _, hasPP := PendingPublish(saved); hasPP {
+		return "", fmt.Errorf("an earlier publish on %s/%d is unresolved; run 'elport push' to recover before pulling", doc.Entity, doc.ID)
+	}
+	if IsRegisteredHTML(saved) {
+		if !IsHTML(remoteDoc) {
+			return "", fmt.Errorf("%s/%d is published in html format, but the server is now in markdown mode; inspect with 'elport diff' before syncing", doc.Entity, doc.ID)
+		}
+		return "", HtmlEntityError{
+			Msg: fmt.Sprintf("%s/%d is published in html format (one-way); pull is not used for HTML bodies: inspect changes with 'elport diff' or download attachments with 'elport fetch'", doc.Entity, doc.ID),
+		}
 	}
 	if err := RefuseHTML(remoteDoc, doc.Entity, doc.ID); err != nil {
 		return "", err

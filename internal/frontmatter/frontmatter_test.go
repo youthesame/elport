@@ -253,3 +253,35 @@ func TestFrontmatterYAML11EdgeCasesAndUTF8Validation(t *testing.T) {
 		}
 	}
 }
+
+func TestFrontmatterFormatKey(t *testing.T) {
+	// Valid format values round-trip cleanly.
+	for _, val := range []string{"markdown", "html"} {
+		doc := "---\nid: 7\nformat: " + val + "\n---\nBody\n"
+		meta, body, err := frontmatter.Parse(doc)
+		if err != nil {
+			t.Fatalf("Parse format=%s failed: %v", val, err)
+		}
+		if meta.Values["format"] != val {
+			t.Errorf("format = %#v, want %q", meta.Values["format"], val)
+		}
+		if body != "Body\n" {
+			t.Errorf("body = %q, want %q", body, "Body\n")
+		}
+		rendered := frontmatter.Render(meta, body)
+		reparsed, _, err := frontmatter.Parse(rendered)
+		if err != nil {
+			t.Fatalf("reparse rendered format=%s failed: %v", val, err)
+		}
+		if reparsed.Values["format"] != val {
+			t.Errorf("reparsed format = %#v, want %q", reparsed.Values["format"], val)
+		}
+	}
+	// Invalid values, wrong case, null, and non-strings are rejected.
+	for _, bad := range []string{"HTML", "md", "1", "true", "null", "[html]"} {
+		doc := "---\nformat: " + bad + "\n---\nBody\n"
+		if _, _, err := frontmatter.Parse(doc); err == nil {
+			t.Errorf("expected format: %s to be rejected", bad)
+		}
+	}
+}
