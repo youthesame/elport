@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/youthesame/elport/internal/cli"
 	"github.com/youthesame/elport/internal/client"
 	"github.com/youthesame/elport/internal/config"
+	"github.com/youthesame/elport/internal/state"
 )
 
 type memKeyring struct {
@@ -283,5 +285,83 @@ func TestRunViewCommentsStatusDiffAndFetchEndToEnd(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "uploads local:") {
 		t.Errorf("status should print local section before failing on missing credentials: stdout=%q stderr=%q", out.String(), errBuf.String())
+	}
+}
+
+func TestRunBatchPushSharesMeCacheAcrossDocuments(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("ELABFTW_BASE_URL", "")
+	t.Setenv("ELABFTW_API_KEY", "")
+
+	var meCalls, exp42Calls, exp43Calls atomic.Int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/users/me":
+			meCalls.Add(1)
+			_, _ = w.Write([]byte(`{"userid":7,"team":3}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/42":
+			exp42Calls.Add(1)
+			_, _ = w.Write([]byte(`{"id":42,"title":"Doc 42","content_type":2,"body":"same 42\n","userid":7,"team":3,"uploads":[]}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/experiments/43":
+			exp43Calls.Add(1)
+			_, _ = w.Write([]byte(`{"id":43,"title":"Doc 43","content_type":2,"body":"same 43\n","userid":7,"team":3,"uploads":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	pool := x509.NewCertPool()
+	pool.AddCert(srv.Certificate())
+	kr := &memKeyring{}
+	work := t.TempDir()
+	env := cli.Env{
+		WorkDir:    work,
+		Keyring:    kr,
+		ClientOpts: []client.Option{client.WithRootCAs(pool)},
+	}
+
+	var out, errBuf bytes.Buffer
+	if code := cli.RunWithEnv(context.Background(), []string{"login", "lab"}, strings.NewReader(srv.URL+"\n1-key\n"), &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("login failed: code=%d stderr=%q", code, errBuf.String())
+	}
+
+	for _, doc := range []struct {
+		dir  string
+		id   string
+		body string
+	}{
+		{"a", "42", "same 42\n"},
+		{"b", "43", "same 43\n"},
+	} {
+		sub := filepath.Join(work, doc.dir)
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(sub, "report.md"), []byte("---\nid: "+doc.id+"\nentity: experiments\nprofile: lab\ntitle: Doc "+doc.id+"\n---\n\n"+doc.body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := state.Save(srv.URL, "experiments", doc.id, map[string]any{
+			"remote_base": doc.body,
+			"local_base":  doc.body,
+			"meta_base":   map[string]any{"title": "Doc " + doc.id},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out.Reset()
+	errBuf.Reset()
+	if code := cli.RunWithEnv(context.Background(), []string{"push", work}, nil, &out, &errBuf, env); code != cli.ExitOK {
+		t.Fatalf("batch push failed: code=%d stdout=%q stderr=%q", code, out.String(), errBuf.String())
+	}
+	if exp42Calls.Load() != 1 || exp43Calls.Load() != 1 {
+		t.Fatalf("expected both documents to be fetched once, got exp42=%d exp43=%d", exp42Calls.Load(), exp43Calls.Load())
+	}
+	if got := meCalls.Load(); got != 1 {
+		t.Fatalf("batch push across 2 documents on same profile must call /users/me once, got %d", got)
 	}
 }

@@ -489,3 +489,54 @@ func TestScanMathAndPlanHTMLMasksMathReferences(t *testing.T) {
 		t.Fatalf("PlanHTML dollar dest refs = %+v, want plot$2025$.png", refsDollar)
 	}
 }
+
+func TestHTMLTagScanUnclosedQuotesMaskPrecedenceAndRawTextRecovery(t *testing.T) {
+	refsDQ := transclude.Extract(`<a title="unclosed <img src="after-dq.png">`)
+	if len(refsDQ) != 1 || refsDQ[0].Path != "after-dq.png" {
+		t.Fatalf("unclosed double-quote recovery = %+v, want [after-dq.png]", refsDQ)
+	}
+
+	refsSQ := transclude.Extract(`<a title='unclosed <img src="after-sq.png">`)
+	if len(refsSQ) != 1 || refsSQ[0].Path != "after-sq.png" {
+		t.Fatalf("unclosed single-quote recovery = %+v, want [after-sq.png]", refsSQ)
+	}
+
+	refsClosed := transclude.Extract(`<a title="<img src='nested.png'>">`)
+	if len(refsClosed) != 0 {
+		t.Fatalf("closed quoted attribute must hide inner img tag, got %+v", refsClosed)
+	}
+
+	refsUnquotedLT := transclude.Extract(`<div data=<1 ![hidden](inside.png)>`)
+	if len(refsUnquotedLT) != 0 {
+		t.Fatalf("unquoted < inside outer tag must keep outer tag match and mask markdown inside, got %+v", refsUnquotedLT)
+	}
+
+	if !transclude.HasRawHTML("`<a x=` <b y=`> text`") {
+		t.Error("HasRawHTML must detect <b> after inline code masks earlier overlapping <a candidate")
+	}
+	if transclude.HasRawHTML("<!-- <a x=' -->`<b>`") {
+		t.Error("HasRawHTML must mask inline code after comment covers earlier <a candidate")
+	}
+	if !transclude.HasRawHTML(strings.Repeat(`<a x="<!--">`, 2000)) {
+		t.Error("HasRawHTML must detect tags containing literal comment openers without terminator")
+	}
+
+	refsAngleCode := transclude.Extract("[x](<code>) ![ok](fig.png)\n")
+	if len(refsAngleCode) != 2 || refsAngleCode[0].Path != "code" || refsAngleCode[1].Path != "fig.png" {
+		t.Fatalf("[x](<code>) must not mask following content as raw-text, got %+v", refsAngleCode)
+	}
+
+	unclosedHTML := strings.Repeat("x <a y ", 2000)
+	if refs := transclude.Extract(unclosedHTML); len(refs) != 0 {
+		t.Fatalf("repeated unclosed <a should yield 0 refs, got %+v", refs)
+	}
+	if transclude.HasRawHTML(unclosedHTML) {
+		t.Fatal("repeated unclosed <a should not report raw HTML")
+	}
+
+	unclosedScript := strings.Repeat("<script ", 2000) + "![ok](fig.png)"
+	refsScript := transclude.Extract(unclosedScript)
+	if len(refsScript) != 1 || refsScript[0].Path != "fig.png" {
+		t.Fatalf("repeated unclosed <script must leave trailing ref intact, got %+v", refsScript)
+	}
+}

@@ -2,6 +2,7 @@ package transclude
 
 import (
 	"html"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -275,17 +276,21 @@ func findNextCodeSpan(s string, from, limit int) (byteSpan, bool) {
 	return byteSpan{}, false
 }
 
+func findCommentEnd(s string, start int) int {
+	endIdx := strings.Index(s[start+4:], "-->")
+	if endIdx < 0 {
+		return len(s)
+	}
+	return start + 4 + endIdx + 3
+}
+
 func findNextComment(s string, from int) (byteSpan, bool) {
 	idx := strings.Index(s[from:], "<!--")
 	if idx < 0 {
 		return byteSpan{}, false
 	}
 	start := from + idx
-	endIdx := strings.Index(s[start+4:], "-->")
-	if endIdx < 0 {
-		return byteSpan{start: start, end: len(s)}, true
-	}
-	return byteSpan{start: start, end: start + 4 + endIdx + 3}, true
+	return byteSpan{start: start, end: findCommentEnd(s, start)}, true
 }
 
 func isASCIIAlpha(b byte) bool {
@@ -296,73 +301,59 @@ func isTagNameChar(b byte) bool {
 	return isASCIIAlpha(b) || (b >= '0' && b <= '9') || b == ':' || b == '-'
 }
 
-func matchHTMLTagAt(s string, start int) (int, bool) {
+func hasHTMLTagHeaderAt(s string, start int) bool {
 	if start >= len(s) || s[start] != '<' {
-		return 0, false
+		return false
 	}
 	pos := start + 1
 	if pos < len(s) && s[pos] == '/' {
 		pos++
 	}
 	if pos >= len(s) || !isASCIIAlpha(s[pos]) {
-		return 0, false
+		return false
 	}
 	pos++
 	for pos < len(s) && isTagNameChar(s[pos]) {
 		pos++
 	}
 	if pos >= len(s) {
-		return 0, false
+		return false
 	}
 	r, _ := utf8.DecodeRuneInString(s[pos:])
-	if !pyIsSpace(r) && s[pos] != '/' && s[pos] != '>' {
-		return 0, false
-	}
-	for pos < len(s) {
-		ch := s[pos]
-		if ch == '>' {
-			return pos + 1, true
-		}
-		if ch == '"' || ch == '\'' {
-			q := ch
-			pos++
-			for pos < len(s) && s[pos] != q {
-				pos++
-			}
-			if pos >= len(s) {
-				return 0, false
-			}
-			pos++
-			continue
-		}
-		pos++
-	}
-	return 0, false
+	return pyIsSpace(r) || s[pos] == '/' || s[pos] == '>'
 }
 
-func findNextHTMLTag(s string, from int) (byteSpan, bool) {
-	pos := from
-	for pos < len(s) {
-		idx := strings.IndexByte(s[pos:], '<')
-		if idx < 0 {
-			return byteSpan{}, false
+func allHTMLTagCandidates(s string) []byteSpan {
+	var cands []byteSpan
+	outEnd, dqEnd, sqEnd := -1, -1, -1
+	for i := len(s) - 1; i >= 0; i-- {
+		switch s[i] {
+		case '>':
+			outEnd = i + 1
+		case '"':
+			outEnd, dqEnd = dqEnd, outEnd
+		case '\'':
+			outEnd, sqEnd = sqEnd, outEnd
+		case '<':
+			if outEnd >= 0 && hasHTMLTagHeaderAt(s, i) {
+				cands = append(cands, byteSpan{start: i, end: outEnd})
+			}
 		}
-		cand := pos + idx
-		if end, ok := matchHTMLTagAt(s, cand); ok {
-			return byteSpan{start: cand, end: end}, true
-		}
-		pos = cand + 1
 	}
-	return byteSpan{}, false
+	slices.Reverse(cands)
+	return cands
 }
 
 func findAllHTMLTags(s string) []byteSpan {
-	var out []byteSpan
+	cands := allHTMLTagCandidates(s)
+	if len(cands) == 0 {
+		return nil
+	}
+	out := make([]byteSpan, 0, len(cands))
 	pos := 0
-	for {
-		sp, ok := findNextHTMLTag(s, pos)
-		if !ok {
-			break
+	for _, sp := range cands {
+		if sp.start < pos {
+			continue
 		}
 		out = append(out, sp)
 		pos = sp.end
@@ -519,8 +510,7 @@ func maskRawTextElements(buf []byte, angles map[byteSpan]bool) {
 		}
 		gt := strings.IndexByte(s[p:], '>')
 		if gt < 0 {
-			pos = start + 1
-			continue
+			break
 		}
 		openEnd := p + gt + 1
 		if angles[byteSpan{start: start, end: openEnd}] {
@@ -1042,9 +1032,12 @@ func scanReferenceDefinitions(maskedText string) []string {
 
 func maskForRawHTML(text string) string {
 	buf := []byte(text)
+	tagCands := allHTMLTagCandidates(text)
+	tagIdx := 0
 	pos := 0
 	var f fenceOpen
-	var c, cm, tg byteSpan
+	var c, tg byteSpan
+	cmStart := 0
 	fState, cState, cmState, tgState := 0, 0, 0, 0
 	for pos < len(text) {
 		if fState == 0 || (fState == 1 && f.start < pos) {
@@ -1070,19 +1063,20 @@ func maskForRawHTML(text string) string {
 				cState = -1
 			}
 		}
-		if cmState == 0 || (cmState == 1 && cm.start < pos) {
-			var ok bool
-			cm, ok = findNextComment(text, pos)
-			if ok {
+		if cmState == 0 || (cmState == 1 && cmStart < pos) {
+			if idx := strings.Index(text[pos:], "<!--"); idx >= 0 {
+				cmStart = pos + idx
 				cmState = 1
 			} else {
 				cmState = -1
 			}
 		}
 		if tgState == 0 || (tgState == 1 && tg.start < pos) {
-			var ok bool
-			tg, ok = findNextHTMLTag(text, pos)
-			if ok {
+			for tagIdx < len(tagCands) && tagCands[tagIdx].start < pos {
+				tagIdx++
+			}
+			if tagIdx < len(tagCands) {
+				tg = tagCands[tagIdx]
 				tgState = 1
 			} else {
 				tgState = -1
@@ -1095,17 +1089,15 @@ func maskForRawHTML(text string) string {
 		if fState == 1 && f.start < bestStart {
 			bestStart = f.start
 			bestKind = "fence"
-			bestEnd = findFenceEnd(text, f)
 		}
 		if cState == 1 && c.start < bestStart {
 			bestStart = c.start
 			bestKind = "code"
 			bestEnd = c.end
 		}
-		if cmState == 1 && cm.start < bestStart {
-			bestStart = cm.start
+		if cmState == 1 && cmStart < bestStart {
+			bestStart = cmStart
 			bestKind = "comment"
-			bestEnd = cm.end
 		}
 		if tgState == 1 && tg.start < bestStart {
 			bestStart = tg.start
@@ -1114,6 +1106,12 @@ func maskForRawHTML(text string) string {
 		}
 		if bestKind == "" {
 			break
+		}
+		switch bestKind {
+		case "fence":
+			bestEnd = findFenceEnd(text, f)
+		case "comment":
+			bestEnd = findCommentEnd(text, cmStart)
 		}
 		if bestKind != "tag" {
 			blankLinesSpan(buf, bestStart, bestEnd)

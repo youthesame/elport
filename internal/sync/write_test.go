@@ -75,6 +75,7 @@ func (f *writeFakeAPI) Me(context.Context) (map[string]any, error) {
 }
 
 func (f *writeFakeAPI) Info(context.Context) (map[string]any, error) {
+	f.calls = append(f.calls, "info")
 	return f.info, nil
 }
 
@@ -151,6 +152,7 @@ func (f *writeFakeAPI) Uploads(_ context.Context, entity string, eid int) ([]map
 }
 
 func (f *writeFakeAPI) Comments(context.Context, string, int) ([]map[string]any, error) {
+	f.calls = append(f.calls, "comments")
 	return nil, nil
 }
 
@@ -191,6 +193,7 @@ func (f *writeFakeAPI) Upload(_ context.Context, entity string, eid int, approve
 }
 
 func (f *writeFakeAPI) Download(_ context.Context, _ string, _ int, uid int) ([]byte, error) {
+	f.calls = append(f.calls, "download")
 	return f.downloads[uid], nil
 }
 
@@ -206,18 +209,36 @@ func (f *writeFakeAPI) AddLink(_ context.Context, entity string, eid int, target
 	return nil
 }
 
-func (f *writeFakeAPI) AddComment(context.Context, string, int, string) error { return nil }
+func (f *writeFakeAPI) AddComment(context.Context, string, int, string) error {
+	f.calls = append(f.calls, "add_comment")
+	return nil
+}
 
 func (f *writeFakeAPI) Categories(_ context.Context, _ any, entity string) ([]map[string]any, error) {
+	f.calls = append(f.calls, "categories")
 	return f.categories[entity], nil
 }
 
 func (f *writeFakeAPI) Statuses(_ context.Context, _ any, entity string) ([]map[string]any, error) {
+	f.calls = append(f.calls, "statuses")
 	return f.statuses[entity], nil
 }
 
 func (f *writeFakeAPI) Search(context.Context, string, url.Values) ([]map[string]any, error) {
+	f.calls = append(f.calls, "search")
 	return nil, nil
+}
+
+func (f *writeFakeAPI) callCountsSince(start int) map[string]int {
+	counts := map[string]int{}
+	for _, c := range f.calls[start:] {
+		kind := c
+		if i := strings.IndexByte(c, ':'); i >= 0 {
+			kind = c[:i]
+		}
+		counts[kind]++
+	}
+	return counts
 }
 
 func testConfig() *config.Data {
@@ -898,5 +919,163 @@ func TestPushNumericTitleChangeNotTreatedAsUnchanged(t *testing.T) {
 	}
 	if len(api.patches) != 1 || api.patches[0]["title"] != "001" {
 		t.Fatalf("expected PATCH with title='001', got patches=%+v", api.patches)
+	}
+}
+
+func TestPushUnchangedConvergedDocumentUsesNoWritesOrUploadsList(t *testing.T) {
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "fig.png"), []byte("converged-png"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	docPath := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(docPath, []byte("---\ntitle: Converged\ntags:\n- alpha\n---\n\nSee ![fig](fig.png)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	api := newWriteFakeAPI()
+	var out, errBuf bytes.Buffer
+	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("initial Push failed: %v", err)
+	}
+	embedded := make([]any, len(api.uploads["experiments/42"]))
+	for i, u := range api.uploads["experiments/42"] {
+		embedded[i] = u
+	}
+	api.entities["experiments/42"]["uploads"] = embedded
+	api.entities["experiments/42"]["tags"] = "alpha"
+
+	start := len(api.calls)
+	out.Reset()
+	errBuf.Reset()
+	summary, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf)
+	if err != nil {
+		t.Fatalf("converged re-Push failed: %v", err)
+	}
+	if summary != "pushed (body unchanged)" {
+		t.Fatalf("summary = %q, want pushed (body unchanged)", summary)
+	}
+	counts := api.callCountsSince(start)
+	total := len(api.calls[start:])
+	if counts["get"] != 1 || counts["me"] > 1 || total != counts["get"]+counts["me"] {
+		t.Fatalf("converged re-push API budget exceeded (want get==1, me<=1, no other calls): total=%d counts=%v", total, counts)
+	}
+}
+
+func TestPushMultipleNewUploadsFetchesUploadsListOnce(t *testing.T) {
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	files := map[string]string{
+		"a.png": "png-a",
+		"b.csv": "col\n1\n",
+		"c.txt": "note-c",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	docPath := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(docPath, []byte("---\ntitle: Batch Uploads\n---\n\n![a](a.png) [b](b.csv) [c](c.txt)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	api := newWriteFakeAPI()
+	start := len(api.calls)
+	var out, errBuf bytes.Buffer
+	if _, err := sync.Push(context.Background(), docPath, api, testConfig(), sync.PushOptions{WorkDir: dir}, &out, &errBuf); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+	counts := api.callCountsSince(start)
+	if counts["upload"] != 3 {
+		t.Fatalf("upload calls = %d, want 3 (%v)", counts["upload"], counts)
+	}
+	if counts["uploads"] > 1 {
+		t.Fatalf("post-upload metadata completion must fetch uploads list at most once for N uploads, got %d (%v)", counts["uploads"], counts)
+	}
+	body, _ := api.entities["experiments/42"]["body"].(string)
+	for _, want := range []string{"name=a.png", "name=b.csv", "name=c.txt"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("patched body missing %q: %q", want, body)
+		}
+	}
+}
+
+func TestPullAndFetchSkipDownloadWhenLocalSHA256Matches(t *testing.T) {
+	setIsolatedHome(t)
+	dir := t.TempDir()
+	data := []byte("stable-attachment-bytes")
+	sum := sha256.Sum256(data)
+	uploadEntry := map[string]any{
+		"id":             json.Number("101"),
+		"real_name":      "data.csv",
+		"long_name":      "ab/101-data.csv",
+		"storage":        1,
+		"hash_algorithm": "sha256",
+		"hash":           hex.EncodeToString(sum[:]),
+	}
+
+	docPath := filepath.Join(dir, "report.md")
+	if err := os.WriteFile(docPath, []byte("---\nid: 32\nentity: experiments\nprofile: test\n---\n\nold\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Save("https://e.example", "experiments", "32", map[string]any{
+		"remote_base": "old\n",
+		"local_base":  "old\n",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	api := newWriteFakeAPI()
+	api.downloads[101] = data
+	api.uploads["experiments/32"] = []map[string]any{uploadEntry}
+	api.entities["experiments/32"] = map[string]any{
+		"id":           json.Number("32"),
+		"content_type": 2,
+		"body":         "v1 [d](app/download.php?f=ab/101-data.csv&name=data.csv&storage=1)\n",
+		"uploads":      []any{uploadEntry},
+	}
+
+	start := len(api.calls)
+	var out, errBuf bytes.Buffer
+	if _, err := sync.Pull(context.Background(), docPath, api, testConfig(), "", &out, &errBuf); err != nil {
+		t.Fatalf("first Pull failed: %v", err)
+	}
+	if got := api.callCountsSince(start)["download"]; got != 1 {
+		t.Fatalf("first Pull downloads = %d, want 1", got)
+	}
+
+	api.entities["experiments/32"]["body"] = "v2 [d](app/download.php?f=ab/101-data.csv&name=data.csv&storage=1)\n"
+	start = len(api.calls)
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Pull(context.Background(), docPath, api, testConfig(), "", &out, &errBuf); err != nil {
+		t.Fatalf("second Pull failed: %v", err)
+	}
+	if got := api.callCountsSince(start)["download"]; got != 0 {
+		t.Fatalf("second Pull with matching local SHA-256 must skip download, got %d", got)
+	}
+
+	start = len(api.calls)
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Fetch(context.Background(), docPath, api, testConfig(), "", &out, &errBuf); err != nil {
+		t.Fatalf("Fetch on existing matching file failed: %v", err)
+	}
+	if got := api.callCountsSince(start)["download"]; got != 0 {
+		t.Fatalf("Fetch with matching local SHA-256 must skip download, got %d", got)
+	}
+
+	if err := os.Remove(filepath.Join(dir, "data.csv")); err != nil {
+		t.Fatal(err)
+	}
+	start = len(api.calls)
+	out.Reset()
+	errBuf.Reset()
+	if _, err := sync.Fetch(context.Background(), docPath, api, testConfig(), "", &out, &errBuf); err != nil {
+		t.Fatalf("Fetch after removing local file failed: %v", err)
+	}
+	if got := api.callCountsSince(start)["download"]; got != 1 {
+		t.Fatalf("Fetch with missing local file downloads = %d, want 1", got)
 	}
 }
