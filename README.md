@@ -1,19 +1,23 @@
-# elport: a git-like sync CLI for eLabFTW
+# elport
 
-[English](https://github.com/youthesame/elport/blob/main/README.md) | [日本語](https://github.com/youthesame/elport/blob/main/README_JA.md)
+[English](README.md) | [日本語](README_JA.md)
 
-Write lab documents locally in Markdown (with inline HTML like `<figure>` on eLabFTW 5.x, or via opt-in `format: html` on 6.x). Then `push`/`pull` them,
-along with every figure and data file the body references, to eLabFTW entities. **Local is the source of truth.**
+A command-line tool for eLabFTW, built for both researchers and AI agents.
+Read and search your lab's entities from the terminal, or write documents locally in Markdown and push them with their figures and data. Your local files are always the master copy.
+
+- **Read and search**: browse and search entities, read bodies, revisions, comments, and attachments, or save local copies.
+- **Write and sync**: one local Markdown document maps to one eLabFTW entity; `push` uploads referenced files and checks for conflicts first.
+- **Safe by default**: never deletes anything, offers a local read-only mode, and sends no telemetry.
 
 ## Install
 
-**macOS / Linux:**
+**macOS / Linux (Homebrew):**
 
 ```sh
 brew install youthesame/tap/elport
 ```
 
-Without Homebrew:
+**macOS / Linux (shell script):**
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/youthesame/elport/main/install.sh | sh
@@ -47,47 +51,44 @@ go install github.com/youthesame/elport/cmd/elport@latest
 
 </details>
 
-### Upgrading from Python `v0.1.x`
+<details><summary>Upgrading from Python v0.1.x</summary>
 
-Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` work as-is on all OSes (do not delete them).
+Existing `~/.config/elport/config.toml` and `~/.config/elport/state/` work as-is on all OSes. Do not delete them.
 
 1. Uninstall the Python package first (`uv tool uninstall elport`, `conda global uninstall elport`, `pipx uninstall elport`, or `pip uninstall elport`) so it does not shadow the Go binary on `PATH`.
-2. Install the Go binary above, then check `command -v elport` (PowerShell: `Get-Command elport`) and `elport --version` (`0.2.x`, or a short commit hash for Nix builds).
+2. Install the Go binary above, then check `command -v elport` (PowerShell: `Get-Command elport`) and `elport --version`.
 
-- **macOS**: on first read of a Keychain entry created by Python `v0.1.x`, macOS prompts once for Keychain access
-  (`/usr/bin/security`); click **Always Allow** or re-run `elport login <profile>` once.
-- **Windows / Linux (KDE)**: run `elport login <profile>` once after upgrading (native keyring storage format differs).
+- **macOS**: on first read of a Keychain entry created by Python `v0.1.x`, macOS prompts once for `/usr/bin/security` access; click **Always Allow** or re-run `elport login <profile>` once.
+- **Windows / Linux (KDE)**: run `elport login <profile>` once after upgrading because native keyring storage differs.
 - **Python `v0.1.x` line**: preserved on the [`python` branch](https://github.com/youthesame/elport/tree/python) and PyPI.
 
-## The core idea
-
-One local file maps to one eLabFTW entity: Markdown with a YAML front matter block.
-
-On `push`, elport uploads every real local file the body references, in any notation and anywhere on disk
-(`../data/raw.csv` and absolute paths work; hidden files never go up), and swaps each path for its real eLabFTW
-URL. By default the body goes up as raw Markdown, so `$...$` renders as-is; inline HTML such as `<figure>` renders on
-eLabFTW 5.x, whereas eLabFTW 6.x strips raw HTML from rendered Markdown (use `![alt](fig.png)`, or opt into one-way
-HTML publish with `format: html` / `elport new --format html`). To link another
-entity instead of uploading, write its eLabFTW URL or its local document's path. Code fences, inline code, and HTML
-comments are never parsed.
+</details>
 
 ## Quick start
 
+### Read and search
+
 ```sh
-elport login labA                       # store base_url (config) + api_key (OS keyring), interactively
-elport list                             # what do I already have on the server? (read-only)
-elport new "CRISPR titration"           # create the entity, scaffold report.md with id
-# ...or edit an entity made in the Web UI: elport clone <id> (to only read it: elport view <id>)
-# ...edit report.md, drop fig1.png / data.csv next to it...
-elport status                           # what would sync? (read-only)
-elport push                             # upload references + push the body
+elport login labA                       # save base_url in config and api_key in OS keyring
+elport list --scope team -q "CRISPR"    # search team entities
+elport view 42                          # read an entity body
+elport revisions 42                     # list saved body revisions
 ```
 
-## Writing a document
+### Write and sync
+
+```sh
+elport new "CRISPR titration"           # create an entity and scaffold report.md
+# ...edit report.md and place fig1.png or data/raw.csv nearby...
+elport status                           # check what would sync
+elport push                             # upload referenced files and push the body
+```
+
+A document is Markdown with YAML front matter:
 
 ```markdown
 ---
-id: 42                    # written by elport new or the first push
+id: 42
 title: CRISPR titration
 tags: [CRISPR]
 ---
@@ -99,168 +100,77 @@ tags: [CRISPR]
 Raw data: [raw.csv](data/raw.csv)
 ```
 
-`elport new` writes the front matter for you. Write the body as usual and reference local files by their path, and
-push uploads them. `elport help documents` lists every front matter key and reference rule.
+On `push`, elport uploads every referenced local file and rewrites paths to eLabFTW URLs on the server without changing your local file. Run `elport help documents` for front matter keys, reference rules, and `format: html`.
+
+## Using with AI agents
+
+elport works directly with AI agents as a single static binary, with no MCP server or extra runtime.
+
+- **Built-in guide**: run `elport help agents`, or install [skills/elport/SKILL.md](skills/elport/SKILL.md) so the agent always reads the guide matching your installed version.
+- **Read-only mode**: set `ELPORT_READ_ONLY=1` or `read_only = true` in config to block `new`, `comment`, and live `push` locally.
+- **Clean output**: `--json`, `revisions --rev`, and `view --attachment` write raw bytes when piped, while terminal output escapes control characters.
 
 ## Commands
 
-Commands that act on a local document take an optional `[<doc>]`, defaulting to `report.md`. Any name works. Sync commands
-also take a directory: every elport document under it, one line each.
-Exit code `0` on success, `1` on failure, `2` on usage error. Run `elport <command> --help` for the full flags.
+Document commands default to `report.md`, and sync commands also accept a directory. Exit codes: `0` success, `1` failure, `2` usage error. Run `elport <command> --help` for full flags.
 
-### Sync
+### Read and inspect
 
 | Command | Summary |
 |---|---|
-| `push` | Upload the body and its referenced files to one entity. |
-| `pull` | Fetch the body and metadata, and download referenced files. |
-| `fetch` | Download every attachment, referenced or not. Read-only. |
-| `status` | Report what would sync, and in which mode. Read-only. |
-| `diff` | Diff local against remote, or against the last push with `--base`. |
-| `merge` | Merge `.base.md` and `.remote.md` into `<doc>` after a conflict. Requires `git`. |
+| `list` | List or search entities (`-q`, `--tag`, `--scope`, `--order`, `--all`, `--json`). |
+| `view <id>` | Print an entity body, save a snapshot (`-o <dir>`), print raw JSON (`--json`), or stream an attachment (`--attachment <name>`). |
+| `revisions [<doc-or-id>]` | List body revisions, or print one verbatim with `--rev <id>`. |
+| `comments [<id>]` | Print remote comments to the terminal. |
+| `activity` | Show a daily creation heatmap (`--team` groups by author). |
+| `fetch` | Download all attachments of a document without changing the body. |
 
-`push` creates the entity and writes `id` back to the front matter when `id` is unset, and it runs the mode and
-conflict checks first. `merge` is local-only: it runs `git merge-file`, so `git` must be installed, but the folder
-need not be a git repository.
-
-### Entities
+### Write and sync
 
 | Command | Summary |
 |---|---|
-| `new "<title>"` | Create an entity and scaffold front matter. |
-| `clone <id>` | Start `<doc>` to edit and push an entity that already exists, then pull. To only read one, use `view`. |
-| `clone --all <dir>` | Back up every entity into `<dir>`. Re-run to add new ones. An HTML entity is saved as `view -o` writes it. |
-| `list` | List remote entities as `id  date  title`. Read-only. `--order lastchange` or `--order comment` shows that time instead of the date. |
-| `view <id>` | Read one remote entity: print its body to stdout, made readable. Read-only. An HTML entity loses its styling, and attachments appear by file name. Links to and from it are listed on stderr. |
-| `view <id> -o <dir>` | Read it with all its attachments, saved into a new or empty `<dir>`. Not a working copy. |
-| `view <id> --json` | Print the raw API entity as JSON on stdout, fields as the server sent them (the shape varies across eLabFTW 5.x and 6.x and may include commenters' email or ORCID). Writes no files. |
-| `view <id> --attachment <name>` | Write one attachment's bytes to stdout, selected by its elport attachment name (as `view -o` names it, e.g. `image-12.png` for a duplicate). Refuses a terminal: redirect (`> file`) or pipe. Verifies SHA-256 before writing when the server provides a valid digest. |
-| `revisions [<doc-or-id>]` | List body revisions as `id  created_at  fullname`, or print one body verbatim with `--rev <id>`; `--json` prints the raw API response. Read-only, stdout only. eLabFTW does not create a revision on every save, and elport ignores a revision's `content_type`. |
-| `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
-| `comments [<id>]` | Print the remote comment thread. With an `<id>`, no local document is needed. |
-| `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
-
-`new` and `clone` write to `report.md` unless you pass `-o <doc>`. `list` defaults to your own entities
-(`--scope self`) and returns 50 at a time, with `-q <term>`, `--tag <tag>`, `--limit`, `--offset`, and `--json` to
-narrow it; `--all` pages through every result. `-q` also takes the Web UI's search fields, such as
-`-q 'author:"Jane Doe" status:"Success"'`. `--order` and `--sort asc|desc` pick the order, as the Web UI's Sort menu
-does: `elport list --scope team --order comment` puts the team's latest comments first.
-`comments` prints to the terminal only, never into the body.
-On a terminal, elport shows control characters from remote text as visible escapes; piped or redirected output
-(`--json`, `revisions --rev`, and `view --attachment` included) stays byte-for-byte.
-
-An entity written in the Web UI's rich text editor stores HTML. elport never pulls HTML bodies and refuses unregistered
-HTML entities on `clone`, `pull`, and `push` (`view -o` reads them with their figures). To publish a local Markdown
-document as HTML on eLabFTW 6.x, opt in with `format: html` (`elport help documents`).
+| `new "<title>"` | Create an entity and scaffold a local document. |
+| `clone <id>` | Create a local working copy of an entity (`--all <dir>` mirrors all). |
+| `status` | Show what would sync and in which mode. |
+| `diff` | Compare local against remote, or against the last sync with `--base`. |
+| `push` | Check conflicts, upload referenced files, and push the body. |
+| `pull` | Fetch remote changes and referenced attachments. |
+| `merge` | Three-way merge after a conflict using `git`. |
+| `comment "<text>"` | Post a comment to an entity. |
 
 ### Setup
 
 | Command | Summary |
 |---|---|
-| `login [<profile>]` | Store base_url in `config.toml`, api_key in the OS keyring. |
-| `logout [<profile>]` | Remove the stored api_key. Keeps base_url. |
-| `profile [use <name>]` | List profiles, or set the default one. |
-| `whoami` | Check auth: user, team, role, key permissions, server version, scopes. |
+| `login [<profile>]` | Save `base_url` in `config.toml` and `api_key` in the OS keyring. |
+| `logout [<profile>]` | Remove the stored `api_key` and keep `base_url`. |
+| `profile [use <name>]` | List profiles or switch the default. |
+| `whoami` | Show auth details, server version, and read-only state. |
 
-### Shared options
+**Shared options**: `-n`/`--dry-run` previews a push; `-f`/`--force` overwrites remote changes; `-y`/`--yes` skips confirmation prompts; `--profile <name>` and `--entity {experiments,items}` choose the target.
 
-- `-n/--dry-run` rehearses a push without sending.
-- `-f/--force` pushes over a changed remote, losing the Web-side change.
-- `-y/--yes` skips the two confirmations: widening `read`/`write` beyond your team, and new uploads over 25 MiB.
-  A non-interactive run needs `-y` for either.
-- `--profile <name>` and `--entity {experiments,items}` pick the destination.
-
-## Documents, sync, and conflicts
-
-The details ship embedded in the CLI, so they match the version you installed:
-
-- `elport help documents`: front matter, references, attachments, links between documents ([on GitHub](https://github.com/youthesame/elport/blob/main/internal/help/documents.md))
-- `elport help workflow`: the status, diff, push loop, conflicts, pull and fetch ([on GitHub](https://github.com/youthesame/elport/blob/main/internal/help/workflow.md))
-- `elport help agents`: what an AI agent asks its user before acting ([on GitHub](https://github.com/youthesame/elport/blob/main/internal/help/agents.md))
-
-## Configuration & auth
+## Security, auth, and config
 
 **No credentials in the project. No telemetry.** The elport CLI sends eLabFTW requests only to the HTTPS origin of your configured `base_url` and refuses cross-origin redirects. The CLI sends no telemetry, collects no usage analytics, and performs no update checks.
 
-### Where the key lives
+- **Credentials**: API keys live in the OS keyring and non-secret settings in `~/.config/elport/config.toml` (mode `600`). Order of precedence: `ELABFTW_BASE_URL` + `ELABFTW_API_KEY` env vars, OS keyring, then plaintext config fallback when no keyring exists.
+- **Profiles**: layered from `~/.config/elport/config.toml` to `<project>/.elport.toml` to `<dir>/.elport.toml`, or pinned with `profile:` in front matter.
+- **Read-only mode**: `ELPORT_READ_ONLY=1` or top-level `read_only = true` in any config layer blocks remote writes and cannot be disabled by a lower layer. For server-side enforcement, use a read-only eLabFTW API key.
+- **`.elportignore`**: `.gitignore`-style rules excluding files in a document directory from upload.
 
-`elport login` stores the API key in your OS keyring: Keychain, Credential Manager, or Secret Service. Everything
-that is not a secret, base_url included, goes in `~/.config/elport/config.toml` with mode `600`. elport never
-prints the key, and refuses a base_url that is not `https://`.
+## Documentation and development
 
-```toml
-# ~/.config/elport/config.toml
-default_profile = "labA"
+Detailed references ship inside the binary so they always match your installed version:
 
-[profiles.labA]
-base_url   = "https://lab-a.example.org"
-verify_ssl = true
-```
+- `elport help documents`: front matter, references, attachments, `format: html`, and entity links ([source](internal/help/documents.md))
+- `elport help workflow`: sync loop, conflicts, `pull`, and `fetch` ([source](internal/help/workflow.md))
+- `elport help agents`: agent workflows, confirmation rules, and untrusted remote content ([source](internal/help/agents.md))
 
-### Which credentials win
+Repository docs:
 
-elport checks three sources, in order, and stops at the first hit.
-
-1. `ELABFTW_BASE_URL` + `ELABFTW_API_KEY` in the environment. This is how CI authenticates.
-2. The keyring and config pair from `elport login`. The normal default.
-3. A plaintext key in `~/.config/elport/config.toml`. A last resort, used with a warning, and only when no keyring backend exists (e.g. WSL, headless servers).
-
-### Profiles
-
-Profiles layer like settings.json, one per team:
-
-```
-~/.config/elport/config.toml  →  <project>/.elport.toml  →  <dir>/.elport.toml
-```
-
-Your first `elport login` becomes the default. `elport profile use <name>` switches it, or set `profile:` in a
-document's front matter to pin that one file.
-
-### Read-only mode
-
-Set `ELPORT_READ_ONLY=1` (or `true`; `0`, `false`, and empty mean off, anything else is an error), or `read_only = true`
-at the top level of `~/.config/elport/config.toml`, `<project>/.elport.toml`, or `<dir>/.elport.toml`, to make elport
-refuse every remote write: `new`, `comment`, and `push` without `-n` fail before contacting the server or writing local files. Reading
-commands and `push -n` still work, and `whoami` shows `Mode      read-only (<source>)`. Any layer that turns it on wins; a
-later `read_only = false` cannot turn it off. elport reads `.elport.toml` only from the directory you run in and the
-document's (or output's) directory, and `ELABFTW_BASE_URL` + `ELABFTW_API_KEY` still override the profile's key. This is a
-local guardrail; for a boundary the server enforces, log in with a read-only eLabFTW API key.
-
-### .elportignore
-
-`.elportignore` excludes referenced files inside the document directory, `.gitignore`-style, so they are never
-uploaded. It is additive across
-the same layers as profiles, plus every `.elportignore` from the project root down to the document directory. Each
-pattern is anchored at its own directory.
-
-## Learn more
-
-- **How eLabFTW's API actually behaves** → [docs/ELABFTW-API.md](https://github.com/youthesame/elport/blob/main/docs/ELABFTW-API.md)
-- **The behavioral contract** → Go tests (`internal/**/*_test.go`), `testdata/golden/`, and Quint traces (`spec/quint/sync.qnt` → `testdata/quint/`)
-- **Driving elport from an AI agent** → `elport help agents`. The skill in [skills/elport/SKILL.md](https://github.com/youthesame/elport/blob/main/skills/elport/SKILL.md) points there.
-- **Historical Python `v0.1.x` design notes & ADRs** → preserved on the [`python` branch](https://github.com/youthesame/elport/tree/python)
-
-## Development
-
-| Package | Role |
-|---|---|
-| `cmd/elport` | CLI entry point and signal handling |
-| `internal/cli` | Flag parsing, dispatch, `new`, `clone`, batch runs |
-| `internal/sync` | `push`, `pull`, `merge`, `fetch`, `status`, `diff`, `view`, `comments` |
-| `internal/plan` | Upload approval boundary (`ApprovedUploadPath`) |
-| `internal/transclude` | Hand-written reference scanner and path ↔ URL rewriting |
-| `internal/render` | Markdown-to-HTML rendering (`format: html`) and HTML canonicalization |
-| `internal/frontmatter` | YAML 1.1-compatible front matter parsing and rendering |
-| `internal/client` | HTTPS eLabFTW REST v2 client with idle timeouts and origin guards |
-| `internal/browse` | `list` and `activity` heatmap |
-| `internal/state` | Stored base state and key hashes |
-| `internal/config` | Layered config, profiles, and redacted `APIKey` resolution |
-| `internal/fsx` | Confined `*os.Root` writes and atomic replacement |
-| `internal/help` | Embedded Markdown help topics (`elport help`) |
-| `arch_test.go` | Structural guardrails and `AGENTS.md` symbol checks |
-
-**The tests are the authoritative behavioral contract, so change tests first.** Run `go test -race ./...` and
-`go vet ./...`. You can check live API behavior against <https://demo.elabftw.net>.
+- [docs/ELABFTW-API.md](docs/ELABFTW-API.md): measured eLabFTW REST API behavior
+- [AGENTS.md](AGENTS.md): invariants, architecture rules, and checks (`go vet ./... && go test -race ./...`; live checks only on <https://demo.elabftw.net>)
+- [`python` branch](https://github.com/youthesame/elport/tree/python): legacy Python `v0.1.x` line and historical ADRs
 
 ## Acknowledgments
 
