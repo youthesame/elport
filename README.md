@@ -180,7 +180,7 @@ The details ship embedded in the CLI, so they match the version you installed:
 
 ## Configuration & auth
 
-**No credentials in the project.**
+**No credentials in the project. No telemetry.** The elport CLI sends eLabFTW requests only to the HTTPS origin of your configured `base_url` and refuses cross-origin redirects. The CLI sends no telemetry, collects no usage analytics, and performs no update checks.
 
 ### Where the key lives
 
