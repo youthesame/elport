@@ -100,7 +100,29 @@ tags: [CRISPR]
 Raw data: [raw.csv](data/raw.csv)
 ```
 
-`push` は参照先のローカルファイルを自動アップロードし、手元のファイルを書き換えずにサーバー側のパスを eLabFTW URL へ置換して送信します。フロントマターのキーや参照ルール、`format: html` は `elport help documents` を参照してください。
+`push` は参照先のローカルファイルを自動アップロードし、手元のファイルを書き換えずにサーバー側のパスを eLabFTW URL へ置換して送信します。参照ルールやエンティティ間リンクの詳細は `elport help documents` を参照してください。
+
+<details><summary>フロントマターのキー一覧</summary>
+
+| キー | 値・型 | 既定 / 挙動 |
+|---|---|---|
+| `id` | 正の整数 | `new` または初回 `push` で自動付与（手書き不要） |
+| `entity` | `experiments` \| `items` | 既定 `experiments` |
+| `format` | `markdown` \| `html` | 既定 `markdown`（`html` は一方向公開、下記参照） |
+| `title` | 文字列 | 初回作成時はファイル名が既定 |
+| `tags` | リスト（単一値も可） | 追加のみ。`pull` ではローカルとリモートの和集合（削除は Web UI） |
+| `category` | ID または既存カテゴリ名 | 新規作成はしない |
+| `status` | ID または既存ステータス名 | 新規作成はしない |
+| `profile` | プロファイル名 | このドキュメントの接続先サーバーを固定 |
+| `read` | `owner` \| `owner+admin` \| `team` \| `account` \| `public` | 基本公開範囲のみ変更（Web UI の個別許可は維持）。`team` 超の拡大時は確認プロンプト |
+| `write` | `read` と同じ 5 段階 | `read` と同じルール |
+| `attachments` | ローカルパスのリスト | 本文から参照せずにアップロードしたい添付ファイル |
+
+- **同期ルール**: `push` は前回同期から変更したキーだけを送信します（未編集・削除したキーはリモート値を維持）。未知のキーはエラーになります。
+- **`format: markdown`（既定）**: Markdown のまま送信し、`push` / `pull` / `merge` で双方向同期します。eLabFTW 5.x では `<figure>` 等のインライン HTML が表示されますが、eLabFTW 6.x では Markdown 本文中の生 HTML が除去されます。
+- **`format: html`（一方向公開）**: `elport new --format html "<title>"` で作成（既存の同期済みドキュメントに追記して移行も可能）。`push` 時に Markdown を HTML へ変換して送信し、`<figure>`・`<img width>`・`<sub>`/`<sup>`・`<s>`・表内 `<br>`・`$...$` 数式を保持します。`pull` はフロントマターのみ更新し、Web UI 側が編集された場合は `elport diff` 確認後に `elport push --confirm-remote <hash>` で上書きします（Markdown へ戻すには明示的に `format: markdown` を指定）。
+
+</details>
 
 ## AI エージェントとの連携
 

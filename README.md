@@ -100,7 +100,29 @@ tags: [CRISPR]
 Raw data: [raw.csv](data/raw.csv)
 ```
 
-On `push`, elport uploads every referenced local file and rewrites paths to eLabFTW URLs on the server without changing your local file. Run `elport help documents` for front matter keys, reference rules, and `format: html`.
+On `push`, elport uploads every referenced local file and rewrites paths to eLabFTW URLs on the server without changing your local file. Run `elport help documents` for full reference and entity-link rules.
+
+<details><summary>Front matter keys</summary>
+
+| Key | Value / type | Default / behavior |
+|---|---|---|
+| `id` | Positive integer | Assigned by `new` or the first `push`; do not hand-edit. |
+| `entity` | `experiments` \| `items` | Defaults to `experiments`. |
+| `format` | `markdown` \| `html` | Defaults to `markdown`; `html` is one-way publish (see below). |
+| `title` | String | Defaults to the file name on creation. |
+| `tags` | List (or single value) | Add-only; `pull` merges the union of local and remote tags (remove in the Web UI). |
+| `category` | ID or existing name | elport never creates a new category. |
+| `status` | ID or existing name | elport never creates a new status. |
+| `profile` | Profile name | Pins the configured server for this document. |
+| `read` | `owner` \| `owner+admin` \| `team` \| `account` \| `public` | Base visibility only (Web UI grants stay); widening beyond `team` prompts. |
+| `write` | Same 5 levels as `read` | Same rules as `read`. |
+| `attachments` | List of local paths | Files to upload as attachments without referencing them in the body. |
+
+- **Sync rules**: `push` sends only keys edited since the last sync, so untouched or removed keys keep their remote values. Unknown keys are rejected.
+- **`format: markdown` (default)**: sends raw Markdown with two-way `push`/`pull`/`merge`. eLabFTW 5.x renders inline HTML such as `<figure>` in Markdown bodies, whereas eLabFTW 6.x strips raw HTML from Markdown bodies.
+- **`format: html` (one-way publish)**: create with `elport new --format html "<title>"` (or add to an existing synced Markdown document). `push` renders Markdown to HTML while preserving `<figure>`, `<img width>`, `<sub>`/`<sup>`, `<s>`, table `<br>`, and `$...$` math. `pull` updates front matter only; if edited in the Web UI, review with `elport diff` and run `elport push --confirm-remote <hash>`. Set `format: markdown` explicitly to revert.
+
+</details>
 
 ## Using with AI agents
 
