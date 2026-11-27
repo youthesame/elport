@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/youthesame/elport/internal/frontmatter"
 )
 
 const modulePrefix = "github.com/youthesame/elport/"
@@ -682,6 +684,45 @@ func TestArchAgentsSymbolLinksExist(t *testing.T) {
 		}
 		if method != "" && !entry.methods[sym+"."+method] {
 			t.Errorf("AGENTS.md references missing method %s.%s in %s", sym, method, pkgDir)
+		}
+	}
+}
+
+func TestArchDocsCoverFrontmatterSchema(t *testing.T) {
+	enumValues := append([]string{"experiments", "items"}, frontmatter.FormatOrder...)
+	enumValues = append(enumValues, frontmatter.PermissionOrder...)
+
+	for _, path := range []string{"README.md", "README_JA.md"} {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		text := string(raw)
+		for _, k := range frontmatter.AllowedKeys {
+			if !strings.Contains(text, "`"+k+"`") {
+				t.Errorf("%s is missing front matter key `%s`", path, k)
+			}
+		}
+		for _, v := range enumValues {
+			if !strings.Contains(text, "`"+v+"`") {
+				t.Errorf("%s is missing front matter value `%s`", path, v)
+			}
+		}
+	}
+
+	rawHelp, err := os.ReadFile("internal/help/documents.md")
+	if err != nil {
+		t.Fatalf("read internal/help/documents.md: %v", err)
+	}
+	helpText := string(rawHelp)
+	for _, k := range frontmatter.AllowedKeys {
+		if !strings.Contains(helpText, "`"+k+"`") && !strings.Contains(helpText, k+":") {
+			t.Errorf("internal/help/documents.md is missing front matter key %s", k)
+		}
+	}
+	for _, v := range enumValues {
+		if !strings.Contains(helpText, v) {
+			t.Errorf("internal/help/documents.md is missing front matter value %s", v)
 		}
 	}
 }
