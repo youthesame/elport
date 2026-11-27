@@ -62,6 +62,9 @@ type Command struct {
 	Format        string
 	Base          bool
 	Resolved      bool
+	Attachment    string
+	Rev           int
+	HasRev        bool
 }
 
 type usageError struct {
@@ -137,6 +140,7 @@ func rootHelp() string {
 		"  status      show local/remote sync state\n" +
 		"  comments    show the remote comment thread\n" +
 		"  comment     post a remote comment\n" +
+		"  revisions   list body revisions or print one (--rev ID)\n" +
 		"  diff        show changes against remote or base\n" +
 		"  merge       merge local and remote sidecars using git merge-file\n" +
 		"  new         create a new remote entity and local document\n" +
@@ -149,8 +153,8 @@ func rootHelp() string {
 		"  logout      remove the stored api_key for a profile\n" +
 		"  profile     list profiles or select the default with 'use'\n\n" +
 		"side effects:\n" +
-		"  read-only       list, view (without -o), activity, comments, status, diff,\n" +
-		"                  whoami, profile list, push -n\n" +
+		"  read-only       list, view (without -o), activity, comments, revisions,\n" +
+		"                  status, diff, whoami, profile list, push -n\n" +
 		"  local writes    pull, fetch, clone, merge, view -o DIR, login, logout,\n" +
 		"                  profile use\n" +
 		"  remote writes   push (without -n; also writes locally),\n" +
@@ -158,7 +162,8 @@ func rootHelp() string {
 		"defaults & auth:\n" +
 		"  document commands default to report.md (sync commands also accept directories)\n" +
 		"  exit codes: 0 success, 1 failure, 2 usage error\n" +
-		"  non-interactive auth: set both ELABFTW_BASE_URL and ELABFTW_API_KEY\n\n" +
+		"  non-interactive auth: set both ELABFTW_BASE_URL and ELABFTW_API_KEY\n" +
+		"  local read-only mode: ELPORT_READ_ONLY=1 or read_only = true refuses remote writes\n\n" +
 		help.Summary()
 }
 
@@ -176,6 +181,8 @@ func subcommandUsage(name string) string {
 		return "usage: elport new [options] <title>"
 	case "view":
 		return "usage: elport view [options] <ID_OR_URL>"
+	case "revisions":
+		return "usage: elport revisions [options] [doc-or-id]"
 	case "clone":
 		return "usage: elport clone [options] [ID_OR_URL | --all ROOT]"
 	case "login", "logout":
@@ -290,6 +297,8 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 	case "view":
 		addChoiceFlag(fs, &cmd.Entity, "entity", "", "entity type to view (default: experiments)", entities)
 		fs.StringVarP(&cmd.Output, "output", "o", "", "write body and attachments into DIR")
+		fs.BoolVar(&cmd.JSON, "json", false, "emit the raw API entity as JSON")
+		fs.StringVar(&cmd.Attachment, "attachment", "", "write one attachment to stdout")
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 	case "clone":
 		fs.StringVar(&cmd.AllRoot, "all", "", "clone every entity not yet under ROOT")
@@ -297,6 +306,10 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 		addChoiceFlag(fs, &cmd.Scope, "scope", "self", "whose entities --all clones (default: self)", scopes)
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 		fs.StringVarP(&cmd.Output, "output", "o", "report.md", "local document to create (default: report.md)")
+	case "revisions":
+		addTargetFlags(fs, cmd)
+		addDecimalIntFlag(fs, &cmd.Rev, "rev", 0, "show the body of this revision id")
+		fs.BoolVar(&cmd.JSON, "json", false, "emit the raw API response as JSON")
 	case "whoami":
 		fs.StringVar(&cmd.Profile, "profile", "", "config profile to use")
 	case "login", "logout", "profile":
@@ -326,6 +339,18 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 		}
 	case "push", "pull", "fetch", "status", "diff":
 		cmd.Docs = defaultDocs(pos)
+	case "revisions":
+		cmd.HasRev = fs.Changed("rev")
+		if cmd.HasRev && cmd.Rev <= 0 {
+			return nil, ExitUsage, usageError{msg: "--rev must be a positive integer"}
+		}
+		if len(pos) > 1 {
+			return nil, ExitUsage, usageError{msg: "revisions accepts at most one document or id"}
+		}
+		cmd.Doc = "report.md"
+		if len(pos) == 1 {
+			cmd.Doc = pos[0]
+		}
 	case "comments", "merge":
 		if len(pos) > 1 {
 			return nil, ExitUsage, usageError{msg: fmt.Sprintf("%s accepts at most one document", name)}
@@ -365,6 +390,21 @@ func Parse(args []string, stdout io.Writer) (*Command, int, error) {
 	case "view":
 		if len(pos) != 1 {
 			return nil, ExitUsage, usageError{msg: "view requires <id-or-url>"}
+		}
+		modes := 0
+		for _, flag := range []string{"json", "attachment", "output"} {
+			if fs.Changed(flag) {
+				modes++
+			}
+		}
+		if modes > 1 {
+			return nil, ExitUsage, usageError{msg: "--json, --attachment, and -o/--output cannot be used together"}
+		}
+		if fs.Changed("attachment") && cmd.Attachment == "" {
+			return nil, ExitUsage, usageError{msg: "--attachment requires a name"}
+		}
+		if fs.Changed("output") && cmd.Output == "" {
+			return nil, ExitUsage, usageError{msg: "-o/--output requires a directory"}
 		}
 		cmd.ID = pos[0]
 	case "clone":

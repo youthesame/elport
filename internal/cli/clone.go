@@ -71,6 +71,9 @@ func runNew(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env
 	if err != nil {
 		return err
 	}
+	if err := requireWritable(data, "create a remote entity"); err != nil {
+		return err
+	}
 	resolvedProfile, c, err := resolveClient(data, cmd.Profile, "", stderr, env)
 	if err != nil {
 		return err
