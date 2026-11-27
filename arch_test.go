@@ -20,7 +20,7 @@ var bannedDocRefPattern = regexp.MustCompile(`\bADR-\d+\b|DESIGN\.md`)
 
 var forbiddenImportsByPkg = map[string][]string{
 	"internal/frontmatter": {
-		"net/http", "os/exec",
+		"os/exec",
 		modulePrefix + "internal/config",
 		modulePrefix + "internal/client",
 		modulePrefix + "internal/state",
@@ -30,7 +30,7 @@ var forbiddenImportsByPkg = map[string][]string{
 		modulePrefix + "internal/cli",
 	},
 	"internal/transclude": {
-		"regexp", "net/http", "os/exec",
+		"regexp", "os/exec",
 		modulePrefix + "internal/config",
 		modulePrefix + "internal/client",
 		modulePrefix + "internal/state",
@@ -40,7 +40,7 @@ var forbiddenImportsByPkg = map[string][]string{
 		modulePrefix + "internal/cli",
 	},
 	"internal/config": {
-		"net/http", "os/exec",
+		"os/exec",
 		modulePrefix + "internal/client",
 		modulePrefix + "internal/sync",
 		modulePrefix + "internal/plan",
@@ -49,7 +49,7 @@ var forbiddenImportsByPkg = map[string][]string{
 		modulePrefix + "internal/cli",
 	},
 	"internal/state": {
-		"net/http", "os/exec",
+		"os/exec",
 		modulePrefix + "internal/client",
 		modulePrefix + "internal/sync",
 		modulePrefix + "internal/plan",
@@ -66,7 +66,7 @@ var forbiddenImportsByPkg = map[string][]string{
 		modulePrefix + "internal/fsx",
 	},
 	"internal/plan": {
-		"net/http", "os/exec",
+		"os/exec",
 		modulePrefix + "internal/client",
 		modulePrefix + "internal/sync",
 		modulePrefix + "internal/browse",
@@ -74,7 +74,7 @@ var forbiddenImportsByPkg = map[string][]string{
 		modulePrefix + "internal/render",
 	},
 	"internal/render": {
-		"os", "net/http", "os/exec",
+		"os", "os/exec",
 		modulePrefix + "internal/config",
 		modulePrefix + "internal/client",
 		modulePrefix + "internal/state",
@@ -240,6 +240,9 @@ func checkGoSource(relPath string, src any) []string {
 		}
 		if importPath == "os/exec" && !pkgMatches(pkgDir, "internal/sync") {
 			add(spec.Pos(), "os/exec is allowed only in internal/sync")
+		}
+		if ((importMatches(importPath, "net") && importPath != "net/url" && importPath != "net/netip") || importMatches(importPath, "crypto/tls")) && !pkgMatches(pkgDir, "internal/client") {
+			add(spec.Pos(), "%s is allowed only in internal/client", importPath)
 		}
 	}
 
@@ -479,6 +482,30 @@ func TestArchRulesCatchViolations(t *testing.T) {
 			src:       "package render\nimport \"os\"\nvar _ = os.ReadFile\n",
 			wantMatch: `must not import "os"`,
 		},
+		{
+			name:      "net outside client rejected",
+			relPath:   "internal/cli/dial.go",
+			src:       "package cli\nimport \"net\"\nvar _ = net.Dial\n",
+			wantMatch: "net is allowed only in internal/client",
+		},
+		{
+			name:      "net/http outside client rejected",
+			relPath:   "internal/sync/http.go",
+			src:       "package sync\nimport \"net/http\"\nvar _ = http.NewRequest\n",
+			wantMatch: "net/http is allowed only in internal/client",
+		},
+		{
+			name:      "net/http/httputil outside client rejected",
+			relPath:   "internal/cli/proxy.go",
+			src:       "package cli\nimport \"net/http/httputil\"\nvar _ = httputil.DumpRequest\n",
+			wantMatch: "net/http/httputil is allowed only in internal/client",
+		},
+		{
+			name:      "crypto/tls outside client rejected",
+			relPath:   "internal/cli/tls.go",
+			src:       "package cli\nimport \"crypto/tls\"\nvar _ = tls.Dial\n",
+			wantMatch: "crypto/tls is allowed only in internal/client",
+		},
 	}
 
 	for _, tc := range cases {
@@ -520,6 +547,16 @@ func TestArchRulesAllowValidCode(t *testing.T) {
 			name:    "os/exec allowed in internal/sync",
 			relPath: "internal/sync/merge.go",
 			src:     "package sync\nimport \"os/exec\"\nvar _ = exec.Command\n",
+		},
+		{
+			name:    "net/url and net/netip allowed in internal/sync",
+			relPath: "internal/sync/parse.go",
+			src:     "package sync\nimport (\n\"net/netip\"\n\"net/url\"\n)\nvar _ = netip.ParseAddr\nvar _ = url.Parse\n",
+		},
+		{
+			name:    "net/http allowed in internal/client",
+			relPath: "internal/client/req.go",
+			src:     "package client\nimport \"net/http\"\nvar _ = http.NewRequest\n",
 		},
 	}
 
