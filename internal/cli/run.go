@@ -58,13 +58,28 @@ func (e Env) useColor(stdout io.Writer) bool {
 	if _, noColor := os.LookupEnv("NO_COLOR"); noColor {
 		return false
 	}
+	return e.isTerminal(stdout)
+}
+
+func (e Env) isTerminal(w io.Writer) bool {
 	if e.IsTTY != nil {
 		return *e.IsTTY
 	}
-	if f, ok := fileOf(stdout); ok {
+	if f, ok := fileOf(w); ok {
 		return term.IsTerminal(int(f.Fd()))
 	}
 	return false
+}
+
+func (e Env) clientOptions(readOnly bool) []client.Option {
+	return append(slices.Clip(e.ClientOpts), client.WithReadOnly(readOnly))
+}
+
+func requireWritable(data *config.Data, action string) error {
+	if data.ReadOnly {
+		return fmt.Errorf("refusing to %s: read-only mode is enabled (%s)", action, data.ReadOnlySource)
+	}
+	return nil
 }
 
 func (e Env) canPrompt(stdin io.Reader, stdout io.Writer) bool {
@@ -266,7 +281,7 @@ func resolveClient(data *config.Data, profile, metaProfile string, stderr io.Wri
 	if err != nil {
 		return "", nil, err
 	}
-	c, err := client.New(baseURL, apiKey, verifySSL, env.ClientOpts...)
+	c, err := client.New(baseURL, apiKey, verifySSL, env.clientOptions(data.ReadOnly)...)
 	if err != nil {
 		return "", nil, err
 	}
@@ -505,6 +520,7 @@ type clientCacheKey struct {
 	baseURL   string
 	verifySSL bool
 	profile   string
+	readOnly  bool
 }
 
 type clientCache struct {
@@ -519,7 +535,7 @@ func resolveClientCached(data *config.Data, profile, metaProfile string, stderr 
 	if cache != nil {
 		name, baseURL, verifySSL, err := config.BaseTarget(data, profile, metaProfile)
 		if err == nil {
-			key := clientCacheKey{baseURL: baseURL, verifySSL: verifySSL, profile: name}
+			key := clientCacheKey{baseURL: baseURL, verifySSL: verifySSL, profile: name, readOnly: data.ReadOnly}
 			if cached, ok := cache.clients[key]; ok {
 				return name, cached, nil
 			}
@@ -529,18 +545,18 @@ func resolveClientCached(data *config.Data, profile, metaProfile string, stderr 
 	if err != nil {
 		return "", nil, err
 	}
-	c, err := client.New(baseURL, apiKey, verifySSL, env.ClientOpts...)
+	c, err := client.New(baseURL, apiKey, verifySSL, env.clientOptions(data.ReadOnly)...)
 	if err != nil {
 		return "", nil, err
 	}
 	if cache != nil {
-		key := clientCacheKey{baseURL: baseURL, verifySSL: verifySSL, profile: name}
+		key := clientCacheKey{baseURL: baseURL, verifySSL: verifySSL, profile: name, readOnly: data.ReadOnly}
 		cache.clients[key] = c
 	}
 	return name, c, nil
 }
 
-func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env, cache *clientCache) (*config.Data, sync.API, error) {
+func loadDocument(docPath, cliEntity string, stderr io.Writer, env Env) (*config.Data, *sync.Document, error) {
 	wd, err := env.workDir()
 	if err != nil {
 		return nil, nil, err
@@ -566,6 +582,15 @@ func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env,
 	}
 	if cliEntity != "" && metaEntity == "" {
 		data.Raw["entity"] = cliEntity
+		doc.Entity = cliEntity
+	}
+	return data, doc, nil
+}
+
+func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env, cache *clientCache) (*config.Data, sync.API, error) {
+	data, doc, err := loadDocument(docPath, cliEntity, stderr, env)
+	if err != nil {
+		return nil, nil, err
 	}
 	metaProf, _ := doc.Meta.Values["profile"].(string)
 	api := &lazyAPI{
@@ -577,7 +602,17 @@ func docTarget(docPath, cliProfile, cliEntity string, stderr io.Writer, env Env,
 	return data, api, nil
 }
 
+func writeJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
+}
+
 func runView(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) error {
+	if cmd.Attachment != "" && env.isTerminal(stdout) {
+		return errors.New("refusing to write attachment to a terminal; redirect to a file (> file) or pipe it")
+	}
 	defaultEntity, c, err := browseTarget(cmd, stderr, env)
 	if err != nil {
 		return err
@@ -586,7 +621,93 @@ func runView(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env En
 	if err != nil {
 		return err
 	}
+	switch {
+	case cmd.JSON:
+		raw, err := c.GetRaw(ctx, entity, eid)
+		if err != nil {
+			return err
+		}
+		return writeJSON(stdout, raw)
+	case cmd.Attachment != "":
+		return sync.ViewAttachment(ctx, c, entity, eid, cmd.Attachment, stdout)
+	}
 	return sync.View(ctx, c, entity, eid, c.Root(), cmd.Output, stdout, stderr)
+}
+
+func revisionsTarget(cmd *Command, stderr io.Writer, env Env) (string, int, *client.Client, error) {
+	if isRemoteTarget(cmd.Doc) {
+		defaultEntity, c, err := browseTarget(cmd, stderr, env)
+		if err != nil {
+			return "", 0, nil, err
+		}
+		entity, eid, err := parseRemoteTarget(cmd.Doc, cmd.Entity, defaultEntity, c)
+		return entity, eid, c, err
+	}
+	data, doc, err := loadDocument(cmd.Doc, cmd.Entity, stderr, env)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	if !doc.HasID {
+		return "", 0, nil, errors.New("id is required")
+	}
+	metaProf, _ := doc.Meta.Values["profile"].(string)
+	_, c, err := resolveClient(data, cmd.Profile, metaProf, stderr, env)
+	return doc.Entity, doc.ID, c, err
+}
+
+func runRevisions(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) error {
+	entity, eid, c, err := revisionsTarget(cmd, stderr, env)
+	if err != nil {
+		return err
+	}
+	if cmd.HasRev {
+		rev, err := c.Revision(ctx, entity, eid, cmd.Rev)
+		if err != nil {
+			return err
+		}
+		if cmd.JSON {
+			return writeJSON(stdout, rev)
+		}
+		body, exists := rev["body"]
+		if !exists {
+			return errors.New("revision response missing body")
+		}
+		if body == nil {
+			return nil
+		}
+		text, ok := body.(string)
+		if !ok {
+			return errors.New("revision response has non-string body")
+		}
+		_, err = io.WriteString(stdout, text)
+		return err
+	}
+	revs, err := c.Revisions(ctx, entity, eid)
+	if err != nil {
+		return err
+	}
+	if cmd.JSON {
+		if revs == nil {
+			revs = []map[string]any{}
+		}
+		return writeJSON(stdout, revs)
+	}
+	if len(revs) == 0 {
+		_, err := io.WriteString(stdout, "no revisions\n")
+		return err
+	}
+	idWidth, whenWidth := 0, 0
+	for _, r := range revs {
+		idWidth = max(idWidth, len(strVal(r, "id")))
+		whenWidth = max(whenWidth, len(strVal(r, "created_at")))
+	}
+	for _, r := range revs {
+		line := fmt.Sprintf("%-*s  %-*s  %s", idWidth, strVal(r, "id"), whenWidth, strVal(r, "created_at"), strVal(r, "fullname"))
+		if _, err := fmt.Fprintln(stdout, strings.TrimRight(line, " ")); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runComments(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env Env) error {
@@ -623,6 +744,9 @@ func runComments(ctx context.Context, cmd *Command, stdout, stderr io.Writer, en
 	}
 	if cmd.Name == "comments" {
 		return sync.Comments(ctx, cmd.Doc, c, data, stdout)
+	}
+	if err := requireWritable(data, "post a comment"); err != nil {
+		return err
 	}
 	return sync.Comment(ctx, cmd.Doc, c, data, cmd.Text, stdout)
 }
@@ -726,6 +850,11 @@ func runDocOne(ctx context.Context, cmd *Command, docPath string, stdin io.Reade
 	}
 	switch cmd.Name {
 	case "push":
+		if !cmd.DryRun {
+			if err := requireWritable(data, "push"); err != nil {
+				return "", true, err
+			}
+		}
 		wd, _ := env.workDir()
 		s, err := sync.Push(ctx, docPath, c, data, sync.PushOptions{
 			Profile:       cmd.Profile,
@@ -1015,6 +1144,10 @@ func runWhoami(ctx context.Context, cmd *Command, stdout, stderr io.Writer, env 
 		}
 	}
 
+	if data.ReadOnly {
+		_, _ = fmt.Fprintf(stdout, "  Mode      %s (%s)\n", colorize("read-only", 33, color), data.ReadOnlySource)
+	}
+
 	if ver := strVal(server, "elabftw_version"); ver != "" {
 		_, _ = fmt.Fprintf(stdout, "  Server    eLabFTW %s\n", ver)
 	}
@@ -1115,6 +1248,8 @@ func RunWithEnv(ctx context.Context, args []string, stdin io.Reader, stdout, std
 		runErr = runActivity(ctx, cmd, stdout, stderr, env)
 	case "view":
 		runErr = runView(ctx, cmd, stdout, stderr, env)
+	case "revisions":
+		runErr = runRevisions(ctx, cmd, stdout, stderr, env)
 	case "comments", "comment":
 		runErr = runComments(ctx, cmd, stdout, stderr, env)
 	case "push", "pull", "status", "diff", "fetch":

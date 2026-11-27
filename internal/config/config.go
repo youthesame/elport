@@ -49,9 +49,38 @@ type IgnoreLayer struct {
 }
 
 type Data struct {
-	Raw          map[string]any
-	IgnoreLayers []IgnoreLayer
-	UserProfiles map[string]bool
+	Raw            map[string]any
+	IgnoreLayers   []IgnoreLayer
+	UserProfiles   map[string]bool
+	ReadOnly       bool
+	ReadOnlySource string
+}
+
+const ReadOnlyEnv = "ELPORT_READ_ONLY"
+
+func envReadOnly() (bool, error) {
+	raw := os.Getenv(ReadOnlyEnv)
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "0", "false":
+		return false, nil
+	case "1", "true":
+		return true, nil
+	default:
+		return false, fmt.Errorf("invalid %s value %q (use 1, true, 0, or false)", ReadOnlyEnv, raw)
+	}
+}
+
+func takeReadOnly(layer map[string]any, path string) (bool, error) {
+	raw, exists := layer["read_only"]
+	if !exists {
+		return false, nil
+	}
+	delete(layer, "read_only")
+	v, ok := raw.(bool)
+	if !ok {
+		return false, fmt.Errorf("%s: read_only must be true or false", path)
+	}
+	return v, nil
 }
 
 func ConfigPath() (string, error) {
@@ -203,6 +232,24 @@ func Load(project, docDir string, warn io.Writer) (*Data, error) {
 	if err != nil {
 		return nil, err
 	}
+	readOnly, err := envReadOnly()
+	if err != nil {
+		return nil, err
+	}
+	source := ""
+	if readOnly {
+		source = ReadOnlyEnv
+	}
+	markReadOnly := func(layer map[string]any, path string) error {
+		v, err := takeReadOnly(layer, path)
+		if v && !readOnly {
+			readOnly, source = true, path
+		}
+		return err
+	}
+	if err := markReadOnly(data, cfgPath); err != nil {
+		return nil, err
+	}
 	userProfiles := map[string]bool{}
 	for name := range profilesMap(data) {
 		userProfiles[name] = true
@@ -244,8 +291,8 @@ func Load(project, docDir string, warn io.Writer) (*Data, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(layer) == 0 {
-			continue
+		if err := markReadOnly(layer, p); err != nil {
+			return nil, err
 		}
 		if layerProfs := profilesMap(layer); layerProfs != nil {
 			profs := ensureProfilesMap(data)
@@ -279,7 +326,7 @@ func Load(project, docDir string, warn io.Writer) (*Data, error) {
 		}
 	}
 
-	return &Data{Raw: data, IgnoreLayers: layers, UserProfiles: userProfiles}, nil
+	return &Data{Raw: data, IgnoreLayers: layers, UserProfiles: userProfiles, ReadOnly: readOnly, ReadOnlySource: source}, nil
 }
 
 func ProfileName(data *Data, cliProfile, metaProfile string) (string, error) {

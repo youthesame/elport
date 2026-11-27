@@ -60,6 +60,7 @@ func setupHome(t *testing.T) string {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("ELABFTW_BASE_URL", "")
 	t.Setenv("ELABFTW_API_KEY", "")
+	t.Setenv("ELPORT_READ_ONLY", "")
 	return home
 }
 

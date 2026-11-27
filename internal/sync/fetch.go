@@ -3,11 +3,14 @@ package sync
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -509,4 +512,44 @@ func View(ctx context.Context, api API, entity string, eid int, baseURL, outputD
 		_, _ = fmt.Fprintf(stderr, "%d attachment(s) shown by file name; -o DIR writes them beside the body\n", len(nameSet))
 	}
 	return nil
+}
+
+func ViewAttachment(ctx context.Context, api API, entity string, eid int, name string, stdout io.Writer) error {
+	validID, err := frontmatter.ValidateID(eid)
+	if err != nil {
+		return err
+	}
+	remote := &Remote{API: api, Entity: entity, ID: validID}
+	uploads, err := remote.Uploads(ctx, nil)
+	if err != nil {
+		return err
+	}
+	attachments := ReversibleUploads(uploads)
+	idx := slices.IndexFunc(attachments, func(u transclude.Upload) bool {
+		return transclude.Fold(transclude.UploadName(u)) == transclude.Fold(name)
+	})
+	if idx < 0 {
+		names := make([]string, 0, len(attachments))
+		for _, u := range attachments {
+			names = append(names, transclude.UploadName(u))
+		}
+		if len(names) == 0 {
+			return fmt.Errorf("no attachment named %q on %s/%d (it has no attachments)", name, entity, validID)
+		}
+		sort.Strings(names)
+		return fmt.Errorf("no attachment named %q on %s/%d; available: %s", name, entity, validID, strings.Join(names, ", "))
+	}
+	u := attachments[idx]
+	data, err := remote.Download(ctx, u.ID)
+	if err != nil {
+		return err
+	}
+	if want := RemoteSHA256(u); want != "" {
+		sum := sha256.Sum256(data)
+		if got := hex.EncodeToString(sum[:]); got != want {
+			return fmt.Errorf("attachment %s failed SHA-256 verification (server %s, downloaded %s)", transclude.UploadName(u), want, got)
+		}
+	}
+	_, err = stdout.Write(data)
+	return err
 }

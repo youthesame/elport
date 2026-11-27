@@ -133,6 +133,9 @@ need not be a git repository.
 | `list` | List remote entities as `id  date  title`. Read-only. `--order lastchange` or `--order comment` shows that time instead of the date. |
 | `view <id>` | Read one remote entity: print its body to stdout, made readable. Read-only. An HTML entity loses its styling, and attachments appear by file name. Links to and from it are listed on stderr. |
 | `view <id> -o <dir>` | Read it with all its attachments, saved into a new or empty `<dir>`. Not a working copy. |
+| `view <id> --json` | Print the raw API entity as JSON on stdout, fields as the server sent them (the shape varies across eLabFTW 5.x and 6.x and may include commenters' email or ORCID). Writes no files. |
+| `view <id> --attachment <name>` | Write one attachment's bytes to stdout, selected by its elport attachment name (as `view -o` names it, e.g. `image-12.png` for a duplicate). Refuses a terminal: redirect (`> file`) or pipe. Verifies SHA-256 before writing when the server provides a valid digest. |
+| `revisions [<doc-or-id>]` | List body revisions as `id  created_at  fullname`, or print one body verbatim with `--rev <id>`; `--json` prints the raw API response. Read-only, stdout only. eLabFTW does not create a revision on every save, and elport ignores a revision's `content_type`. |
 | `activity` | Heatmap of the entities you created per day, up to a year as the terminal width allows. `--team` gives one per author. |
 | `comments [<id>]` | Print the remote comment thread. With an `<id>`, no local document is needed. |
 | `comment "<text>"` | Post one comment. Use the Web UI to edit or delete. |
@@ -143,6 +146,8 @@ narrow it; `--all` pages through every result. `-q` also takes the Web UI's sear
 `-q 'author:"Jane Doe" status:"Success"'`. `--order` and `--sort asc|desc` pick the order, as the Web UI's Sort menu
 does: `elport list --scope team --order comment` puts the team's latest comments first.
 `comments` prints to the terminal only, never into the body.
+On a terminal, elport shows control characters from remote text as visible escapes; piped or redirected output
+(`--json`, `revisions --rev`, and `view --attachment` included) stays byte-for-byte.
 
 An entity written in the Web UI's rich text editor stores HTML. elport never pulls HTML bodies and refuses unregistered
 HTML entities on `clone`, `pull`, and `push` (`view -o` reads them with their figures). To publish a local Markdown
@@ -210,6 +215,16 @@ Profiles layer like settings.json, one per team:
 
 Your first `elport login` becomes the default. `elport profile use <name>` switches it, or set `profile:` in a
 document's front matter to pin that one file.
+
+### Read-only mode
+
+Set `ELPORT_READ_ONLY=1` (or `true`; `0`, `false`, and empty mean off, anything else is an error), or `read_only = true`
+at the top level of `~/.config/elport/config.toml`, `<project>/.elport.toml`, or `<dir>/.elport.toml`, to make elport
+refuse every remote write: `new`, `comment`, and `push` without `-n` fail before contacting the server or writing local files. Reading
+commands and `push -n` still work, and `whoami` shows `Mode      read-only (<source>)`. Any layer that turns it on wins; a
+later `read_only = false` cannot turn it off. elport reads `.elport.toml` only from the directory you run in and the
+document's (or output's) directory, and `ELABFTW_BASE_URL` + `ELABFTW_API_KEY` still override the profile's key. This is a
+local guardrail; for a boundary the server enforces, log in with a read-only eLabFTW API key.
 
 ### .elportignore
 

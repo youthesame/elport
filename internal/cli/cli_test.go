@@ -32,7 +32,7 @@ func TestRunHelpAndVersion(t *testing.T) {
 	if code := cli.Run([]string{"--help"}, nil, &out, &errBuf); code != cli.ExitOK {
 		t.Fatalf("--help exit = %d, want 0", code)
 	}
-	for _, want := range []string{"side effects:", "exit codes:", "ELABFTW_API_KEY", "elport help agents"} {
+	for _, want := range []string{"side effects:", "exit codes:", "ELABFTW_API_KEY", "elport help agents", "  revisions   ", "comments, revisions,", "ELPORT_READ_ONLY=1"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("root --help missing %q", want)
 		}

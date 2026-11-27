@@ -61,6 +61,7 @@ type options struct {
 	dialTimeout time.Duration
 	idleTimeout time.Duration
 	rootCAs     *x509.CertPool
+	readOnly    bool
 }
 
 func WithTimeouts(dial, idle time.Duration) Option {
@@ -71,6 +72,12 @@ func WithTimeouts(dial, idle time.Duration) Option {
 		if idle > 0 {
 			o.idleTimeout = idle
 		}
+	}
+}
+
+func WithReadOnly(readOnly bool) Option {
+	return func(o *options) {
+		o.readOnly = readOnly
 	}
 }
 
@@ -87,6 +94,7 @@ type Client struct {
 	key         config.APIKey
 	idleTimeout time.Duration
 	httpClient  *http.Client
+	readOnly    bool
 
 	mu       sync.Mutex
 	identity map[string]any
@@ -231,12 +239,17 @@ func New(baseURL string, apiKey config.APIKey, verifySSL bool, opts ...Option) (
 		key:         apiKey,
 		idleTimeout: cfg.idleTimeout,
 		httpClient:  hc,
+		readOnly:    cfg.readOnly,
 		catalogs:    map[string][]map[string]any{},
 	}, nil
 }
 
 func (c *Client) Root() string {
 	return c.root
+}
+
+func (c *Client) ReadOnly() bool {
+	return c.readOnly
 }
 
 func (c *Client) KeyIDPrefix() string {
@@ -304,6 +317,9 @@ func readAllWithIdleTimeout(ctx context.Context, r io.Reader, idle time.Duration
 }
 
 func (c *Client) do(ctx context.Context, method, path string, query url.Values, contentType string, body io.Reader, getBody func() (io.ReadCloser, error)) (int, http.Header, []byte, error) {
+	if c.readOnly && method != http.MethodGet {
+		return 0, nil, nil, fmt.Errorf("refusing %s %s: read-only mode is enabled", method, strings.TrimLeft(path, "/"))
+	}
 	reqCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -448,20 +464,42 @@ func (c *Client) APIKeys(ctx context.Context) ([]map[string]any, error) {
 	return res, nil
 }
 
-func (c *Client) Get(ctx context.Context, entity string, eid int) (map[string]any, error) {
-	p, err := entityPath(entity, eid, "")
+func getEntityJSON[T any](ctx context.Context, c *Client, entity string, eid int, suffix string) (T, error) {
+	var res T
+	p, err := entityPath(entity, eid, suffix)
 	if err != nil {
-		return nil, err
+		return res, err
 	}
 	_, data, err := c.doJSON(ctx, http.MethodGet, p, nil, nil)
 	if err != nil {
-		return nil, err
+		return res, err
 	}
-	var res map[string]any
-	if err := decodeJSON(data, &res); err != nil {
+	err = decodeJSON(data, &res)
+	return res, err
+}
+
+func (c *Client) GetRaw(ctx context.Context, entity string, eid int) (map[string]any, error) {
+	return getEntityJSON[map[string]any](ctx, c, entity, eid, "")
+}
+
+func (c *Client) Get(ctx context.Context, entity string, eid int) (map[string]any, error) {
+	res, err := c.GetRaw(ctx, entity, eid)
+	if err != nil {
 		return nil, err
 	}
 	return normalizeEntity(res), nil
+}
+
+func (c *Client) Revisions(ctx context.Context, entity string, eid int) ([]map[string]any, error) {
+	return getEntityJSON[[]map[string]any](ctx, c, entity, eid, "/revisions")
+}
+
+func (c *Client) Revision(ctx context.Context, entity string, eid, revID int) (map[string]any, error) {
+	validRev, err := frontmatter.ValidateID(revID)
+	if err != nil {
+		return nil, err
+	}
+	return getEntityJSON[map[string]any](ctx, c, entity, eid, fmt.Sprintf("/revisions/%d", validRev))
 }
 
 func idFromLocation(hdr http.Header) string {
@@ -517,35 +555,11 @@ func (c *Client) Patch(ctx context.Context, entity string, eid int, payload map[
 }
 
 func (c *Client) Uploads(ctx context.Context, entity string, eid int) ([]map[string]any, error) {
-	p, err := entityPath(entity, eid, "/uploads")
-	if err != nil {
-		return nil, err
-	}
-	_, data, err := c.doJSON(ctx, http.MethodGet, p, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	var res []map[string]any
-	if err := decodeJSON(data, &res); err != nil {
-		return nil, err
-	}
-	return res, nil
+	return getEntityJSON[[]map[string]any](ctx, c, entity, eid, "/uploads")
 }
 
 func (c *Client) Comments(ctx context.Context, entity string, eid int) ([]map[string]any, error) {
-	p, err := entityPath(entity, eid, "/comments")
-	if err != nil {
-		return nil, err
-	}
-	_, data, err := c.doJSON(ctx, http.MethodGet, p, nil, nil)
-	if err != nil {
-		return nil, err
-	}
-	var res []map[string]any
-	if err := decodeJSON(data, &res); err != nil {
-		return nil, err
-	}
-	return res, nil
+	return getEntityJSON[[]map[string]any](ctx, c, entity, eid, "/comments")
 }
 
 func openMultipartBody(approved plan.ApprovedUploadPath, boundary string) (io.ReadCloser, error) {
